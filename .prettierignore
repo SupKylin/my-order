@@ -1,0 +1,8 @@
+node_modules/
+frontend/dist/
+backend/storage/
+logs/
+test-results/
+package-lock.json
+backend/.env
+.local-access.txt

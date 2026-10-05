@@ -1,0 +1,23 @@
+import { Router } from 'express';
+import { imageUpload, excelUpload } from '../middleware/upload.js';
+import { saveImage, saveExcel } from '../services/storage.js';
+import { inspectExcel } from '../services/imports.js';
+import { assert } from '../errors.js';
+
+export function createUploadsRouter() {
+  const router = Router();
+  router.post('/image', imageUpload, async (req, res) => {
+    assert(req.file, '请选择图片');
+    res.status(201).json(await saveImage(req.file.buffer, req.user.id, req.file.originalname));
+  });
+  router.post('/excel', excelUpload, async (req, res) => {
+    const file = await saveExcel(req.file, req.user.id);
+    res
+      .status(201)
+      .json({ id: file.id, name: file.originalName, ...(await inspectExcel(file.id)) });
+  });
+  router.get('/excel/:id/inspect', async (req, res) => {
+    res.json(await inspectExcel(req.params.id, req.query.sheetName, req.query.headerRow));
+  });
+  return router;
+}

@@ -1,0 +1,72 @@
+/* 提高主题变量优先级，防止异步加载的组件默认变量覆盖项目配色。 */
+html:root {
+  font-family: Inter, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  color: #203039;
+  background: #f3f6f7;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --el-color-primary: #087f79;
+  --el-color-primary-light-3: #4ca49f;
+  --el-color-primary-light-5: #83bfbb;
+  --el-color-primary-light-7: #b5d8d5;
+  --el-color-primary-light-8: #cce5e3;
+  --el-color-primary-light-9: #edf7f5;
+  --el-color-primary-dark-2: #076660;
+  --el-color-success: #168570;
+  --el-color-warning: #b78027;
+  --el-color-danger: #c55353;
+  --el-font-family: Inter, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  --el-border-radius-base: 7px;
+  --el-border-color: #dce4e7;
+  --el-text-color-primary: #203039;
+  --el-text-color-regular: #50616b;
+  --el-fill-color-light: #f5f8f9;
+  --el-font-size-base: 13px;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+button,
+input,
+textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+.muted {
+  color: #84939c;
+}
+.mono {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+}
+.success-text {
+  color: #168570 !important;
+}
+.danger-text {
+  color: #c55353 !important;
+}
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+.flex-one {
+  flex: 1;
+}

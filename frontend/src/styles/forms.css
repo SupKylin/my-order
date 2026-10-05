@@ -1,0 +1,140 @@
+.drawer-intro {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 20px;
+  font-size: 12px;
+}
+.pill {
+  background: #eff7f3;
+  color: #478875;
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 5px;
+}
+.section-heading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.section-heading strong {
+  font-size: 14px;
+}
+.section-heading span {
+  color: #98a4ab;
+  font-size: 10px;
+  font-weight: 400;
+}
+.el-drawer__header {
+  margin-bottom: 10px;
+  padding: 24px 28px;
+  color: #18373d;
+}
+.el-drawer__body {
+  padding: 20px 28px;
+}
+.el-drawer__footer {
+  border-top: 1px solid #eef2f4;
+  padding: 18px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.drawer-tip {
+  font-size: 10px;
+  margin-right: auto;
+}
+.form-grid {
+  padding-top: 20px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 22px;
+}
+.form-grid .full-width {
+  grid-column: 1/-1;
+}
+.form-grid .el-form-item {
+  margin-bottom: 20px;
+}
+.el-form-item__label {
+  font-size: 12px !important;
+  color: #627a85 !important;
+  margin-bottom: 7px !important;
+}
+.form-grid .el-date-editor.el-input {
+  width: 100%;
+}
+.el-select {
+  width: 100%;
+}
+.el-collapse {
+  --el-collapse-border-color: #e7edf0;
+}
+.image-field {
+  display: flex;
+  gap: 13px;
+  align-items: center;
+}
+.image-preview {
+  position: relative;
+}
+.image-preview .el-image {
+  width: 72px;
+  height: 72px;
+  background: #f6f9fa;
+  border: 1px solid #e6edef;
+  border-radius: 7px;
+}
+.image-remove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+}
+.tiny-image {
+  height: 42px;
+  width: 45px;
+  border-radius: 5px;
+}
+.dialog-description {
+  font-size: 12px;
+  color: #8799a1;
+  margin-bottom: 22px;
+  line-height: 1.6;
+}
+/* 弹框仅正文滚动，避免遮罩、正文和内嵌表格同时出现纵向滚动条。 */
+body .el-overlay-dialog {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+body .el-dialog {
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  margin: 0;
+  border-radius: 12px;
+  padding: 25px;
+  overflow: hidden;
+}
+body .el-dialog__header,
+body .el-dialog__footer {
+  flex-shrink: 0;
+}
+.el-dialog__title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #203e46;
+}
+body .el-dialog__body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-top: 15px;
+}
+.el-dialog__footer {
+  padding-top: 22px;
+}

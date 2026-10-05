@@ -1,0 +1,235 @@
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  overflow: hidden;
+}
+.sidebar {
+  width: 230px;
+  position: fixed;
+  inset: 0 auto 0 0;
+  background: #10272f;
+  color: #beced3;
+  display: flex;
+  flex-direction: column;
+  padding: 30px 18px 18px;
+  z-index: 30;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 10px;
+  color: #f6faf9;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: 1px;
+}
+.brand small {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 1.7px;
+  color: #77949f;
+  margin-top: 7px;
+  font-weight: 500;
+}
+.brand-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: #198e82;
+  color: white;
+}
+.nav-caption {
+  font-size: 10px;
+  color: #72909b;
+  letter-spacing: 2px;
+  margin: 46px 15px 17px;
+}
+.sidebar nav {
+  display: grid;
+  gap: 7px;
+  overflow-y: auto;
+  flex-shrink: 1;
+  min-height: 0;
+}
+.sidebar nav a {
+  padding: 14px 15px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  font-size: 13px;
+  transition: 0.18s;
+}
+.sidebar nav a:hover {
+  background: #1b363e;
+  color: white;
+}
+.sidebar nav a.active {
+  background: #20473f;
+  color: #b9efdd;
+}
+.nav-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #71cdb0;
+  margin-left: auto;
+}
+.sidebar-note {
+  margin: auto 14px 24px;
+  padding-top: 42px;
+  color: #a7c0c8;
+  font-size: 12px;
+}
+.sidebar-note p {
+  font-size: 10px;
+  color: #637f88;
+  margin-top: 9px;
+  margin-left: 13px;
+}
+.live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #35a885;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.sidebar-user {
+  border-top: 1px solid #2b4249;
+  padding: 19px 5px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.avatar {
+  width: 35px;
+  height: 35px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: #2e535a;
+  color: #c0e2df;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.avatar.light {
+  background: #e8f2ef;
+  color: #238c75;
+}
+.user-info {
+  flex: 1;
+  min-width: 0;
+}
+.user-info strong {
+  font-size: 12px;
+  color: #e2eeee;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-info small {
+  display: block;
+  font-size: 10px;
+  color: #86a3ab;
+  margin-top: 5px;
+}
+.sidebar-user .el-button {
+  color: #a7bdc5;
+}
+.workspace {
+  margin-left: 230px;
+  width: calc(100% - 230px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.topbar {
+  flex-shrink: 0;
+  height: 70px;
+  background: rgba(255, 255, 255, 0.85);
+  border-bottom: 1px solid #e6ecef;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 34px;
+}
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  font-size: 12px;
+  color: #8b99a1;
+}
+.breadcrumb .el-icon {
+  font-size: 10px;
+}
+.breadcrumb strong {
+  color: #3c535e;
+  font-weight: 500;
+}
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 11px;
+}
+main {
+  padding: 32px 34px 24px;
+  max-width: 2000px;
+  margin: 0 auto;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  /* 长表单仍可用滚轮、触控和键盘访问，一级页面不显示外层滚动条。 */
+  scrollbar-width: none;
+}
+main::-webkit-scrollbar {
+  display: none;
+}
+.workspace > footer {
+  flex-shrink: 0;
+  padding-top: 8px;
+  padding-bottom: 12px;
+}
+.page-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 29px;
+}
+.eyebrow {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: #6a8b90;
+  font-weight: 650;
+  margin-bottom: 12px;
+}
+.page-title h1 {
+  font-size: 27px;
+  letter-spacing: 0.8px;
+  font-weight: 650;
+  color: #18373d;
+}
+.page-title p {
+  font-size: 12px;
+  color: #84949c;
+  margin-top: 10px;
+  line-height: 1.6;
+}
+.workspace-badge {
+  font-size: 11px;
+  border: 1px solid #d9e6df;
+  border-radius: 20px;
+  color: #577a6b;
+  padding: 8px 13px;
+  background: #edf5f0;
+}

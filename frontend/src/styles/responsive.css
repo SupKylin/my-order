@@ -1,0 +1,317 @@
+@media (min-width: 1700px) {
+  main {
+    padding-left: 46px;
+    padding-right: 46px;
+  }
+  .stats-grid {
+    gap: 24px;
+  }
+  .stat-card {
+    padding: 23px 26px;
+  }
+}
+@media (max-width: 1200px) {
+  .sidebar {
+    width: 200px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .workspace {
+    margin-left: 200px;
+    width: calc(100% - 200px);
+  }
+  .brand {
+    font-size: 15px;
+    gap: 8px;
+  }
+  .brand small {
+    font-size: 8px;
+  }
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+  }
+  .topbar {
+    padding: 0 23px;
+  }
+  main {
+    padding: 26px 22px;
+  }
+  .filter-bar {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .filter-bar > .el-select {
+    width: 135px;
+  }
+  .panel-heading {
+    padding: 21px 18px;
+  }
+  .stat-card {
+    padding: 15px;
+  }
+  .stat-caption {
+    font-size: 9px;
+  }
+  .stat-heading {
+    font-size: 11px;
+  }
+  .login-story {
+    padding: 36px 40px;
+  }
+  .story-body h1 {
+    font-size: 38px;
+  }
+}
+@media (max-width: 900px) {
+  .topbar {
+    height: auto;
+    min-height: 70px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .topbar-right {
+    margin-left: auto;
+  }
+  .sidebar {
+    width: 70px;
+    padding: 25px 8px 16px;
+  }
+  .brand {
+    padding: 0;
+    justify-content: center;
+  }
+  .brand > div:not(.brand-mark),
+  .nav-caption,
+  .sidebar nav span,
+  .sidebar-note,
+  .user-info,
+  .sidebar-user .el-button {
+    display: none;
+  }
+  .sidebar nav {
+    margin-top: 40px;
+  }
+  .sidebar nav a {
+    padding: 15px;
+    justify-content: center;
+  }
+  .sidebar-user {
+    margin-top: auto;
+    justify-content: center;
+    padding-top: 20px;
+  }
+  .workspace {
+    margin-left: 70px;
+    width: calc(100% - 70px);
+  }
+  .date-label {
+    display: none;
+  }
+  .stats-grid {
+    gap: 10px;
+  }
+  .stat-card > strong {
+    font-size: 26px;
+  }
+  .stat-heading {
+    font-size: 10px;
+  }
+  .stat-icon {
+    width: 28px;
+    height: 28px;
+  }
+  .stat-caption {
+    display: none;
+  }
+  .page-title h1 {
+    font-size: 24px;
+  }
+  .panel-heading {
+    align-items: flex-start;
+  }
+  .button-row {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .button-row .el-button {
+    margin-left: 0;
+  }
+  .table-footer {
+    flex-wrap: wrap;
+  }
+  .login-page {
+    grid-template-columns: 1fr 1fr;
+  }
+  .login-story {
+    padding: 30px;
+  }
+  .story-body h1 {
+    font-size: 30px;
+  }
+  .login-panel {
+    padding: 30px;
+  }
+  .story-flow {
+    gap: 10px;
+  }
+  .story-card {
+    padding: 16px;
+  }
+  .template-controls {
+    flex-wrap: wrap;
+  }
+  .import-panel {
+    padding: 22px;
+  }
+  .el-drawer {
+    max-width: calc(100vw - 30px) !important;
+  }
+}
+@media (max-width: 640px) {
+  main {
+    padding: 22px 12px;
+  }
+  .topbar {
+    height: auto;
+    min-height: 57px;
+    padding: 10px 15px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .topbar-right {
+    margin-left: auto;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .workspace-badge {
+    display: none;
+  }
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .page-title p {
+    max-width: 320px;
+    font-size: 11px;
+  }
+  .panel-heading {
+    display: block;
+  }
+  .button-row {
+    justify-content: flex-start;
+    margin-top: 17px;
+  }
+  .filter-bar {
+    padding-left: 13px;
+    padding-right: 13px;
+  }
+  .filter-bar .search-input {
+    min-width: 200px;
+  }
+  .filter-bar > .el-select {
+    flex: 1;
+    min-width: 125px;
+  }
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .el-drawer__body {
+    padding: 15px;
+  }
+  .section-heading span {
+    display: none;
+  }
+  .drawer-tip {
+    display: none;
+  }
+  .login-page {
+    display: block;
+  }
+  .login-story {
+    min-height: 210px;
+    padding: 24px;
+  }
+  .story-body {
+    padding: 30px 0 0;
+  }
+  .story-body h1 {
+    font-size: 25px;
+    line-height: 1.6;
+  }
+  .story-body h1 br {
+    display: none;
+  }
+  .story-body .eyebrow,
+  .story-body > p,
+  .story-flow,
+  .story-card,
+  .story-footer {
+    display: none;
+  }
+  .login-panel {
+    min-height: calc(100vh - 210px);
+    padding: 45px 30px 80px;
+  }
+  .login-form h2 {
+    font-size: 25px;
+  }
+  .login-brand {
+    font-size: 17px;
+  }
+  .login-form > p {
+    margin-bottom: 28px;
+  }
+  .el-dialog {
+    width: calc(100% - 24px) !important;
+  }
+  .import-steps .el-step__description {
+    display: none;
+  }
+  .import-steps .el-step__title {
+    font-size: 11px;
+  }
+  .preview-stats {
+    gap: 8px;
+  }
+  .preview-stats > div {
+    display: block;
+    padding: 13px;
+  }
+  .preview-stats span {
+    font-size: 10px;
+    display: block;
+  }
+  .preview-stats strong {
+    display: block;
+    margin-top: 8px;
+  }
+  .expanded-product {
+    padding: 18px;
+    gap: 12px;
+  }
+  .product-grid {
+    grid-template-columns: 1fr;
+  }
+  .product-grid > div {
+    flex-direction: column;
+    gap: 2px;
+  }
+  .product-thumb,
+  .image-placeholder {
+    width: 65px;
+    height: 70px;
+  }
+  footer span {
+    display: none;
+  }
+  .stage-actions {
+    gap: 10px;
+  }
+  .table-footer .el-pagination__sizes,
+  .table-footer .el-pagination__total {
+    display: none;
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "order-management",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n API,WEB -c cyan,green \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "build": "npm run build -w frontend",
+    "start": "npm run start -w backend",
+    "db:init": "npm run db:init -w backend",
+    "db:migrate": "node backend/scripts/migrate-db.js",
+    "test": "npm run test -w backend",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "prettier": "^3.6.2"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  },
+  "dependencies": {
+    "uuid": "11.1.1"
+  }
+}
