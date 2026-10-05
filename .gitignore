@@ -26,6 +26,4 @@ logs/
 .local-access.txt
 test-results/
 *.log
-.env
-.env.*
 !.env.example
