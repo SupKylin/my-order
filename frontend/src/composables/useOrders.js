@@ -49,6 +49,7 @@ export function useOrders() {
     endDate: '',
     shipStartDate: '',
     shipEndDate: '',
+    shippingWarning: '',
     page: 1,
     pageSize: 20,
   });
@@ -95,6 +96,7 @@ export function useOrders() {
       endDate: '',
       shipStartDate: '',
       shipEndDate: '',
+      shippingWarning: '',
       page: 1,
     });
     dates.value = [];

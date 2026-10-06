@@ -115,6 +115,17 @@ const {
       </div>
       <div class="filter-bar filter-secondary">
         <el-select
+          v-model="filters.shippingWarning"
+          placeholder="全部发货预警"
+          aria-label="发货预警筛选"
+          class="shipping-warning-filter"
+          clearable
+          @change="search"
+        >
+          <el-option label="24小时内发货（橙色）" value="orange" />
+          <el-option label="已逾期（红色）" value="red" />
+        </el-select>
+        <el-select
           v-model="filters.priceFactorLevel"
           placeholder="价格系数等级"
           aria-label="价格系数等级"

@@ -139,6 +139,9 @@
 .filter-secondary > .el-select {
   width: 145px;
 }
+.filter-secondary > .shipping-warning-filter {
+  width: 205px;
+}
 .filter-secondary > .el-date-editor {
   max-width: 285px;
   min-width: 245px;
