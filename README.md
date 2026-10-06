@@ -1,6 +1,6 @@
 # 订单协作台
 
-本地部署的运营与采购管理系统。前端 Vue 3 / Element Plus / Pinia / Vue Router / Vite / Axios；后端 Node.js / Express / Sequelize；数据库 MySQL `my_order`。
+1本地部署的运营与采购管理系统。前端 Vue 3 / Element Plus / Pinia / Vue Router / Vite / Axios；后端 Node.js / Express / Sequelize；数据库 MySQL `my_order`。
 
 ## 本地运行
 
