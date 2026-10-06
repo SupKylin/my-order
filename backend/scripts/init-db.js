@@ -5,34 +5,52 @@ import { hashPassword } from '../src/auth.js';
 import { ensureStorage } from '../src/services/storage.js';
 import { migrateDictionaries, migrateOrderFields } from '../src/migrations.js';
 const reset = process.argv.includes('--reset');
+const database = config.db.database;
+let connection;
 try {
-  if (config.db.database !== 'my_order') throw new Error('初始化程序只允许操作 my_order 数据库');
-  if (reset && !process.argv.includes('--confirm=my_order'))
-    throw new Error('重置需显式提供 --reset --confirm=my_order');
+  if (
+    !database ||
+    database.length > 64 ||
+    ['mysql', 'information_schema', 'performance_schema', 'sys'].includes(database.toLowerCase())
+  )
+    throw new Error('请配置有效的业务数据库 DB_NAME');
+  if (reset && !process.argv.includes(`--confirm=${database}`))
+    throw new Error(`重置需显式提供 --reset --confirm=${database}`);
   if (!config.secret || config.secret.length < 32)
     throw new Error('请配置至少 32 字符的 SESSION_SECRET');
   if (!process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD.length < 8)
     throw new Error('请在 .env 配置至少 8 字符的 ADMIN_PASSWORD');
-  const c = await mysql.createConnection({
+  const connectionOptions = {
     host: config.db.host,
     port: config.db.port,
     user: config.db.username,
     password: config.db.password,
-  });
-  await c.query(
-    'CREATE DATABASE IF NOT EXISTS `my_order` CHARACTER SET utf8mb4 COLLATE utf8mb4_bin',
-  );
-  const [tables] = await c.query(
-    'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?',
-    ['my_order'],
-  );
-  console.log(`目标数据库 my_order，当前 ${tables.length} 张表。`);
-  if (reset) {
-    await c.query('DROP DATABASE `my_order`');
-    await c.query('CREATE DATABASE `my_order` CHARACTER SET utf8mb4 COLLATE utf8mb4_bin');
-    console.log('已按明确指令清空 my_order。');
+  };
+  const databaseIdentifier = mysql.escapeId(database);
+  try {
+    // 宝塔通常已创建数据库；直接连接，避免要求应用账号拥有建库权限。
+    connection = await mysql.createConnection({ ...connectionOptions, database });
+  } catch (error) {
+    if (error.code !== 'ER_BAD_DB_ERROR') throw error;
+    connection = await mysql.createConnection(connectionOptions);
+    await connection.query(
+      `CREATE DATABASE IF NOT EXISTS ${databaseIdentifier} CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
+    );
   }
-  await c.end();
+  const [tables] = await connection.query(
+    'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?',
+    [database],
+  );
+  console.log(`目标数据库 ${database}，当前 ${tables.length} 张表。`);
+  if (reset) {
+    await connection.query(`DROP DATABASE ${databaseIdentifier}`);
+    await connection.query(
+      `CREATE DATABASE ${databaseIdentifier} CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
+    );
+    console.log(`已按明确指令清空 ${database}。`);
+  }
+  await connection.end();
+  connection = null;
   await db.sync();
   await migrateDictionaries();
   await migrateOrderFields();
@@ -50,5 +68,6 @@ try {
   console.error(e.message);
   process.exitCode = 1;
 } finally {
+  if (connection) await connection.end();
   await db.close();
 }

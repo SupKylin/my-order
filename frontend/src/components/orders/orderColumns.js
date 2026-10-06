@@ -29,7 +29,7 @@ const purchaseKeys = [
 const labels = { purchaseStatus: '采购状态（刘贞填）', merchantName: '商家名' };
 const widths = {
   shopName: 125,
-  orderNumber: 190,
+  orderNumber: 220,
   platformShipDate: 155,
   orderStatus: 210,
   purchaseStatus: 200,

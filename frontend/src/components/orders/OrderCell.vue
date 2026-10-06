@@ -11,6 +11,7 @@ const props = defineProps({
 });
 const meta = useMeta();
 const value = computed(() => props.row[props.field.key]);
+const factorLabels = { low: '低', medium: '平', high: '高' };
 const purchaseTag = computed(() => {
   const status = value.value;
   if (!status) return 'info';
@@ -20,7 +21,18 @@ const purchaseTag = computed(() => {
 const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value.value : ''));
 </script>
 <template>
-  <template v-if="field.type === 'image'">
+  <div v-if="field.key === 'orderNumber'" class="order-number-cell">
+    <span class="mono order-number-text">{{ value ?? '—' }}</span>
+    <span
+      v-if="factorLabels[row.priceFactorLevel]"
+      class="price-factor-badge"
+      :class="`price-factor-${row.priceFactorLevel}`"
+      :title="`价格系数：${row.priceFactor}（${factorLabels[row.priceFactorLevel]}）`"
+      :aria-label="`价格系数${factorLabels[row.priceFactorLevel]}`"
+      >{{ factorLabels[row.priceFactorLevel] }}</span
+    >
+  </div>
+  <template v-else-if="field.type === 'image'">
     <el-image
       v-if="value"
       :src="meta.imageUrl(value, true)"

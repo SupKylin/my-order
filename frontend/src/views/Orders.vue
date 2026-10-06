@@ -114,6 +114,17 @@ const {
         ><el-button text @click="reset">重置</el-button>
       </div>
       <div class="filter-bar filter-secondary">
+        <el-select
+          v-model="filters.priceFactorLevel"
+          placeholder="价格系数等级"
+          aria-label="价格系数等级"
+          clearable
+          @change="search"
+        >
+          <el-option label="低（< 0.8）" value="low" />
+          <el-option label="平（0.8 ≤ 系数 < 0.85）" value="medium" />
+          <el-option label="高（≥ 0.85）" value="high" />
+        </el-select>
         <el-select v-model="filters.purchaseChannel" placeholder="采购渠道" clearable filterable>
           <el-option
             v-for="channel in meta.fieldMap.purchaseChannel?.options"
@@ -157,6 +168,32 @@ const {
           "
           >只看分配给我的</el-button
         >
+      </div>
+      <div class="filter-bar filter-price">
+        <el-select v-model="filters.priceType" aria-label="价格类型">
+          <el-option label="商品价格" value="purchaseLinkAmount" />
+          <el-option label="订单金额" value="orderAmount" />
+          <el-option label="采购限价" value="purchaseLimit" />
+        </el-select>
+        <div class="price-range-inputs">
+          <el-input
+            v-model="filters.minPrice"
+            aria-label="最低价格"
+            inputmode="decimal"
+            clearable
+            placeholder="最低价格"
+            @keyup.enter="search"
+          />
+          <span class="price-range-separator">至</span>
+          <el-input
+            v-model="filters.maxPrice"
+            aria-label="最高价格"
+            inputmode="decimal"
+            clearable
+            placeholder="最高价格"
+            @keyup.enter="search"
+          />
+        </div>
       </div>
       <div v-if="selected.length" class="selection-bar">
         <span
