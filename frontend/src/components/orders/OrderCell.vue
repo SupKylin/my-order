@@ -2,15 +2,17 @@
 import { computed } from 'vue';
 import { useMeta } from '../../stores/meta';
 import { fmtDate, money } from '../../utils/format';
-import { PLATFORM_TIME_LABEL } from '../../utils/businessTime';
-import { shippingWarningLabels } from '../../utils/shippingWarning';
+import { CHINA_UTC_OFFSET } from '../../utils/businessTime';
+import { shippingRemainingHours, shippingWarningLabels } from '../../utils/shippingWarning';
 const props = defineProps({
   row: { type: Object, required: true },
   field: { type: Object, required: true },
   warning: String,
+  warningNow: { type: Number, required: true },
 });
 const meta = useMeta();
 const value = computed(() => props.row[props.field.key]);
+const shippingHours = computed(() => shippingRemainingHours(value.value, props.warningNow));
 const factorLabels = { low: '低', medium: '平', high: '高' };
 const purchaseTag = computed(() => {
   const status = value.value;
@@ -51,8 +53,8 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
       v-if="warning"
       class="shipping-badge"
       :class="`shipping-${warning}`"
-      :title="`截止：${fmtDate(value)} 23:59:59（${PLATFORM_TIME_LABEL}）`"
-      >{{ shippingWarningLabels[warning] }}</span
+      :title="`截止：${fmtDate(value)} 后一天 15:00（北京时间 UTC${CHINA_UTC_OFFSET}）`"
+      >{{ warning === 'red' ? shippingWarningLabels.red : shippingHours }}</span
     >
   </template>
   <el-tag v-else-if="field.key === 'purchaseStatus'" :type="purchaseTag" effect="light" round>{{

@@ -53,7 +53,7 @@ defineExpose({ clearSelection: () => table.value?.clearSelection() });
       "
     >
       <template #default="{ row }"
-        ><OrderCell :row="row" :field="field" :warning="warnings[row.id]"
+        ><OrderCell :row="row" :field="field" :warning="warnings[row.id]" :warning-now="warningNow"
       /></template>
     </el-table-column>
     <el-table-column label="操作" fixed="right" width="180"
