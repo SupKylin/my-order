@@ -2,7 +2,7 @@
 export function errorHandler(error, req, res, next) {
   if (res.headersSent) return next(error);
   if (error.name === 'SequelizeUniqueConstraintError') {
-    return res.status(409).json({ message: '账号、模板名或订单号＋采购渠道已存在' });
+    return res.status(409).json({ message: '账号、模板名或订单号＋SKU＋店铺名已存在' });
   }
   if (error.name === 'MulterError') {
     return res.status(400).json({

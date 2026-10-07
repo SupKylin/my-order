@@ -9,6 +9,7 @@ const props = defineProps({
   modelValue: { type: Array, default: () => [] },
   manualSource: Boolean,
   disabled: Boolean,
+  allowedFields: { type: Array, default: null },
   // 独立导入页面限制表格高度；弹框内交由弹框正文统一滚动。
   maxHeight: { type: [Number, String], default: 460 },
 });
@@ -20,10 +21,11 @@ const groups = [
   { key: 'purchase', label: '采购信息' },
 ];
 const columns = computed(() => props.info?.columns || []);
+const fieldOptions = computed(() => props.allowedFields || meta.fields);
 const availableColumns = computed(() =>
   columns.value.filter((column) => !props.modelValue.some((row) => row.column === column.column)),
 );
-const issues = computed(() => mappingIssues(props.modelValue, meta.fields));
+const issues = computed(() => mappingIssues(props.modelValue, fieldOptions.value));
 const ambiguous = computed(() =>
   ambiguousSuggestions(columns.value)
     .filter((item) => !props.modelValue.some((row) => row.field === item.field))
@@ -155,7 +157,7 @@ function samples(columnNumber) {
         >
           <el-option-group v-for="group in groups" :key="group.key" :label="group.label">
             <el-option
-              v-for="field in meta.fields.filter((item) => item.group === group.key)"
+              v-for="field in fieldOptions.filter((item) => item.group === group.key)"
               :key="field.key"
               :value="field.key"
               :label="field.label + (field.required ? ' *' : '')"
@@ -200,7 +202,6 @@ function samples(columnNumber) {
   </p>
   <p class="mapping-footnote">
     未选择系统字段的 Excel
-    表头仍会保存在模板中，可稍后配置；导入时跳过这些列。必须保留订单号的映射，SKU
-    可不映射。每个源列和系统字段只能使用一次；不需要的关系可直接删除，也可通过“新增映射”重新添加。删除映射只影响后续导入，已有订单字段保留原值。
+    表头仍会保存在模板中，可稍后配置；导入时跳过这些列。必须保留订单号的映射，SKU、店铺名可不映射，不映射时按空值匹配，只匹配对应空值的组合。每个源列和系统字段只能使用一次；不需要的关系可直接删除，也可通过“新增映射”重新添加。删除映射只影响后续导入，已有订单字段保留原值。
   </p>
 </template>

@@ -1,4 +1,4 @@
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { templateApi } from '../api/templates';
 import { uploadApi } from '../api/uploads';
@@ -25,6 +25,12 @@ export function useOrderImport() {
     mappings: [],
     purchaseChannelId: null,
   });
+  const allowedFields = computed(() => meta.fields.filter((field) => field.group !== 'purchase'));
+  const orderMappings = (columns) =>
+    suggestedMappings(columns).map((mapping) => ({
+      ...mapping,
+      field: allowedFields.value.some((field) => field.key === mapping.field) ? mapping.field : '',
+    }));
   onMounted(async () => {
     await meta.load();
     templates.value = await templateApi.list();
@@ -37,7 +43,7 @@ export function useOrderImport() {
       info.value = response;
       form.sheetName = response.sheetName;
       form.headerRow = 1;
-      form.mappings = suggestedMappings(response.columns);
+      form.mappings = orderMappings(response.columns);
       step.value = 1;
       if (templateId.value) await chooseTemplate();
       options.onSuccess(response);
@@ -52,7 +58,7 @@ export function useOrderImport() {
     busy.value = true;
     try {
       info.value = await uploadApi.inspect(file.value.id, form.sheetName, form.headerRow);
-      if (!templateId.value) form.mappings = suggestedMappings(info.value.columns);
+      if (!templateId.value) form.mappings = orderMappings(info.value.columns);
     } finally {
       busy.value = false;
     }
@@ -64,8 +70,13 @@ export function useOrderImport() {
         name: found.name,
         sheetName: found.sheetName,
         headerRow: found.headerRow,
-        mappings: JSON.parse(JSON.stringify(found.mappings)),
-        purchaseChannelId: found.purchaseChannelId ?? null,
+        mappings: JSON.parse(JSON.stringify(found.mappings)).map((mapping) => ({
+          ...mapping,
+          field: allowedFields.value.some((field) => field.key === mapping.field)
+            ? mapping.field
+            : '',
+        })),
+        purchaseChannelId: null,
       });
       if (file.value) {
         await inspect();
@@ -77,13 +88,13 @@ export function useOrderImport() {
           );
       }
     } else if (info.value) {
-      form.mappings = suggestedMappings(info.value.columns);
+      form.mappings = orderMappings(info.value.columns);
       form.name = '临时导入映射';
       form.purchaseChannelId = null;
     }
   }
   async function saveTemplate() {
-    const issues = mappingIssues(form.mappings, meta.fields);
+    const issues = mappingIssues(form.mappings, allowedFields.value);
     if (issues.length) return ElMessage.warning(issues[0].message);
     try {
       const { value } = await ElMessageBox.prompt(
@@ -107,11 +118,11 @@ export function useOrderImport() {
   }
   /** 预览只保存校验快照；用户确认 commit 后才写入订单。 */
   async function makePreview() {
-    const issues = mappingIssues(form.mappings, meta.fields);
+    const issues = mappingIssues(form.mappings, allowedFields.value);
     if (issues.length) return ElMessage.warning(issues[0].message);
     busy.value = true;
     try {
-      preview.value = await importApi.preview(file.value.id, {
+      preview.value = await importApi.previewOrder(file.value.id, {
         ...form,
         mappings: selectedMappings(form.mappings),
       });
@@ -123,7 +134,7 @@ export function useOrderImport() {
   async function commit() {
     busy.value = true;
     try {
-      result.value = await importApi.commit(preview.value.id);
+      result.value = await importApi.commitOrder(preview.value.id);
       step.value = 3;
       ElMessage.success('订单导入完成');
     } finally {
@@ -157,6 +168,7 @@ export function useOrderImport() {
     preview,
     result,
     form,
+    allowedFields,
     upload,
     inspect,
     chooseTemplate,

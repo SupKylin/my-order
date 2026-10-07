@@ -21,6 +21,14 @@ const router = createRouter({
       meta: { title: '导入订单', subtitle: '映射表头、检查预览，将每日订单有序同步到系统。' },
     },
     {
+      path: '/imports/purchases/new',
+      component: () => import('./views/PurchaseImport.vue'),
+      meta: {
+        title: '采购导入',
+        subtitle: '选择导入模板与 Excel 文件，预览匹配结果后更新采购信息。',
+      },
+    },
+    {
       path: '/templates',
       component: () => import('./views/Templates.vue'),
       meta: { title: '导入模板', subtitle: '不同店铺、不同表头，维护一次映射即可反复使用。' },

@@ -9,6 +9,27 @@ import { upsertImported } from './orders.js';
 import { AppError, assert } from '../errors.js';
 import { IMPORT_MATCH_RULE } from '../lib/order-identity.js';
 import { matchImportRows } from '../lib/import-matching.js';
+import { fieldMap } from '../fields.js';
+
+export function validateImportMappings(template, kind) {
+  if (kind === 'legacy') return;
+  const selected = template.mappings.filter((mapping) => mapping.field);
+  const allowed = (field) =>
+    kind === 'order'
+      ? field.group !== 'purchase'
+      : ['orderNumber', 'sku', 'shopName'].includes(field.key) || field.group === 'purchase';
+  const invalid = selected.find((mapping) => !allowed(fieldMap[mapping.field]));
+  assert(
+    !invalid,
+    `“${fieldMap[invalid?.field]?.label}”不属于${kind === 'order' ? '订单' : '采购'}导入字段`,
+  );
+  if (kind === 'purchase')
+    assert(
+      selected.some((mapping) => fieldMap[mapping.field].group === 'purchase'),
+      '采购导入至少需要映射一个采购字段',
+    );
+  else assert(!template.purchaseChannelId, '订单导入不能绑定采购渠道');
+}
 export async function getExcelUpload(id) {
   const file = await Upload.findByPk(id);
   assert(file?.kind === 'excel', '上传文件不存在', 404);
@@ -24,21 +45,55 @@ export async function inspectExcel(id, sheetName, headerRow) {
   );
 }
 /** 预览保存数据快照和目标版本，尚不修改订单。 */
-export async function prepareImport(input, user) {
+export async function prepareImport(input, user, kind = 'legacy') {
   const { loadWorkbook, extractRows } = await import('../lib/excel/index.js');
-  const upload = await getExcelUpload(input.uploadId);
-  const source = input.templateId
-    ? await ImportTemplate.findByPk(input.templateId)
-    : input.template;
-  assert(source, '请选择导入模板');
-  const template = await templatePayload(source.toJSON ? source.toJSON() : source);
-  template.matchRule = IMPORT_MATCH_RULE;
-  const data = await extractRows(
-    await loadWorkbook(uploadPath(upload)),
-    template,
-    (buffer) => saveImage(buffer, user.id, upload.originalName),
-    await getFieldDefinitions(),
+  const sources = kind === 'purchase' ? input?.sources : [input];
+  assert(
+    Array.isArray(sources) &&
+      sources.length > 0 &&
+      sources.length <= (kind === 'purchase' ? 10 : 1),
+    '上传区数量无效',
   );
+  assert(
+    new Set(sources.map((source) => source.uploadId)).size === sources.length,
+    '同一文件不能重复预览',
+  );
+  const data = { rows: [], errors: [], warnings: [] };
+  const snapshots = [];
+  let firstTemplate;
+  const fieldDefinitions = await getFieldDefinitions();
+  for (const entry of sources) {
+    assert(entry && typeof entry === 'object' && entry.uploadId, '请选择要导入的 Excel 文件');
+    const upload = await getExcelUpload(entry.uploadId);
+    assert(upload.uploadedBy === user.id, '只能导入自己上传的文件', 403);
+    const source = entry.templateId
+      ? await ImportTemplate.findByPk(entry.templateId)
+      : entry.template;
+    assert(source, '请选择导入模板');
+    const template = await templatePayload(source.toJSON ? source.toJSON() : source);
+    validateImportMappings(template, kind);
+    firstTemplate ||= template;
+    const extracted = await extractRows(
+      await loadWorkbook(uploadPath(upload)),
+      template,
+      (buffer) => saveImage(buffer, user.id, upload.originalName),
+      fieldDefinitions,
+    );
+    for (const key of ['rows', 'errors', 'warnings'])
+      data[key].push(...extracted[key].map((row) => ({ ...row, sourceName: upload.originalName })));
+    snapshots.push({
+      uploadId: upload.id,
+      name: upload.originalName,
+      templateId: source.id || null,
+    });
+  }
+  const template = {
+    ...firstTemplate,
+    matchRule: IMPORT_MATCH_RULE,
+    importKind: kind,
+    sources: snapshots,
+    purchaseChannel: snapshots.length === 1 ? firstTemplate.purchaseChannel : null,
+  };
   assert(
     Buffer.byteLength(JSON.stringify(data.rows), 'utf8') < 8 * 1024 * 1024,
     '导入数据内容过大，请拆分为较小文件',
@@ -47,7 +102,7 @@ export async function prepareImport(input, user) {
   const existing = orderNumbers.length
     ? await OrderItem.findAll({
         include: [{ model: Order, as: 'order', where: { orderNumber: { [Op.in]: orderNumbers } } }],
-        attributes: ['id', 'purchaseChannelKey', 'version'],
+        attributes: ['id', 'sku', 'shopName', 'version'],
         order: [['id', 'ASC']],
       })
     : [];
@@ -57,19 +112,37 @@ export async function prepareImport(input, user) {
       id: item.id,
       version: item.version,
       orderNumber: item.order.orderNumber,
-      purchaseChannelKey: item.purchaseChannelKey,
+      sku: item.sku,
+      shopName: item.shopName,
     })),
   );
   for (const [index, row] of data.rows.entries()) {
     const old = targets[index];
-    row.action = old ? 'update' : 'create';
+    row.action = old ? 'update' : kind === 'purchase' ? 'missing' : 'create';
     row.expectedId = old?.id || null;
     row.expectedVersion = old?.version || null;
+    if (
+      kind === 'purchase' &&
+      !Object.keys(row.patch).some((key) => fieldMap[key]?.group === 'purchase')
+    )
+      data.errors.push({
+        row: row.rowNumber,
+        sourceName: row.sourceName,
+        label: '采购字段',
+        message: '本行没有可更新的采购字段',
+      });
+    if (kind === 'purchase' && !old)
+      data.errors.push({
+        row: row.rowNumber,
+        sourceName: row.sourceName,
+        label: '订单匹配',
+        message: '未找到订单号＋SKU＋店铺名相同的商品明细，采购导入不会新建订单',
+      });
   }
   const job = await ImportJob.create({
     id: randomUUID(),
-    uploadId: upload.id,
-    templateId: source.id || null,
+    uploadId: snapshots[0].uploadId,
+    templateId: snapshots.length === 1 ? snapshots[0].templateId : null,
     templateSnapshot: template,
     ...data,
     createdBy: user.id,
@@ -89,16 +162,19 @@ export function previewResult(job) {
     warnings: job.warnings.slice(0, 100),
     rows: rows.slice(0, 100),
     previewLimit: 100,
+    importKind: job.templateSnapshot.importKind || 'legacy',
+    sources: job.templateSnapshot.sources || [],
     purchaseChannel: job.templateSnapshot.purchaseChannel || null,
     createdAt: job.createdAt,
   };
 }
 /** 幂等提交预览；版本冲突或任意错误都会中止整个事务。 */
-export async function commitImport(id, user) {
+export async function commitImport(id, user, kind = 'legacy') {
   return db.transaction(async (t) => {
     const job = await ImportJob.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE });
     assert(job, '导入预览不存在', 404);
     assert(job.createdBy === user.id, '请由生成预览的账号确认导入', 403);
+    assert((job.templateSnapshot.importKind || 'legacy') === kind, '请使用对应的导入入口确认', 409);
     if (job.status === 'completed')
       return { id: job.id, added: job.added, updated: job.updated, alreadyCompleted: true };
     assert(
@@ -107,6 +183,11 @@ export async function commitImport(id, user) {
       409,
     );
     assert(!job.errors.length, '存在错误行，请修正 Excel 后重新预览');
+    if (kind === 'purchase')
+      assert(
+        job.rows.every((row) => row.expectedId),
+        '采购导入存在未匹配的订单，请重新预览',
+      );
     assert(
       Date.now() - new Date(job.createdAt).getTime() < 2 * 60 * 60 * 1000,
       '预览已超过 2 小时，请重新生成',
@@ -127,7 +208,7 @@ export async function commitImport(id, user) {
     for (const [orderNumber, rows] of orderRows) {
       const [order] = await Order.findOrCreate({ where: { orderNumber }, transaction: t });
       await order.reload({ transaction: t, lock: t.LOCK.UPDATE });
-      // 同订单只读取一次锁定快照；渠道补全或本批新增不能改变后续行的目标。
+      // 同订单只读取一次锁定快照，本批新增不能改变后续行的目标。
       const items = await OrderItem.findAll({
         where: { orderId: order.id },
         order: [['id', 'ASC']],
@@ -141,7 +222,8 @@ export async function commitImport(id, user) {
           id: item.id,
           version: item.version,
           orderNumber,
-          purchaseChannelKey: item.purchaseChannelKey,
+          sku: item.sku,
+          shopName: item.shopName,
         })),
       );
       rows.forEach((row, index) => targets.set(row, byId.get(matches[index]?.id) || null));
@@ -175,12 +257,13 @@ export async function commitImport(id, user) {
     await AuditLog.create(
       {
         userId: user.id,
-        action: 'import_orders',
+        action: kind === 'purchase' ? 'import_purchases' : 'import_orders',
         entityId: job.id,
         details: {
           added,
           updated,
           filename: (await Upload.findByPk(job.uploadId, { transaction: t }))?.originalName,
+          filenames: job.templateSnapshot.sources?.map((source) => source.name),
         },
       },
       { transaction: t },

@@ -13,7 +13,7 @@ import { fields } from '../fields.js';
 import { AppError, assert } from '../errors.js';
 import { validatePatch, normalizeValue } from '../validation.js';
 import { getFieldDefinitions } from './dictionaries.js';
-import { channelKey } from '../lib/order-identity.js';
+import { channelKey, orderIdentityKey } from '../lib/order-identity.js';
 import { priceFactorPatterns } from '../lib/price-factor.js';
 import { shippingWindow } from '../lib/shipping-window.js';
 import {
@@ -36,7 +36,7 @@ export async function createItem(input, actor) {
   });
   const result = await db.transaction(async (transaction) => {
     const created = await upsertImported(patch, transaction, actor);
-    assert(created.created, '订单号＋采购渠道已存在，请编辑已有记录', 409);
+    assert(created.created, '订单号＋SKU＋店铺名已存在，请编辑已有记录', 409);
     await AuditLog.create(
       { userId: actor.id, action: 'create_item', entityId: String(created.id) },
       { transaction },
@@ -64,10 +64,11 @@ export async function upsertImported(patch, transaction, actor, target = undefin
   // 同订单的新增串行化，重复导入依赖明细 ID 的创建顺序。
   await order.reload({ transaction, lock: transaction.LOCK.UPDATE });
   const purchaseChannelKey = channelKey(patch.purchaseChannel);
+  const identityKey = orderIdentityKey(patch);
   const existing =
     target === undefined
       ? await OrderItem.findOne({
-          where: { orderId: order.id, purchaseChannelKey },
+          where: { orderId: order.id, orderIdentityKey: identityKey },
           order: [['id', 'ASC']],
           transaction,
           lock: transaction.LOCK.UPDATE,
@@ -75,8 +76,10 @@ export async function upsertImported(patch, transaction, actor, target = undefin
       : target;
   const parts = splitPatch(patch);
   if (existing) {
-    // 空渠道旧明细被补全后同步匹配键，后续导入才能按新渠道继续更新同一条。
-    const identity = Object.hasOwn(patch, 'purchaseChannel') ? { purchaseChannelKey } : {};
+    const identity = {
+      orderIdentityKey: orderIdentityKey({ ...existing.toJSON(), ...parts.item }),
+      ...(Object.hasOwn(patch, 'purchaseChannel') ? { purchaseChannelKey } : {}),
+    };
     await existing.update(
       { ...parts.item, ...identity, version: existing.version + 1 },
       { transaction },
@@ -92,7 +95,7 @@ export async function upsertImported(patch, transaction, actor, target = undefin
     return { created: false, id: existing.id };
   }
   const item = await OrderItem.create(
-    { ...parts.item, orderId: order.id, purchaseChannelKey },
+    { ...parts.item, orderId: order.id, purchaseChannelKey, orderIdentityKey: identityKey },
     { transaction },
   );
   // 采购人员只取已认证的当前账号，不能由上传文件或客户端指定。
@@ -110,6 +113,15 @@ export async function upsertImported(patch, transaction, actor, target = undefin
 export function buildFilters(query, now = Date.now()) {
   const where = {},
     purchaseWhere = {};
+  if (query.orderNumbers) {
+    assert(typeof query.orderNumbers === 'string', '批量订单号格式无效');
+    const numbers = [...new Set(query.orderNumbers.trim().split(/\s+/).filter(Boolean))];
+    assert(
+      numbers.length <= 200 && numbers.every((number) => number.length <= 191),
+      '单次最多查询 200 个有效订单号',
+    );
+    if (numbers.length) where['$order.orderNumber$'] = { [Op.in]: numbers };
+  }
   if (query.q)
     where[Op.or] = [
       { productName: { [Op.like]: `%${String(query.q).slice(0, 100)}%` } },
@@ -117,7 +129,24 @@ export function buildFilters(query, now = Date.now()) {
       { '$order.orderNumber$': { [Op.like]: `%${String(query.q).slice(0, 100)}%` } },
       { '$purchase.trackingNumber$': { [Op.like]: `%${String(query.q).slice(0, 100)}%` } },
     ];
-  for (const key of ['shopName', 'orderStatus']) if (query[key]) where[key] = String(query[key]);
+  if (query.shopNames) {
+    let names = query.shopNames;
+    if (typeof names === 'string') {
+      try {
+        names = JSON.parse(names);
+      } catch {
+        throw new AppError(400, '店铺筛选格式无效');
+      }
+    }
+    assert(
+      Array.isArray(names) &&
+        names.length <= 200 &&
+        names.every((name) => typeof name === 'string' && name.length <= 191),
+      '店铺筛选格式无效',
+    );
+    if (names.length) where.shopName = { [Op.in]: [...new Set(names)] };
+  } else if (query.shopName) where.shopName = String(query.shopName);
+  if (query.orderStatus) where.orderStatus = String(query.orderStatus);
   for (const key of ['purchaseStatus', 'settlement', 'allocatable', 'afterSales'])
     if (query[key]) purchaseWhere[key] = String(query[key]);
   if (query.purchaseChannel) {
@@ -319,17 +348,24 @@ export async function editItem(id, input, user) {
         : currentPurchase?.purchaseChannel,
     );
     await order.reload({ transaction: t, lock: t.LOCK.UPDATE });
+    const identityKey = orderIdentityKey({ ...item.toJSON(), ...parts.item });
     // 已有重复明细可单独编辑；人工改到另一个已有组合仍保持原来的冲突提示。
-    if (item.orderId !== order.id || item.purchaseChannelKey !== purchaseChannelKey) {
+    if (item.orderId !== order.id || orderIdentityKey(item) !== identityKey) {
       const conflict = await OrderItem.findOne({
-        where: { orderId: order.id, purchaseChannelKey, id: { [Op.ne]: item.id } },
+        where: { orderId: order.id, orderIdentityKey: identityKey, id: { [Op.ne]: item.id } },
         transaction: t,
         lock: t.LOCK.UPDATE,
       });
-      assert(!conflict, '订单号＋采购渠道已存在，请编辑已有记录', 409);
+      assert(!conflict, '订单号＋SKU＋店铺名已存在，请编辑已有记录', 409);
     }
     await item.update(
-      { ...parts.item, orderId: order.id, purchaseChannelKey, version: item.version + 1 },
+      {
+        ...parts.item,
+        orderId: order.id,
+        purchaseChannelKey,
+        orderIdentityKey: identityKey,
+        version: item.version + 1,
+      },
       { transaction: t },
     );
     const [purchase] = await Purchase.findOrCreate({
@@ -396,4 +432,44 @@ export async function assignItems(input, user) {
       { transaction: t },
     );
   });
+}
+
+/** 批量状态更新与单条编辑共用字典校验，任一版本冲突则整批回滚。 */
+export async function updateOrderStatus(input, user) {
+  const entries = input?.items;
+  assert(
+    Array.isArray(entries) && entries.length > 0 && entries.length <= 500,
+    '请选择 1 至 500 条商品明细',
+  );
+  assert(
+    entries.every((entry) => Number.isInteger(entry?.id) && Number.isInteger(entry?.version)),
+    '商品明细参数错误',
+  );
+  assert(new Set(entries.map((entry) => entry.id)).size === entries.length, '商品明细不能重复');
+  assert(typeof input.orderStatus === 'string' && input.orderStatus.trim(), '请选择订单状态');
+  await db.transaction(async (transaction) => {
+    const definitions = await getFieldDefinitions(transaction);
+    const { orderStatus } = validatePatch(
+      { orderStatus: input.orderStatus },
+      { fieldDefinitions: definitions.filter((field) => field.key === 'orderStatus') },
+    );
+    for (const entry of [...entries].sort((a, b) => a.id - b.id)) {
+      const item = await OrderItem.findByPk(entry.id, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      assert(item, '部分商品已不存在，请刷新', 404);
+      assert(item.version === entry.version, '部分商品已更新，请刷新后重试', 409);
+      await item.update({ orderStatus, version: item.version + 1 }, { transaction });
+    }
+    await AuditLog.create(
+      {
+        userId: user.id,
+        action: 'batch_update_order_status',
+        details: { itemIds: entries.map((entry) => entry.id), orderStatus },
+      },
+      { transaction },
+    );
+  });
+  return { updated: entries.length };
 }

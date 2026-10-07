@@ -29,6 +29,11 @@ export async function migrateOrderFields() {
   const query = db.getQueryInterface();
   for (const table of ['order_items', 'purchases']) {
     const columns = await query.describeTable(table);
+    if (table === 'order_items' && !columns.platformTrackingNumber)
+      await query.addColumn(table, 'platformTrackingNumber', {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+      });
     if (table === 'order_items' && !columns.sku.allowNull)
       await query.changeColumn(table, 'sku', { type: DataTypes.STRING(191), allowNull: true });
     const decimalFields = fields.filter(

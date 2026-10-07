@@ -1,8 +1,24 @@
 <script setup>
-import { defineAsyncComponent } from 'vue';
-import { Search, Plus, Upload, Refresh, User, Delete } from '@element-plus/icons-vue';
+import { computed, defineAsyncComponent, ref } from 'vue';
+import {
+  Search,
+  Plus,
+  Upload,
+  Refresh,
+  User,
+  Delete,
+  Setting,
+  Check,
+  CircleClose,
+  Download,
+  CopyDocument,
+  EditPen,
+} from '@element-plus/icons-vue';
+import { ElMessage } from 'element-plus';
 import { useOrders } from '../composables/useOrders';
+import { orderApi } from '../api/orders';
 import OrderTable from '../components/orders/OrderTable.vue';
+import { orderColumns } from '../components/orders/orderColumns';
 import { PLATFORM_TIME_LABEL } from '../utils/businessTime';
 // 弹窗只在打开时挂载，因此不会提前下载编辑表单和图片上传逻辑。
 const OrderEditor = defineAsyncComponent(() => import('../components/OrderEditor.vue'));
@@ -41,6 +57,155 @@ const {
   assign,
   remove,
 } = useOrders();
+const storageKey = `my-order-order-columns-${auth.user?.id || 'default'}`;
+function savedHiddenColumns() {
+  try {
+    const value = JSON.parse(localStorage.getItem(storageKey));
+    return Array.isArray(value) ? value.filter((key) => typeof key === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+const hiddenColumns = ref(savedHiddenColumns());
+const columnDialog = ref(false);
+const batchOrderDialog = ref(false);
+const batchOrderDraft = ref('');
+const exportBusy = ref(false);
+const statusDialog = ref(false);
+const statusBusy = ref(false);
+const statusDraft = ref('');
+const statusItems = ref([]);
+const draftColumns = ref([]);
+const allColumns = computed(() => orderColumns(meta.fields));
+const visibleColumns = computed(() =>
+  allColumns.value.filter((field) => !hiddenColumns.value.includes(field.key)),
+);
+const columnGroups = computed(() => [
+  { label: '订单信息', fields: allColumns.value.filter((field) => field.group === 'order') },
+  { label: '采购信息', fields: allColumns.value.filter((field) => field.group === 'purchase') },
+  {
+    label: '其他',
+    fields: allColumns.value.filter((field) => !['order', 'purchase'].includes(field.group)),
+  },
+]);
+const batchOrderCount = computed(
+  () => new Set(filters.orderNumbers.trim().split(/\s+/).filter(Boolean)).size,
+);
+function openBatchOrderDialog() {
+  batchOrderDraft.value = filters.orderNumbers;
+  batchOrderDialog.value = true;
+}
+async function applyBatchOrderSearch() {
+  const numbers = [...new Set(batchOrderDraft.value.trim().split(/\s+/).filter(Boolean))];
+  if (numbers.length > 200 || numbers.some((number) => number.length > 191))
+    return ElMessage.warning('单次最多查询 200 个订单号，每个订单号最多 191 个字符');
+  filters.orderNumbers = numbers.join(' ');
+  filters.q = '';
+  batchOrderDialog.value = false;
+  await search();
+}
+function openColumnDialog() {
+  draftColumns.value = visibleColumns.value.map((field) => field.key);
+  columnDialog.value = true;
+}
+function applyColumns() {
+  hiddenColumns.value = allColumns.value
+    .filter((field) => !draftColumns.value.includes(field.key))
+    .map((field) => field.key);
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(hiddenColumns.value));
+  } catch {
+    // 浏览器禁用本地存储时仍允许本次页面调整表头。
+  }
+  columnDialog.value = false;
+}
+async function exportOrderRows() {
+  if (exportBusy.value) return;
+  exportBusy.value = true;
+  try {
+    const file = await orderApi.export(
+      { ...filters },
+      selected.value.map((row) => row.id),
+    );
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
+    link.href = url;
+    link.download = `订单明细-${date}.xlsx`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (error) {
+    let message = '导出失败，请稍后重试';
+    try {
+      message = JSON.parse(await error.response?.data?.text()).message || message;
+    } catch {
+      if (error.code === 'ECONNABORTED') message = '导出超时，请缩小筛选范围后重试';
+    }
+    ElMessage.error(message);
+  } finally {
+    exportBusy.value = false;
+  }
+}
+async function writeClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // HTTP 测试站或剪贴板权限受限时，尝试浏览器的复制命令。
+    }
+  }
+  const input = document.createElement('textarea');
+  input.value = text;
+  input.setAttribute('readonly', '');
+  input.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+  document.body.append(input);
+  try {
+    input.select();
+    if (!document.execCommand('copy')) throw new Error('Clipboard unavailable');
+  } finally {
+    input.remove();
+  }
+}
+async function copyTrackingNumbers() {
+  const selectedIds = new Set(selected.value.map((row) => row.id));
+  const numbers = rows.value
+    .filter((row) => selectedIds.has(row.id))
+    .map((row) => String(row.trackingNumber ?? '').trim())
+    .filter(Boolean);
+  if (!numbers.length) return ElMessage.warning('所选明细均未填写物流单号');
+  try {
+    await writeClipboard(numbers.join('\n'));
+    const skipped = selected.value.length - numbers.length;
+    ElMessage.success(
+      `已复制 ${numbers.length} 个物流单号${skipped ? `，跳过 ${skipped} 条未填写的明细` : ''}`,
+    );
+  } catch {
+    ElMessage.error('复制失败，请检查浏览器剪贴板权限');
+  }
+}
+function openStatusDialog() {
+  statusItems.value = selected.value.map(({ id, version }) => ({ id, version }));
+  if (!statusItems.value.length) return ElMessage.warning('请先勾选商品明细');
+  statusDraft.value = '';
+  statusDialog.value = true;
+}
+async function submitStatus() {
+  if (!statusDraft.value) return ElMessage.warning('请选择订单状态');
+  if (statusBusy.value) return;
+  statusBusy.value = true;
+  try {
+    const result = await orderApi.updateStatus(statusItems.value, statusDraft.value);
+    statusDialog.value = false;
+    table.value?.clearSelection();
+    ElMessage.success(`已更新 ${result.updated} 条商品明细的订单状态`);
+    await refresh();
+  } finally {
+    statusBusy.value = false;
+  }
+}
 </script>
 <template>
   <div class="orders-page">
@@ -64,10 +229,11 @@ const {
           <h2>
             订单商品明细<span class="count-label">{{ total }} 条</span>
           </h2>
-          <p>每行对应一条商品明细，可展开查看商品和收件信息，或勾选后批量分配采购人员。</p>
+          <p>每行对应一条商品明细，可展开查看商品和收件信息，或勾选后进行批量操作。</p>
         </div>
         <div class="button-row">
-          <el-button :icon="Refresh" @click="refresh">刷新</el-button
+          <el-button :icon="Setting" @click="openColumnDialog">表头选择</el-button
+          ><el-button :icon="Refresh" @click="refresh">刷新</el-button
           ><el-button :icon="Plus" @click="edit(null)">新增明细</el-button
           ><el-button :icon="User" :disabled="!selected.length" @click="openAssign()"
             >分配采购</el-button
@@ -81,6 +247,8 @@ const {
             >批量删除</el-button
           ><el-button type="primary" :icon="Upload" @click="router.push('/imports/new')"
             >导入订单</el-button
+          ><el-button :icon="Download" :loading="exportBusy" @click="exportOrderRows"
+            >导出订单</el-button
           >
         </div>
       </div>
@@ -93,7 +261,17 @@ const {
             placeholder="搜索订单号、SKU、商品或物流单号"
             class="search-input"
             @keyup.enter="search"
-          /><el-select v-model="filters.shopName" placeholder="全部店铺" clearable filterable
+          /><el-button :icon="Search" @click="openBatchOrderDialog"
+            >批量订单号{{ batchOrderCount ? ` (${batchOrderCount})` : '' }}</el-button
+          ><el-select
+            v-model="filters.shopNames"
+            placeholder="全部店铺"
+            aria-label="店铺多选筛选"
+            clearable
+            filterable
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
             ><el-option
               v-for="shop in stats.shops"
               :key="shop"
@@ -165,6 +343,8 @@ const {
               :value="status" /></el-select
           ><el-select v-model="filters.allocatable" placeholder="是否可分配" clearable
             ><el-option label="是" value="是" /><el-option label="否" value="否" /></el-select
+          ><el-select v-model="filters.afterSales" placeholder="是否售后" clearable
+            ><el-option label="是" value="是" /><el-option label="否" value="否" /></el-select
           ><el-select v-model="filters.settlement" placeholder="结算情况" clearable
             ><el-option label="已结算" value="已结算" /><el-option
               label="未结算"
@@ -225,11 +405,16 @@ const {
           >已选中 <strong>{{ selected.length }}</strong> 条商品明细</span
         ><el-button type="primary" size="small" :icon="User" @click="openAssign()"
           >批量分配采购</el-button
+        ><el-button size="small" :icon="EditPen" @click="openStatusDialog"
+          >批量更改订单状态</el-button
+        ><el-button size="small" :icon="CopyDocument" @click="copyTrackingNumbers"
+          >复制物流单号</el-button
         ><el-button text size="small" @click="table.clearSelection()">取消选择</el-button>
       </div>
       <div class="order-table-region">
         <OrderTable
           ref="table"
+          :columns="visibleColumns"
           :rows="rows"
           :loading="loading"
           :deleting="deleteBusy"
@@ -242,8 +427,7 @@ const {
         />
       </div>
       <div class="table-footer">
-        <span class="muted"
-          >导入优先匹配同订单同渠道，无渠道旧明细按订单号补匹配；重复行按顺序更新</span
+        <span class="muted">导入按订单号＋SKU＋店铺名匹配；重复行按顺序更新</span
         ><el-pagination
           v-model:current-page="filters.page"
           v-model:page-size="filters.pageSize"
@@ -266,4 +450,77 @@ const {
     :assign-busy="assignBusy"
     @submit="assign"
   />
+  <el-dialog
+    v-model="statusDialog"
+    title="批量更改订单状态"
+    width="460px"
+    :close-on-click-modal="!statusBusy"
+    :close-on-press-escape="!statusBusy"
+    :show-close="!statusBusy"
+  >
+    <p class="dialog-description">将选中的 {{ statusItems.length }} 条商品明细更改为：</p>
+    <el-select
+      v-model="statusDraft"
+      placeholder="选择订单状态"
+      aria-label="批量选择订单状态"
+      filterable
+      style="width: 100%"
+    >
+      <el-option
+        v-for="status in meta.fieldMap.orderStatus?.options"
+        :key="status"
+        :label="status"
+        :value="status"
+      />
+    </el-select>
+    <template #footer>
+      <el-button :disabled="statusBusy" @click="statusDialog = false">取消</el-button>
+      <el-button type="primary" :loading="statusBusy" @click="submitStatus">确认更改</el-button>
+    </template>
+  </el-dialog>
+  <el-dialog
+    v-model="batchOrderDialog"
+    title="批量搜索订单号"
+    width="520px"
+    class="batch-order-dialog"
+  >
+    <el-input
+      v-model="batchOrderDraft"
+      type="textarea"
+      :rows="8"
+      resize="vertical"
+      placeholder="粘贴订单号，用换行或空格分隔"
+      aria-label="批量订单号"
+    />
+    <template #footer>
+      <el-button @click="batchOrderDialog = false">取消</el-button>
+      <el-button @click="batchOrderDraft = ''">清空</el-button>
+      <el-button type="primary" @click="applyBatchOrderSearch">查询</el-button>
+    </template>
+  </el-dialog>
+  <el-dialog v-model="columnDialog" title="表头选择" width="520px" class="column-settings-dialog">
+    <div class="column-settings-toolbar">
+      <span class="muted">已勾选 {{ draftColumns.length }} / {{ allColumns.length }} 列</span>
+      <div>
+        <el-button text :icon="Check" @click="draftColumns = allColumns.map((field) => field.key)"
+          >全选</el-button
+        >
+        <el-button text :icon="CircleClose" @click="draftColumns = []">清除勾选</el-button>
+      </div>
+    </div>
+    <el-checkbox-group v-model="draftColumns" class="column-settings-list">
+      <div v-for="group in columnGroups" :key="group.label" class="column-settings-group">
+        <strong>{{ group.label }}</strong>
+        <div class="column-settings-options">
+          <el-checkbox v-for="field in group.fields" :key="field.key" :value="field.key">
+            {{ field.label }}
+          </el-checkbox>
+        </div>
+      </div>
+    </el-checkbox-group>
+    <template #footer>
+      <el-button @click="columnDialog = false">取消</el-button>
+      <el-button type="primary" @click="applyColumns">应用</el-button>
+    </template>
+  </el-dialog>
 </template>

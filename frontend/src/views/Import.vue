@@ -3,7 +3,6 @@ import { defineAsyncComponent } from 'vue';
 import { useRouter } from 'vue-router';
 import { ArrowRight, Document } from '@element-plus/icons-vue';
 import MappingEditor from '../components/MappingEditor.vue';
-import ChannelBinding from '../components/ChannelBinding.vue';
 import ImportUpload from '../components/imports/ImportUpload.vue';
 import { useOrderImport } from '../composables/useOrderImport';
 const ImportPreview = defineAsyncComponent(() => import('../components/imports/ImportPreview.vue'));
@@ -19,6 +18,7 @@ const {
   preview,
   result,
   form,
+  allowedFields,
   upload,
   inspect,
   chooseTemplate,
@@ -85,9 +85,13 @@ const {
                 inspect();
               "
           /></el-form-item>
-        </div>
-        <ChannelBinding v-model="form.purchaseChannelId" :disabled="busy || uploading" /> </el-form
-      ><MappingEditor :info="info" v-model="form.mappings" :disabled="busy || uploading" />
+        </div> </el-form
+      ><MappingEditor
+        :info="info"
+        v-model="form.mappings"
+        :allowed-fields="allowedFields"
+        :disabled="busy || uploading"
+      />
       <div class="stage-actions">
         <el-button @click="saveTemplate">保存当前映射为模板</el-button
         ><el-button type="primary" :loading="busy" @click="makePreview"
@@ -98,6 +102,7 @@ const {
     <ImportPreview
       v-else-if="step === 2"
       :preview="preview"
+      kind="order"
       :busy="busy"
       @back="step = 1"
       @reset="reset"

@@ -83,6 +83,110 @@
   max-width: 680px;
   margin: 35px auto 15px;
 }
+.upload-paste-row,
+.purchase-zone-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  color: #6b7f86;
+  font-size: 12px;
+}
+.purchase-import-page {
+  display: grid;
+  gap: 18px;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.purchase-upload-summary,
+.purchase-upload-zone {
+  background: #fff;
+  border: 1px solid #dfe9e5;
+  border-radius: 6px;
+  padding: 26px;
+}
+.purchase-upload-heading,
+.purchase-zone-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.purchase-upload-heading h2,
+.purchase-zone-heading h3 {
+  margin: 0;
+  color: #263e39;
+  font-size: 18px;
+}
+.purchase-upload-actions {
+  margin-top: 22px;
+}
+.purchase-upload-zone {
+  border-top: 3px solid #2b8b74;
+}
+.purchase-zone-label {
+  display: block;
+  margin: 20px 0 8px;
+  color: #3e5751;
+  font-size: 13px;
+  font-weight: 600;
+}
+.purchase-template-select,
+.purchase-zone-upload,
+.purchase-zone-upload .el-upload {
+  width: 100%;
+}
+.purchase-template-detail {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 20px 0 14px;
+}
+.purchase-template-detail strong {
+  color: #2d5750;
+  font-size: 16px;
+}
+.purchase-template-detail span {
+  color: #758890;
+  font-size: 12px;
+}
+.purchase-zone-upload .el-upload-dragger {
+  width: 100%;
+  background: #f3f8ff;
+  border: 1px dashed #80a9ed;
+  padding: 32px 20px;
+}
+.purchase-zone-upload .upload-icon {
+  color: #2c69c7;
+}
+.purchase-zone-upload h3 {
+  margin: 0;
+  color: #294a78;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.purchase-zone-upload p {
+  margin: 8px 0 0;
+  color: #52769b;
+  font-size: 12px;
+}
+.purchase-zone-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+}
+@media (max-width: 600px) {
+  .purchase-upload-summary,
+  .purchase-upload-zone {
+    padding: 18px;
+  }
+  .purchase-upload-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
 .el-upload-dragger {
   background: #f8fbfa;
   border: 1px dashed #bed8cd;

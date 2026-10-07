@@ -44,7 +44,8 @@ export function useOrders() {
   };
   const filters = reactive({
     q: '',
-    shopName: '',
+    orderNumbers: '',
+    shopNames: [],
     orderStatus: '',
     purchaseStatus: '',
     purchaseChannel: '',
@@ -54,6 +55,7 @@ export function useOrders() {
     maxPrice: '',
     assignedTo: '',
     allocatable: '',
+    afterSales: '',
     settlement: '',
     startDate: '',
     endDate: '',
@@ -67,12 +69,11 @@ export function useOrders() {
   const dates = ref([]),
     shipDates = ref([]),
     table = ref();
-  const afterSales = ref('');
   /** 只读取当前筛选页；重新查询后清理旧的多选状态。 */
   async function load() {
     loading.value = true;
     try {
-      const result = await orderApi.list({ ...filters, afterSales: afterSales.value });
+      const result = await orderApi.list({ ...filters });
       if (result.serverNow) {
         serverClock = { time: Date.parse(result.serverNow), received: performance.now() };
         tickClock();
@@ -96,7 +97,8 @@ export function useOrders() {
   async function reset() {
     Object.assign(filters, {
       q: '',
-      shopName: '',
+      orderNumbers: '',
+      shopNames: [],
       orderStatus: '',
       purchaseStatus: '',
       purchaseChannel: '',
@@ -106,6 +108,7 @@ export function useOrders() {
       maxPrice: '',
       assignedTo: '',
       allocatable: '',
+      afterSales: '',
       settlement: '',
       startDate: '',
       endDate: '',
@@ -117,15 +120,14 @@ export function useOrders() {
     });
     dates.value = [];
     shipDates.value = [];
-    afterSales.value = '';
     await load();
   }
   async function cardFilter(kind) {
     Object.assign(filters, { assignedTo: '', purchaseStatus: '', page: 1 });
-    afterSales.value = '';
+    filters.afterSales = '';
     if (kind === 'unassigned') filters.assignedTo = 'unassigned';
     if (kind === 'progress') filters.purchaseStatus = '采购中';
-    if (kind === 'afterSales') afterSales.value = '是';
+    if (kind === 'afterSales') filters.afterSales = '是';
     await load();
   }
   function edit(row) {

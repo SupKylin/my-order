@@ -29,6 +29,7 @@ const auth = useAuth(),
 const menus = [
   { path: '/orders', label: '订单管理', icon: Box },
   { path: '/imports/new', label: '导入订单', icon: Upload },
+  { path: '/imports/purchases/new', label: '导入采购', icon: Upload },
   { path: '/templates', label: '导入模板', icon: Document },
   { path: '/imports', label: '导入记录', icon: Clock },
   { path: '/users', label: '账号管理', icon: User },

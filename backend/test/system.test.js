@@ -34,6 +34,8 @@ import {
 import { fields } from '../src/fields.js';
 import { money } from '../../frontend/src/utils/format.js';
 import { purchaseWarning } from '../../frontend/src/utils/purchaseWarning.js';
+import { migrateOrderIdentity } from '../src/migrations/order-identity.js';
+import { orderIdentityKey } from '../src/lib/order-identity.js';
 const prefix = `QA${Date.now()}`;
 const identityChannels = [`${prefix}-渠道B`, `${prefix}-渠道C`];
 let server, base, cookie, csrf, admin, initialUploads, startedAt, reusableTemplateId;
@@ -152,7 +154,7 @@ after(async () => {
         testItemIds.includes(Number(log.entityId))) ||
       (['create_user', 'edit_user'].includes(log.action) &&
         userIds.includes(Number(log.entityId))) ||
-      (log.action === 'assign_items' &&
+      (['assign_items', 'batch_update_order_status'].includes(log.action) &&
         log.details?.itemIds?.length &&
         log.details.itemIds.every((id) => testItemIds.includes(id)));
     if (belongs) await log.destroy();
@@ -390,6 +392,81 @@ test('三个角色均可操作账号、独立商品采购分配及最后一个�
     409,
   );
 });
+test('批量更改订单状态只影响勾选明细，版本冲突时整批回滚', async () => {
+  const number = `${prefix}-BATCH-STATUS`;
+  orderNumbers.push(number);
+  const created = [];
+  for (const sku of ['STATUS-A', 'STATUS-B', 'STATUS-C']) {
+    const response = await request('/api/orders', 'POST', {
+      fields: { orderNumber: number, sku },
+    });
+    assert.equal(response.status, 201, JSON.stringify(response.data));
+    created.push(response.data);
+  }
+  const entries = created.slice(0, 2).map(({ id, version }) => ({ id, version }));
+  assert.equal(
+    (await request('/api/orders/batch-status', 'POST', { items: entries, orderStatus: '砍单' }, {}))
+      .status,
+    401,
+  );
+  for (const items of [[], [null], [entries[0], entries[0]]]) {
+    assert.equal(
+      (await request('/api/orders/batch-status', 'POST', { items, orderStatus: '砍单' })).status,
+      400,
+    );
+  }
+  for (const orderStatus of ['', '不存在的状态']) {
+    assert.equal(
+      (await request('/api/orders/batch-status', 'POST', { items: entries, orderStatus })).status,
+      400,
+    );
+  }
+  assert.equal(
+    (
+      await request('/api/orders/batch-status', 'POST', {
+        items: [entries[0], { id: 2147483647, version: 1 }],
+        orderStatus: '砍单',
+      })
+    ).status,
+    404,
+  );
+  assert.equal((await request(`/api/orders/${created[0].id}`)).data.orderStatus, null);
+  const edit = await request(`/api/orders/${created[1].id}`, 'PUT', {
+    version: created[1].version,
+    fields: { orderNumber: number, sku: 'STATUS-B', productName: '刚被修改' },
+  });
+  assert.equal(edit.status, 200, JSON.stringify(edit.data));
+  assert.equal(
+    (await request('/api/orders/batch-status', 'POST', { items: entries, orderStatus: '砍单' }))
+      .status,
+    409,
+  );
+  assert.equal((await request(`/api/orders/${created[0].id}`)).data.orderStatus, null);
+  assert.equal((await request(`/api/orders/${created[0].id}`)).data.version, created[0].version);
+  const current = await request(`/api/orders/${created[1].id}`);
+  const updated = await request('/api/orders/batch-status', 'POST', {
+    items: [entries[0], { id: current.data.id, version: current.data.version }],
+    orderStatus: '砍单',
+  });
+  assert.equal(updated.status, 200, JSON.stringify(updated.data));
+  assert.equal(updated.data.updated, 2);
+  for (const row of created.slice(0, 2)) {
+    const result = await request(`/api/orders/${row.id}`);
+    assert.equal(result.data.orderStatus, '砍单');
+    assert.equal(result.data.version, row.version + (row.id === created[1].id ? 2 : 1));
+  }
+  assert.equal((await request(`/api/orders/${created[2].id}`)).data.orderStatus, null);
+  const logs = await AuditLog.findAll({ where: { action: 'batch_update_order_status' } });
+  assert.ok(
+    logs.some(
+      (log) =>
+        log.userId === admin.id &&
+        log.details?.orderStatus === '砍单' &&
+        entries.every(({ id }) => log.details.itemIds.includes(id)),
+    ),
+  );
+});
+
 test('Excel 表头映射、嵌入图片、非空更新、零值更新与其他渠道明细保留', async () => {
   const orderNumber = orderNumbers[0];
   const headers = [
@@ -401,6 +478,7 @@ test('Excel 表头映射、嵌入图片、非空更新、零值更新与其他�
     '产品图',
     '状态',
     '采购渠道',
+    '店铺名',
   ];
   const keys = [
     'orderNumber',
@@ -411,11 +489,12 @@ test('Excel 表头映射、嵌入图片、非空更新、零值更新与其他�
     'productImage',
     'orderStatus',
     'purchaseChannel',
+    'shopName',
   ];
   const p = await previewRows(
     headers,
     [
-      [orderNumber, 'SKU-A', '', '新的采购备注', 0, '', '采购成功真实单号发货'],
+      [orderNumber, 'SKU-A', '', '新的采购备注', 0, '', '采购成功真实单号发货', '', '测试店铺'],
       [orderNumber, '000123', '新增的商品', '', '', '', '', identityChannels[1]],
     ],
     keys,
@@ -463,9 +542,9 @@ test('Excel 表头映射、嵌入图片、非空更新、零值更新与其他�
 });
 test('未映射字段和采购空白保持原值，人工编辑允许清空', async () => {
   const p = await previewRows(
-    ['单号', 'SKU', '备注'],
-    [[orderNumbers[0], 'SKU-A', '   ']],
-    ['orderNumber', 'sku', 'purchaseNote'],
+    ['单号', 'SKU', '备注', '店铺名'],
+    [[orderNumbers[0], 'SKU-A', '   ', '测试店铺']],
+    ['orderNumber', 'sku', 'purchaseNote', 'shopName'],
   );
   assert.equal(p.data.errorCount, 0);
   assert.equal((await request(`/api/imports/${p.data.id}/commit`, 'POST')).status, 200);
@@ -507,11 +586,111 @@ test('错误行阻止整批提交；同一文件重复行全部保留', async ()
   assert.equal((await request(`/api/imports/${d.data.id}/commit`, 'POST')).status, 200);
   assert.equal((await request('/api/orders?q=' + number)).data.total, 2);
 });
+test('订单与采购导入入口隔离；多文件采购只更新匹配的已有明细', async () => {
+  const number = `${prefix}-SPLIT-IMPORT`;
+  orderNumbers.push(number);
+  const order = await previewRows(
+    ['订单号', 'SKU', '店铺名', '商品名称'],
+    [[number, 'SPLIT-1', '采购测试店', '原商品']],
+    ['orderNumber', 'sku', 'shopName', 'productName'],
+  );
+  const orderPreview = await request('/api/imports/orders/preview', 'POST', {
+    uploadId: order.upload.id,
+    template: order.template,
+  });
+  assert.equal(orderPreview.status, 200, JSON.stringify(orderPreview.data));
+  jobIds.push(orderPreview.data.id);
+  assert.equal(orderPreview.data.added, 1);
+  assert.equal(
+    (await request(`/api/imports/purchases/${orderPreview.data.id}/commit`, 'POST')).status,
+    409,
+  );
+  assert.equal(
+    (await request(`/api/imports/orders/${orderPreview.data.id}/commit`, 'POST')).status,
+    200,
+  );
+
+  const invalidOrder = await request('/api/imports/orders/preview', 'POST', {
+    uploadId: order.upload.id,
+    template: {
+      ...order.template,
+      mappings: [
+        ...order.template.mappings,
+        { column: 5, header: '采购备注', field: 'purchaseNote' },
+      ],
+    },
+  });
+  assert.equal(invalidOrder.status, 400);
+
+  const purchaseTemplate = {
+    name: `${prefix}-采购模板`,
+    sheetName: '每日订单',
+    headerRow: 2,
+    mappings: [
+      { column: 1, header: '订单号', field: 'orderNumber' },
+      { column: 2, header: 'SKU', field: 'sku' },
+      { column: 3, header: '店铺名', field: 'shopName' },
+      { column: 4, header: '采购备注', field: 'purchaseNote' },
+    ],
+  };
+  const saved = await request('/api/templates', 'POST', purchaseTemplate);
+  assert.equal(saved.status, 201, JSON.stringify(saved.data));
+  templateIds.push(saved.data.id);
+  async function purchaseUpload(rows) {
+    const body = new FormData();
+    body.append(
+      'file',
+      new Blob([await makeWorkbook(['订单号', 'SKU', '店铺名', '采购备注'], rows)]),
+      `${prefix}-${randomUUID()}.xlsx`,
+    );
+    const uploaded = await request('/api/uploads/excel', 'POST', body);
+    assert.equal(uploaded.status, 201, JSON.stringify(uploaded.data));
+    return { uploadId: uploaded.data.id, templateId: saved.data.id };
+  }
+  const first = await purchaseUpload([[number, 'SPLIT-1', '采购测试店', '第一次采购']]);
+  const second = await purchaseUpload([[number, 'SPLIT-1', '采购测试店', '重复采购']]);
+  const duplicate = await request('/api/imports/purchases/preview', 'POST', {
+    sources: [first, second],
+  });
+  assert.equal(duplicate.status, 200, JSON.stringify(duplicate.data));
+  jobIds.push(duplicate.data.id);
+  assert.equal(duplicate.data.updated, 1);
+  assert.equal(duplicate.data.errorCount, 1);
+  assert.equal(
+    (await request(`/api/imports/purchases/${duplicate.data.id}/commit`, 'POST')).status,
+    400,
+  );
+
+  const missing = await purchaseUpload([[number, 'NOT-FOUND', '采购测试店', '不存在的明细']]);
+  const unmatched = await request('/api/imports/purchases/preview', 'POST', { sources: [missing] });
+  assert.equal(unmatched.status, 200, JSON.stringify(unmatched.data));
+  jobIds.push(unmatched.data.id);
+  assert.equal(unmatched.data.errorCount, 1);
+  assert.equal(
+    (await request(`/api/imports/purchases/${unmatched.data.id}/commit`, 'POST')).status,
+    400,
+  );
+
+  const valid = await request('/api/imports/purchases/preview', 'POST', { sources: [first] });
+  assert.equal(valid.status, 200, JSON.stringify(valid.data));
+  jobIds.push(valid.data.id);
+  assert.equal(valid.data.added, 0);
+  assert.equal(valid.data.updated, 1);
+  assert.equal((await request(`/api/imports/${valid.data.id}/commit`, 'POST')).status, 409);
+  assert.equal(
+    (await request(`/api/imports/purchases/${valid.data.id}/commit`, 'POST')).status,
+    200,
+  );
+  const rows = (await request('/api/orders?q=' + encodeURIComponent(number))).data.rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].productName, '原商品');
+  assert.equal(rows[0].purchaseNote, '第一次采购');
+});
 test('复用模板时列顺序变化可重定位，缺少可选列仍保留原值', async () => {
   const p = await previewRows(
-    ['商品编码', '平台单号'],
-    [['SKU-A', orderNumbers[0]]],
-    ['sku', 'orderNumber'],
+    ['商品编码', '平台单号', '店铺名'],
+    [['SKU-A', orderNumbers[0], '测试店铺']],
+    ['sku', 'orderNumber', 'shopName'],
   );
   const preview = await request('/api/imports/preview', 'POST', {
     uploadId: p.upload.id,
@@ -531,9 +710,9 @@ test('复用模板时列顺序变化可重定位，缺少可选列仍保留原�
 });
 test('预览后发生修改会中止提交，避免覆盖其他人员修改', async () => {
   const p = await previewRows(
-    ['单号', 'SKU', '采购备注'],
-    [[orderNumbers[0], 'SKU-A', '不应提交的备注']],
-    ['orderNumber', 'sku', 'purchaseNote'],
+    ['单号', 'SKU', '采购备注', '店铺名'],
+    [[orderNumbers[0], 'SKU-A', '不应提交的备注', '测试店铺']],
+    ['orderNumber', 'sku', 'purchaseNote', 'shopName'],
   );
   const row = (
     await request('/api/orders?q=' + encodeURIComponent(orderNumbers[0]))
@@ -930,30 +1109,38 @@ test('Excel 上传超过旧 50 MB 上限后仍进入格式校验', async () => {
   assert.match(result.data.message, /不是有效的 XLSX/);
 });
 
-test('订单号与完整渠道组合匹配，SKU 可不填不映射、变更不新增，不覆盖其他渠道', async () => {
+test('三项组合校验与导入匹配，渠道变更更新原明细，不同 SKU 或店铺独立', async () => {
   const number = `${prefix}-CHANNEL-IDENTITY`;
   orderNumbers.push(number);
   const channels = identityChannels;
-  const create = async (purchaseChannel) => {
+  const create = async (sku, shopName, purchaseChannel = channels) => {
     const result = await request('/api/orders', 'POST', {
       fields: {
         orderNumber: number,
         purchaseChannel,
+        sku,
+        shopName,
         productName: '原商品',
         purchaseNote: '保留的备注',
       },
     });
     assert.equal(result.status, 201, JSON.stringify(result.data));
-    assert.equal(result.data.sku, null);
     return result.data;
   };
-  const combined = await create(channels);
-  const single = await create([channels[0]]);
-  const empty = await create(null);
+  const combined = await create('001', '店1');
+  const single = await create('001', '店2');
+  const differentSku = await create('002', '店1');
+  const empty = await create(null, null);
+  const blankShop = await create('001', null);
+  const blankSku = await create(null, '店1');
+  const duplicateCreate = await request('/api/orders', 'POST', {
+    fields: { orderNumber: number, sku: '001', shopName: '店1', purchaseChannel: null },
+  });
+  assert.equal(duplicateCreate.status, 409);
   const p = await previewRows(
-    ['订单号', '渠道', 'SKU', '订单状态', '采购状态'],
-    [[number, [...channels].reverse().join(' / '), '新 SKU', '采购成功真实单号发货', '采购中']],
-    ['orderNumber', 'purchaseChannel', 'sku', 'orderStatus', 'purchaseStatus'],
+    ['订单号', '渠道', 'SKU', '订单状态', '采购状态', '店铺名'],
+    [[number, channels[0], '001', '采购成功真实单号发货', '采购中', '店1']],
+    ['orderNumber', 'purchaseChannel', 'sku', 'orderStatus', 'purchaseStatus', 'shopName'],
   );
   assert.equal(p.data.errorCount, 0, JSON.stringify(p.data.errors));
   assert.equal(p.data.added, 0);
@@ -961,22 +1148,26 @@ test('订单号与完整渠道组合匹配，SKU 可不填不映射、变更不�
   assert.equal(p.data.rows[0].expectedId, combined.id);
   assert.equal((await request(`/api/imports/${p.data.id}/commit`, 'POST')).status, 200);
   const changed = (await request(`/api/orders/${combined.id}`)).data;
-  assert.equal(changed.sku, '新 SKU');
+  assert.equal(changed.sku, '001');
+  assert.deepEqual(changed.purchaseChannel, [channels[0]]);
   assert.equal(changed.orderStatus, '采购成功真实单号发货');
   assert.equal(changed.purchaseStatus, '采购中');
   assert.equal(changed.purchaseNote, '保留的备注');
   assert.equal((await request(`/api/orders/${single.id}`)).data.orderStatus, null);
   assert.equal((await request(`/api/orders/${empty.id}`)).data.orderStatus, null);
-  assert.equal((await request('/api/orders?q=' + number)).data.total, 3);
+  assert.equal((await request(`/api/orders/${differentSku.id}`)).data.orderStatus, null);
+  assert.equal((await request('/api/orders?q=' + number)).data.total, 6);
 
   const noSku = await previewRows(
-    ['订单号', '渠道', '备注'],
-    [[number, channels.join('/'), '更新采购备注']],
-    ['orderNumber', 'purchaseChannel', 'purchaseNote'],
+    ['订单号', '渠道', '备注', '店铺名'],
+    [[number, channels.join('/'), '更新采购备注', '店1']],
+    ['orderNumber', 'purchaseChannel', 'purchaseNote', 'shopName'],
   );
-  assert.equal(noSku.data.rows[0].expectedId, combined.id);
+  assert.equal(noSku.data.rows[0].expectedId, blankSku.id);
   assert.equal((await request(`/api/imports/${noSku.data.id}/commit`, 'POST')).status, 200);
-  assert.equal((await request(`/api/orders/${combined.id}`)).data.sku, '新 SKU');
+  assert.equal((await request(`/api/orders/${combined.id}`)).data.purchaseNote, '保留的备注');
+  const noShop = await previewRows(['订单号', 'SKU'], [[number, '001']], ['orderNumber', 'sku']);
+  assert.equal(noShop.data.rows[0].expectedId, blankShop.id);
 
   const onlyNumber = await previewRows(['订单号'], [[number]], ['orderNumber']);
   assert.equal(onlyNumber.status, 200, JSON.stringify(onlyNumber.data));
@@ -992,25 +1183,25 @@ test('订单号与完整渠道组合匹配，SKU 可不填不映射、变更不�
 
   const conflict = await request(`/api/orders/${single.id}`, 'PUT', {
     version: single.version,
-    fields: { orderNumber: number, purchaseChannel: channels },
+    fields: { orderNumber: number, shopName: '店1' },
   });
   assert.equal(conflict.status, 409, JSON.stringify(conflict.data));
-  assert.deepEqual((await request(`/api/orders/${single.id}`)).data.purchaseChannel, [channels[0]]);
+  assert.equal((await request(`/api/orders/${single.id}`)).data.shopName, '店2');
   const duplicate = await previewRows(
-    ['订单号', '采购渠道', 'SKU'],
+    ['订单号', '采购渠道', 'SKU', '店铺名'],
     [
-      [number, channels.join('/'), 'A'],
-      [number, [...channels].reverse().join('/'), 'B'],
+      [number, channels.join('/'), '003', '店1'],
+      [number, [...channels].reverse().join('/'), '003', '店1'],
     ],
-    ['orderNumber', 'purchaseChannel', 'sku'],
+    ['orderNumber', 'purchaseChannel', 'sku', 'shopName'],
   );
   assert.equal(duplicate.data.errorCount, 0);
-  assert.deepEqual([duplicate.data.updated, duplicate.data.added], [2, 0]);
-  assert.equal(duplicate.data.rows[1].expectedId, empty.id);
+  assert.deepEqual([duplicate.data.updated, duplicate.data.added], [0, 2]);
+  assert.equal(duplicate.data.rows[1].expectedId, null);
   assert.equal((await request(`/api/imports/${duplicate.data.id}/commit`, 'POST')).status, 200);
 });
 
-test('渠道键与预览版本同步变更，并拒绝按旧 SKU 规则生成的预览', async () => {
+test('身份键与预览版本同步变更，并拒绝按旧渠道规则生成的预览', async () => {
   const number = `${prefix}-IDENTITY-VERSION`;
   orderNumbers.push(number);
   const p = await previewRows(
@@ -1027,23 +1218,64 @@ test('渠道键与预览版本同步变更，并拒绝按旧 SKU 规则生成的
   );
   const edited = await request(`/api/orders/${row.id}`, 'PUT', {
     version: row.version,
-    fields: { orderNumber: number, purchaseChannel: [identityChannels[1]], sku: null },
+    fields: {
+      orderNumber: number,
+      purchaseChannel: [identityChannels[1]],
+      sku: '新SKU',
+      shopName: '新店',
+    },
   });
   assert.equal(edited.status, 200, JSON.stringify(edited.data));
   assert.equal((await request(`/api/imports/${stale.data.id}/commit`, 'POST')).status, 409);
   const next = await previewRows(
-    ['订单号', '采购渠道'],
-    [[number, identityChannels[1]]],
-    ['orderNumber', 'purchaseChannel'],
+    ['订单号', '采购渠道', 'SKU', '店铺名'],
+    [[number, identityChannels[1], '新SKU', '新店']],
+    ['orderNumber', 'purchaseChannel', 'sku', 'shopName'],
   );
   assert.equal(next.data.rows[0].expectedId, row.id);
   const old = await ImportJob.findByPk(next.data.id);
   const snapshot = { ...old.templateSnapshot };
-  delete snapshot.matchRule;
+  snapshot.matchRule = 'order-channel-empty-fallback-v3';
   await old.update({ templateSnapshot: snapshot });
   const rejected = await request(`/api/imports/${next.data.id}/commit`, 'POST');
   assert.equal(rejected.status, 409);
   assert.match(rejected.data.message, /匹配规则已更新/);
+});
+
+test('历史匹配键回填可重复执行，保留重复明细、采购记录和时间戳', async () => {
+  const number = `${prefix}-IDENTITY-MIGRATION`;
+  orderNumbers.push(number);
+  const p = await previewRows(
+    ['订单号', 'SKU', '店铺名', '采购备注'],
+    [
+      [number, '001', '店1', '采购1'],
+      [number, '001', '店1', '采购2'],
+      [number, '', '', '空组合'],
+    ],
+    ['orderNumber', 'sku', 'shopName', 'purchaseNote'],
+  );
+  assert.equal((await request(`/api/imports/${p.data.id}/commit`, 'POST')).status, 200);
+  const order = await Order.findOne({ where: { orderNumber: number } });
+  const records = () =>
+    OrderItem.findAll({ where: { orderId: order.id }, order: [['id', 'ASC']], raw: true });
+  const before = await records();
+  const ids = before.map((item) => item.id);
+  const purchasesBefore = await Purchase.findAll({
+    where: { itemId: ids },
+    order: [['id', 'ASC']],
+    raw: true,
+  });
+  await OrderItem.update({ orderIdentityKey: null }, { where: { id: ids }, silent: true });
+  await migrateOrderIdentity();
+  await migrateOrderIdentity();
+  assert.deepEqual(
+    await records(),
+    before.map((item) => ({ ...item, orderIdentityKey: orderIdentityKey(item) })),
+  );
+  assert.deepEqual(
+    await Purchase.findAll({ where: { itemId: ids }, order: [['id', 'ASC']], raw: true }),
+    purchasesBefore,
+  );
 });
 
 test('采购金额与价格系数按字符串保存，允许非数字和超过 20 位的小数文本', async () => {
@@ -1194,7 +1426,7 @@ test('重复明细按出现顺序更新，超出新增，缺少保留，采购�
     (await request('/api/orders?q=' + number)).data.rows.sort((a, b) => a.id - b.id);
   const first = await preview([
     [number, identityChannels[0], '同SKU', 'A1', '采购1'],
-    [number, identityChannels[1], '', 'B1', '独立渠道'],
+    [number, identityChannels[1], '其他SKU', 'B1', '独立商品'],
     [number, identityChannels[0], '同SKU', 'A2', '采购2'],
     [number, '', '', '空渠道1', ''],
     [number, '', '', '空渠道2', ''],
@@ -1218,14 +1450,14 @@ test('重复明细按出现顺序更新，超出新增，缺少保留，采购�
     200,
   );
   const second = await preview([
-    [number, identityChannels[0], '换SKU', '更新1', ''],
-    [number, identityChannels[0], '', '更新2', ''],
-    [number, identityChannels[0], '新SKU', '新增3', '采购3'],
+    [number, identityChannels[0], '同SKU', '更新1', ''],
+    [number, identityChannels[0], '同SKU', '更新2', ''],
+    [number, identityChannels[0], '同SKU', '新增3', '采购3'],
   ]);
-  assert.deepEqual([second.data.added, second.data.updated], [0, 3]);
+  assert.deepEqual([second.data.added, second.data.updated], [1, 2]);
   assert.deepEqual(
     second.data.rows.map((row) => row.expectedId),
-    [group[0].id, group[1].id, blankIds[0]],
+    [group[0].id, group[1].id, null],
   );
   assert.equal((await request(`/api/imports/${second.data.id}/commit`, 'POST')).status, 200);
   assert.equal(
@@ -1249,15 +1481,15 @@ test('重复明细按出现顺序更新，超出新增，缺少保留，采购�
   assert.equal(saved.find((row) => row.id === other.id).productName, 'B1');
   assert.ok(blankIds.every((id) => saved.some((row) => row.id === id)));
   const again = await preview([
-    [number, identityChannels[0], '', '更新1', ''],
-    [number, identityChannels[0], '', '更新2', ''],
-    [number, identityChannels[0], '', '新增3', ''],
+    [number, identityChannels[0], '同SKU', '更新1', ''],
+    [number, identityChannels[0], '同SKU', '更新2', ''],
+    [number, identityChannels[0], '同SKU', '新增3', ''],
   ]);
   assert.deepEqual([again.data.added, again.data.updated], [0, 3]);
   assert.equal((await request(`/api/imports/${again.data.id}/commit`, 'POST')).status, 200);
-  const less = await preview([[number, identityChannels[0], '', '仅第一条变化', '']]);
+  const less = await preview([[number, identityChannels[0], '同SKU', '仅第一条变化', '']]);
   assert.equal((await request(`/api/imports/${less.data.id}/commit`, 'POST')).status, 200);
-  assert.equal((await items()).length, 5);
+  assert.equal((await items()).length, 6);
   assert.equal((await items()).find((row) => row.id === a[1].id).productName, '更新2');
   // 已有重复组合中的某一条仍可单独编辑。
   const current = (await request(`/api/orders/${a[1].id}`)).data;
@@ -1272,8 +1504,8 @@ test('重复明细按出现顺序更新，超出新增，缺少保留，采购�
   );
   // 后面的重复行发生版本冲突时，前面的更新也必须回滚。
   const stale = await preview([
-    [number, identityChannels[0], '', '不得写入', ''],
-    [number, identityChannels[0], '', '旧预览', ''],
+    [number, identityChannels[0], '同SKU', '不得写入', ''],
+    [number, identityChannels[0], '同SKU', '旧预览', ''],
   ]);
   const changed = (await request(`/api/orders/${a[1].id}`)).data;
   assert.equal(
@@ -1290,30 +1522,30 @@ test('重复明细按出现顺序更新，超出新增，缺少保留，采购�
   // 两个预览都准备新增同一组合时，后提交者必须重新预览。
   const combined = `${identityChannels[0]}/${identityChannels[1]}`;
   const p1 = await preview([
-    [number, combined, '', '组合1', ''],
-    [number, combined, '', '组合2', ''],
+    [number, combined, '竞争SKU', '组合1', ''],
+    [number, combined, '竞争SKU', '组合2', ''],
   ]);
   const p2 = await preview([
-    [number, combined, '', '组合1', ''],
-    [number, combined, '', '组合2', ''],
+    [number, combined, '竞争SKU', '组合1', ''],
+    [number, combined, '竞争SKU', '组合2', ''],
   ]);
   assert.equal((await request(`/api/imports/${p1.data.id}/commit`, 'POST')).status, 200);
   assert.equal((await request(`/api/imports/${p2.data.id}/commit`, 'POST')).status, 409);
   const reversed = await preview([
-    [number, `${identityChannels[1]}/${identityChannels[0]}`, '', '组合更新1', ''],
-    [number, combined, '', '组合更新2', ''],
+    [number, `${identityChannels[1]}/${identityChannels[0]}`, '竞争SKU', '组合更新1', ''],
+    [number, combined, '竞争SKU', '组合更新2', ''],
   ]);
   assert.deepEqual([reversed.data.added, reversed.data.updated], [0, 2]);
 });
 
-test('空渠道补全后重复导入更新原明细，多出新增，异渠道隔离，冲突回滚', async () => {
+test('空 SKU 和店铺的组合改渠道仍更新，SKU 不同新增，竞争预览回滚', async () => {
   const number = `${prefix}-EMPTY-FALLBACK`;
   orderNumbers.push(number);
   const preview = (rows) =>
     previewRows(
-      ['订单号', '采购渠道', '商品名称', '采购备注'],
+      ['订单号', '采购渠道', '商品名称', '采购备注', 'SKU'],
       rows.map((values) => [number, ...values]),
-      ['orderNumber', 'purchaseChannel', 'productName', 'purchaseNote'],
+      ['orderNumber', 'purchaseChannel', 'productName', 'purchaseNote', 'sku'],
     );
   const commit = async (p) => {
     assert.equal(p.data.errorCount, 0, JSON.stringify(p.data.errors));
@@ -1361,11 +1593,13 @@ test('空渠道补全后重复导入更新原明细，多出新增，异渠道�
   ]);
   assert.deepEqual([again.data.updated, again.data.added], [2, 0]);
   await commit(again);
-  const otherChannel = await preview([[identityChannels[1], '其他渠道', '']]);
+  const changedChannel = await preview([[identityChannels[1], '更换渠道', '']]);
+  assert.equal(changedChannel.data.rows[0].expectedId, original.id);
+  await commit(changedChannel);
+  const otherChannel = await preview([[identityChannels[1], '其他商品', '', '其他SKU']]);
   assert.deepEqual([otherChannel.data.updated, otherChannel.data.added], [0, 1]);
   await commit(otherChannel);
-  await commit(await preview([['', '无渠道旧明细', '']]));
-  const blank = (await items()).find((r) => !r.purchaseChannel?.length);
+  const blank = (await items()).find((r) => r.id === original.id);
   const combined = identityChannels.join('/');
   const p1 = await preview([[combined, '竞争1', '']]);
   const p2 = await preview([[combined, '竞争2', '']]);
@@ -1374,7 +1608,7 @@ test('空渠道补全后重复导入更新原明细，多出新增，异渠道�
   await commit(p1);
   assert.equal((await request(`/api/imports/${p2.data.id}/commit`, 'POST')).status, 409);
   saved = await items();
-  assert.equal(saved.length, 4);
+  assert.equal(saved.length, 3);
   assert.equal(saved.find((r) => r.id === blank.id).productName, '竞争1');
 });
 
@@ -1800,4 +2034,60 @@ test('未出跟踪号提醒筛选在分页之前完成，包含统计并排除�
     }
     assert.deepEqual(numbers.sort(), indexes.map((i) => `${group}-${i}`).sort());
   }
+});
+
+test('订单导出忽略分页，按筛选或勾选明细生成 Excel', async () => {
+  const group = `${prefix}-EXPORT`;
+  const items = [];
+  for (const [index, shopName] of ['导出店铺A', '导出店铺A', '导出店铺B'].entries()) {
+    const orderNumber = `${group}-${index}`;
+    orderNumbers.push(orderNumber);
+    const created = await request('/api/orders', 'POST', {
+      fields: { orderNumber, sku: `EXPORT-SKU-${index}`, shopName },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+    items.push(created.data);
+  }
+
+  async function download(body) {
+    const response = await fetch(`${base}/api/orders/export`, {
+      method: 'POST',
+      headers: {
+        Cookie: cookie,
+        Origin: 'http://localhost:5173',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-CSRF-Token': csrf,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (response.status !== 200)
+      assert.fail(`导出失败：${response.status} ${await response.text()}`);
+    assert.match(response.headers.get('content-type'), /spreadsheetml/);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
+    const sheet = workbook.getWorksheet('订单明细');
+    const orderColumn = sheet.getRow(1).values.indexOf('订单号');
+    return Array.from(
+      { length: sheet.rowCount - 1 },
+      (_, index) => sheet.getRow(index + 2).getCell(orderColumn).value,
+    );
+  }
+
+  const all = await download({ filters: { q: group, page: 1, pageSize: 1 } });
+  assert.deepEqual(all.sort(), items.map((item) => item.orderNumber).sort());
+  const filtered = await download({ filters: { q: group, shopName: '导出店铺A' } });
+  assert.deepEqual(
+    filtered.sort(),
+    items
+      .slice(0, 2)
+      .map((item) => item.orderNumber)
+      .sort(),
+  );
+  const selected = await download({
+    filters: { q: group, shopName: '导出店铺A' },
+    ids: [items[1].id],
+  });
+  assert.deepEqual(selected, [items[1].orderNumber]);
+  assert.equal((await request('/api/orders/export', 'POST', { ids: ['bad'] })).status, 400);
 });

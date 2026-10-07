@@ -5,6 +5,18 @@ import { createExclusiveTask } from '../utils/exclusive-task.js';
 export function createImportsRouter() {
   const router = Router();
   const runImport = createExclusiveTask();
+  router.post('/orders/preview', async (req, res) =>
+    res.json(await runImport(() => prepareImport(req.body, req.user, 'order'))),
+  );
+  router.post('/purchases/preview', async (req, res) =>
+    res.json(await runImport(() => prepareImport(req.body, req.user, 'purchase'))),
+  );
+  router.post('/orders/:id/commit', async (req, res) =>
+    res.json(await runImport(() => commitImport(req.params.id, req.user, 'order'))),
+  );
+  router.post('/purchases/:id/commit', async (req, res) =>
+    res.json(await runImport(() => commitImport(req.params.id, req.user, 'purchase'))),
+  );
   router.post('/preview', async (req, res) =>
     res.json(await runImport(() => prepareImport(req.body, req.user))),
   );

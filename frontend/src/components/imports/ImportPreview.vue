@@ -1,7 +1,11 @@
 <script setup>
 import { Check } from '@element-plus/icons-vue';
 import { useMeta } from '../../stores/meta';
-defineProps({ preview: { type: Object, required: true }, busy: Boolean });
+defineProps({
+  preview: { type: Object, required: true },
+  busy: Boolean,
+  kind: { type: String, default: 'order' },
+});
 const emit = defineEmits(['back', 'reset', 'commit']);
 const meta = useMeta();
 </script>
@@ -14,8 +18,11 @@ const meta = useMeta();
       :title="`模板绑定渠道：${preview.purchaseChannel}。Excel 非空渠道优先，空白或未映射时使用模板渠道。`"
     />
     <div class="preview-stats">
-      <div>
+      <div v-if="kind === 'order'">
         <span>新增商品明细</span><strong class="success-text">{{ preview.added }}</strong>
+      </div>
+      <div v-else>
+        <span>上传文件</span><strong>{{ preview.sources?.length || 1 }}</strong>
       </div>
       <div>
         <span>更新已有明细</span><strong>{{ preview.updated }}</strong>
@@ -35,7 +42,11 @@ const meta = useMeta();
       :closable="false"
     /><el-alert
       v-else
-      title="预览通过。优先按订单号＋采购渠道匹配，再按订单号匹配剩余的无渠道旧明细。重复行按文件出现顺序更新（旧明细按创建顺序），每条旧明细只更新一次；多出行新增，原有多出明细保留。仅更新非空的已映射字段。"
+      :title="
+        kind === 'purchase'
+          ? '预览通过。采购字段仅更新匹配的已有商品明细，未填写的字段保留原值。'
+          : '预览通过。按订单号＋SKU＋店铺名匹配；多出的商品明细会新增。仅更新非空的已映射字段。'
+      "
       type="success"
       show-icon
       :closable="false"
@@ -44,14 +55,18 @@ const meta = useMeta();
       :data="preview.errors"
       max-height="220"
       class="errors-table"
-      ><el-table-column label="Excel 行" prop="row" width="90" /><el-table-column
+      ><el-table-column
+        v-if="kind === 'purchase'"
+        label="文件"
+        prop="sourceName"
+        min-width="170" /><el-table-column label="Excel 行" prop="row" width="90" /><el-table-column
         label="字段"
         prop="label"
         width="150" /><el-table-column label="错误原因" prop="message" /></el-table
     ><el-alert
       v-for="(warning, index) in preview.warnings"
       :key="index"
-      :title="`第 ${warning.row} 行：${warning.message}`"
+      :title="`${warning.sourceName ? `${warning.sourceName} · ` : ''}第 ${warning.row} 行：${warning.message}`"
       type="warning"
       :closable="false"
       class="warning-row"
@@ -61,13 +76,23 @@ const meta = useMeta();
       <span class="muted">共 {{ preview.total }} 条，显示前 {{ preview.previewLimit }} 条</span>
     </div>
     <el-table :data="preview.rows" max-height="400"
-      ><el-table-column label="Excel 行" prop="rowNumber" width="90" /><el-table-column
+      ><el-table-column
+        v-if="kind === 'purchase'"
+        label="文件"
+        prop="sourceName"
+        min-width="170"
+      /><el-table-column label="Excel 行" prop="rowNumber" width="90" /><el-table-column
         label="操作"
         width="90"
         ><template #default="{ row }"
-          ><el-tag :type="row.action === 'create' ? 'success' : 'warning'">{{
-            row.action === 'create' ? '新增' : '更新'
-          }}</el-tag></template
+          ><el-tag
+            :type="
+              row.action === 'create' ? 'success' : row.action === 'missing' ? 'danger' : 'warning'
+            "
+            >{{
+              row.action === 'create' ? '新增' : row.action === 'missing' ? '未匹配' : '更新'
+            }}</el-tag
+          ></template
         ></el-table-column
       ><el-table-column label="订单号" prop="patch.orderNumber" min-width="170" /><el-table-column
         label="SKU"
@@ -108,7 +133,9 @@ const meta = useMeta();
       ></el-table
     >
     <div class="stage-actions">
-      <el-button @click="emit('back')">返回调整映射</el-button
+      <el-button @click="emit('back')">{{
+        kind === 'purchase' ? '返回上传区' : '返回调整映射'
+      }}</el-button
       ><el-button v-if="preview.errorCount" @click="emit('reset')" type="primary"
         >重新上传文件</el-button
       ><el-button v-else type="primary" :loading="busy" :icon="Check" @click="emit('commit')"

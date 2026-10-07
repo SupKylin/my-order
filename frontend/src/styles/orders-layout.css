@@ -40,6 +40,12 @@
   width: 145px;
   flex: 0 0 auto;
 }
+.orders-filters .el-select[aria-label='店铺多选筛选'] {
+  width: 185px;
+}
+.batch-order-dialog {
+  max-width: calc(100vw - 32px);
+}
 .orders-filters .shipping-warning-filter {
   width: 205px;
 }

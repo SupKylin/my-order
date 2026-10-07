@@ -34,6 +34,7 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
       :aria-label="`价格系数${factorLabels[row.priceFactorLevel]}`"
       >{{ factorLabels[row.priceFactorLevel] }}</span
     >
+    <span v-if="row.afterSales === '是'" class="after-sales-badge">售后</span>
   </div>
   <template v-else-if="field.type === 'image'">
     <el-image
@@ -97,7 +98,11 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
     rel="noopener noreferrer"
     >{{ value }}</a
   >
-  <span v-else :class="{ mono: ['orderNumber', 'sku', 'trackingNumber'].includes(field.key) }">{{
-    value ?? '—'
-  }}</span>
+  <span
+    v-else
+    :class="{
+      mono: ['orderNumber', 'sku', 'trackingNumber', 'platformTrackingNumber'].includes(field.key),
+    }"
+    >{{ value ?? '—' }}</span
+  >
 </template>

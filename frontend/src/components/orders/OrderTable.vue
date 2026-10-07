@@ -1,21 +1,18 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { Upload } from '@element-plus/icons-vue';
-import { useMeta } from '../../stores/meta';
 import { shippingWarning } from '../../utils/shippingWarning';
-import { orderColumns } from './orderColumns';
 import OrderCell from './OrderCell.vue';
 import ProductDetails from './ProductDetails.vue';
 const props = defineProps({
   rows: { type: Array, required: true },
+  columns: { type: Array, required: true },
   loading: Boolean,
   deleting: Boolean,
   warningNow: { type: Number, required: true },
 });
 const emit = defineEmits(['selection-change', 'edit', 'assign', 'import', 'delete']);
 const table = ref();
-const meta = useMeta();
-const columns = computed(() => orderColumns(meta.fields));
 const warnings = computed(() =>
   Object.fromEntries(
     props.rows.map((row) => [row.id, shippingWarning(row.platformShipDate, props.warningNow)]),

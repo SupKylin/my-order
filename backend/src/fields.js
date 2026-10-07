@@ -33,6 +33,7 @@ export const fields = [
   f('orderNumber', '订单号', 'order', 'text', { required: true }),
   f('orderDate', '出单日期', 'order', 'date'),
   f('platformShipDate', '平台发货日期', 'order', 'date'),
+  f('platformTrackingNumber', '平台发货物流单号', 'order'),
   f('platformDeliveryDate', '平台到货日期', 'order', 'date'),
   f('actualDeliveryDate', '实际到货日期', 'order', 'date'),
   f('orderStatus', '订单状态', 'order', 'select', { options: ORDER_STATUSES }),
