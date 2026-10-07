@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Op } from 'sequelize';
-import { purchaseTimerPatch, isPurchaseSuccess } from '../src/lib/purchase-timer.js';
+import {
+  purchaseTimerPatch,
+  isPurchaseSuccess,
+  PURCHASE_SUCCESS_PATTERN,
+  PURCHASE_UNTRACKED_PATTERN,
+} from '../src/lib/purchase-timer.js';
 import { purchaseWarning, confirmationTime } from '../../frontend/src/utils/purchaseWarning.js';
 import { buildFilters } from '../src/services/orders.js';
 import { serializeItem } from '../src/models.js';
@@ -16,6 +21,34 @@ const row = {
   purchaseConfirmedAt: start.toISOString(),
   trackingNumber: null,
 };
+
+test('SQL 状态正则在 Unicode 和旧版 MySQL 字节匹配下都识别中文状态', () => {
+  const cases = [
+    ['采购成功未出跟踪号', true, true],
+    ['采购成功已出跟踪号', true, false],
+    ['采购成功（未出跟踪号）', true, true],
+    ['采购成功(已出跟踪号)', true, false],
+    ['采购成功 （ 未出跟踪号 ） ', true, true],
+    ['采购成功\t(已出跟踪号)\n', true, false],
+    ['采购失败', false, false],
+    ['采购成功（砍单）', false, false],
+    ['采购成功未已出跟踪号', false, false],
+    ['采购成功未出跟踪号额外文字', false, false],
+  ];
+  for (const byteMatching of [false, true]) {
+    const encode = (value) =>
+      byteMatching ? Buffer.from(value, 'utf8').toString('latin1') : value;
+    for (const [pattern, expectedIndex] of [
+      [PURCHASE_SUCCESS_PATTERN, 1],
+      [PURCHASE_UNTRACKED_PATTERN, 2],
+    ]) {
+      // 用单字节字符串模拟旧引擎，POSIX 空白集合转换为 JS 对应集合。
+      const regexp = new RegExp(encode(pattern).replaceAll('[[:space:]]', '[\\t\\n\\r\\v\\f ]'));
+      for (const entry of cases)
+        assert.equal(regexp.test(encode(entry[0])), entry[expectedIndex], entry[0]);
+    }
+  }
+});
 
 test('采购状态自动启动计时，重复编辑、导入及已出/未出切换保留原时间', () => {
   const entered = purchaseTimerPatch(

@@ -1750,6 +1750,9 @@ test('未出跟踪号提醒筛选在分页之前完成，包含统计并排除�
     [60, '采购成功未出跟踪号', 'TRACKED'],
     [60, '采购失败', null],
     [0, '采购成功已出跟踪号', null],
+    [2, '采购成功（未出跟踪号）', ' \n '],
+    [26, '采购成功 (未出跟踪号)', null],
+    [50, '采购成功（已出跟踪号）', null],
   ];
   for (let i = 0; i < fixtures.length; i++) {
     const [hours, purchaseStatus, trackingNumber] = fixtures[i];
@@ -1758,7 +1761,7 @@ test('未出跟踪号提醒筛选在分页之前完成，包含统计并排除�
     const created = await request('/api/orders', 'POST', {
       fields: {
         orderNumber,
-        purchaseStatus,
+        purchaseStatus: purchaseStatus.replace(/[\s（）()]/g, ''),
         trackingNumber,
         orderAmount: '12',
         platformShipDate: '2026-10-07',
@@ -1766,15 +1769,19 @@ test('未出跟踪号提醒筛选在分页之前完成，包含统计并排除�
     });
     assert.equal(created.status, 201, JSON.stringify(created.data));
     await Purchase.update(
-      { purchaseConfirmedAt: hours ? new Date(now - hours * 3600000) : null },
+      {
+        purchaseStatus,
+        trackingNumber,
+        purchaseConfirmedAt: hours ? new Date(now - hours * 3600000) : null,
+      },
       { where: { itemId: created.data.id } },
     );
   }
   for (const [trackingWarning, indexes] of [
-    ['all', [0, 1, 2, 3]],
-    ['waiting', [0]],
-    ['yellow', [1]],
-    ['red', [2, 3]],
+    ['all', [0, 1, 2, 3, 7, 8, 9]],
+    ['waiting', [0, 7]],
+    ['yellow', [1, 8]],
+    ['red', [2, 3, 9]],
   ]) {
     const numbers = [];
     for (let page = 1; page <= indexes.length; page++) {
