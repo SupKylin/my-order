@@ -33,6 +33,7 @@ import {
 } from '../../frontend/src/mapping.js';
 import { fields } from '../src/fields.js';
 import { money } from '../../frontend/src/utils/format.js';
+import { purchaseWarning } from '../../frontend/src/utils/purchaseWarning.js';
 const prefix = `QA${Date.now()}`;
 const identityChannels = [`${prefix}-渠道B`, `${prefix}-渠道C`];
 let server, base, cookie, csrf, admin, initialUploads, startedAt, reusableTemplateId;
@@ -1655,5 +1656,141 @@ test('三类价格区间筛选支持单端边界，分页与预警统计一致',
     '&minPrice=1',
   ]) {
     assert.equal((await request(`/api/orders?q=${group}${range}`)).status, 400);
+  }
+});
+
+test('采购状态联动自动计时，重复保存和导入保留，填删单号及再次采购按规则处理', async () => {
+  const number = `${prefix}-PURCHASE-TIMER`;
+  orderNumbers.push(number);
+  let result = await request('/api/orders', 'POST', {
+    fields: { orderNumber: number, purchaseStatus: '采购中' },
+  });
+  assert.equal(result.status, 201, JSON.stringify(result.data));
+  let row = result.data;
+  assert.equal(row.purchaseConfirmedAt, null);
+  async function edit(fields) {
+    result = await request(`/api/orders/${row.id}`, 'PUT', {
+      version: row.version,
+      fields: { orderNumber: number, ...fields },
+    });
+    assert.equal(result.status, 200, JSON.stringify(result.data));
+    row = result.data;
+  }
+  const before = Date.now();
+  await edit({ purchaseStatus: '采购成功未出跟踪号' });
+  const first = row.purchaseConfirmedAt;
+  assert.ok(Date.parse(first) >= before && Date.parse(first) <= Date.now());
+  await edit({ purchaseStatus: '采购成功未出跟踪号', purchaseNote: '普通保存' });
+  assert.equal(row.purchaseConfirmedAt, first);
+  const imported = await previewRows(
+    ['订单号', '采购状态'],
+    [[number, '采购成功未出跟踪号']],
+    ['orderNumber', 'purchaseStatus'],
+  );
+  assert.equal(imported.status, 200, JSON.stringify(imported.data));
+  assert.equal((await request(`/api/imports/${imported.data.id}/commit`, 'POST')).status, 200);
+  row = (await request(`/api/orders/${row.id}`)).data;
+  assert.equal(row.purchaseConfirmedAt, first);
+  await edit({ trackingNumber: 'TRACK-TIMER', purchaseStatus: '采购成功已出跟踪号' });
+  assert.equal(row.purchaseConfirmedAt, first);
+  assert.equal(purchaseWarning(row, Date.parse(first) + 50 * 3600000), null);
+  await edit({ trackingNumber: null });
+  assert.equal(row.purchaseConfirmedAt, first);
+  assert.equal(purchaseWarning(row, Date.parse(first) + 50 * 3600000).level, 'red');
+  for (const purchaseStatus of ['采购中', '砍单', '采购失败']) {
+    await edit({ purchaseStatus });
+    assert.equal(row.purchaseConfirmedAt, null);
+    const resumedAt = Date.now();
+    await edit({ purchaseStatus: '采购成功未出跟踪号' });
+    assert.ok(Date.parse(row.purchaseConfirmedAt) >= resumedAt);
+  }
+  const persisted = row.purchaseConfirmedAt;
+  const conflict = await request(`/api/orders/${row.id}`, 'PUT', {
+    version: row.version - 1,
+    fields: { orderNumber: number, purchaseStatus: '采购失败' },
+  });
+  assert.equal(conflict.status, 409);
+  assert.equal((await request(`/api/orders/${row.id}`)).data.purchaseConfirmedAt, persisted);
+  assert.equal(
+    (
+      await request(`/api/orders/${row.id}`, 'PUT', {
+        version: row.version,
+        fields: { orderNumber: number, purchaseConfirmedAt: '2020-01-01' },
+      })
+    ).status,
+    400,
+  );
+  const resetImport = await previewRows(
+    ['订单号', '采购状态'],
+    [[number, '采购失败']],
+    ['orderNumber', 'purchaseStatus'],
+  );
+  assert.equal((await request(`/api/imports/${resetImport.data.id}/commit`, 'POST')).status, 200);
+  assert.equal((await request(`/api/orders/${row.id}`)).data.purchaseConfirmedAt, null);
+  const retryImport = await previewRows(
+    ['订单号', '采购状态'],
+    [[number, '采购成功未出跟踪号']],
+    ['orderNumber', 'purchaseStatus'],
+  );
+  const committedAt = Date.now();
+  assert.equal((await request(`/api/imports/${retryImport.data.id}/commit`, 'POST')).status, 200);
+  assert.ok(
+    Date.parse((await request(`/api/orders/${row.id}`)).data.purchaseConfirmedAt) >= committedAt,
+  );
+});
+
+test('未出跟踪号提醒筛选在分页之前完成，包含统计并排除已有单号及非成功状态', async () => {
+  const group = `${prefix}-TRACK-FILTER`;
+  const now = Date.now();
+  const fixtures = [
+    [1, '采购成功未出跟踪号', null],
+    [25, '采购成功未出跟踪号', null],
+    [49, '采购成功未出跟踪号', null],
+    [50, '采购成功已出跟踪号', null],
+    [60, '采购成功未出跟踪号', 'TRACKED'],
+    [60, '采购失败', null],
+    [0, '采购成功已出跟踪号', null],
+  ];
+  for (let i = 0; i < fixtures.length; i++) {
+    const [hours, purchaseStatus, trackingNumber] = fixtures[i];
+    const orderNumber = `${group}-${i}`;
+    orderNumbers.push(orderNumber);
+    const created = await request('/api/orders', 'POST', {
+      fields: {
+        orderNumber,
+        purchaseStatus,
+        trackingNumber,
+        orderAmount: '12',
+        platformShipDate: '2026-10-07',
+      },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+    await Purchase.update(
+      { purchaseConfirmedAt: hours ? new Date(now - hours * 3600000) : null },
+      { where: { itemId: created.data.id } },
+    );
+  }
+  for (const [trackingWarning, indexes] of [
+    ['all', [0, 1, 2, 3]],
+    ['waiting', [0]],
+    ['yellow', [1]],
+    ['red', [2, 3]],
+  ]) {
+    const numbers = [];
+    for (let page = 1; page <= indexes.length; page++) {
+      const result = await request(
+        `/api/orders?q=${group}&trackingWarning=${trackingWarning}&priceType=orderAmount&minPrice=12&maxPrice=12&pageSize=1&page=${page}`,
+      );
+      assert.equal(result.status, 200, JSON.stringify(result.data));
+      assert.equal(result.data.total, indexes.length);
+      assert.equal(result.data.rows.length, 1);
+      assert.ok(Math.abs(Date.now() - Date.parse(result.data.serverNow)) < 5000);
+      assert.equal(
+        result.data.shippingDates.reduce((n, entry) => n + entry.count, 0),
+        indexes.length,
+      );
+      numbers.push(result.data.rows[0].orderNumber);
+    }
+    assert.deepEqual(numbers.sort(), indexes.map((i) => `${group}-${i}`).sort());
   }
 });

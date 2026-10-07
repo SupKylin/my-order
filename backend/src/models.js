@@ -100,6 +100,7 @@ export const Purchase = db.define(
     ...attrs('purchase'),
     assignedTo: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
     assignedAt: { type: DataTypes.DATE, allowNull: true },
+    purchaseConfirmedAt: { type: DataTypes.DATE(3), allowNull: true },
   },
   { tableName: 'purchases' },
 );
@@ -205,6 +206,7 @@ export function serializeItem(instance) {
     assignedAt: value.purchase?.assignedAt || null,
     assignee: value.purchase?.assignee || null,
     priceFactorLevel: priceFactorLevel(value.purchase?.priceFactor),
+    purchaseConfirmedAt: value.purchase?.purchaseConfirmedAt || null,
   };
   for (const f of fields) {
     if (f.key === 'orderNumber') continue;

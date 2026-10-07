@@ -28,10 +28,20 @@ export function useOrders() {
   const stats = reactive({ total: 0, unassigned: 0, inProgress: 0, afterSales: 0, shops: [] });
   const shippingDates = ref([]);
   const warningNow = ref(Date.now());
+  let serverClock = null;
+  const tickClock = () => {
+    warningNow.value = serverClock
+      ? serverClock.time + (performance.now() - serverClock.received)
+      : Date.now();
+  };
   const shippingCounts = computed(() =>
     countShippingWarnings(shippingDates.value, warningNow.value),
   );
   let warningTimer;
+  const syncAfterResume = () => {
+    if (!document.hidden && !loading.value && !editor.value && !selected.value.length)
+      load().catch(() => {});
+  };
   const filters = reactive({
     q: '',
     shopName: '',
@@ -50,6 +60,7 @@ export function useOrders() {
     shipStartDate: '',
     shipEndDate: '',
     shippingWarning: '',
+    trackingWarning: '',
     page: 1,
     pageSize: 20,
   });
@@ -62,6 +73,10 @@ export function useOrders() {
     loading.value = true;
     try {
       const result = await orderApi.list({ ...filters, afterSales: afterSales.value });
+      if (result.serverNow) {
+        serverClock = { time: Date.parse(result.serverNow), received: performance.now() };
+        tickClock();
+      }
       rows.value = result.rows;
       total.value = result.total;
       shippingDates.value = result.shippingDates || [];
@@ -97,6 +112,7 @@ export function useOrders() {
       shipStartDate: '',
       shipEndDate: '',
       shippingWarning: '',
+      trackingWarning: '',
       page: 1,
     });
     dates.value = [];
@@ -196,14 +212,18 @@ export function useOrders() {
   );
   onMounted(async () => {
     // 数量和明细颜色共用时钟，跨过截止时间时一起更新，无需再次请求全部记录。
-    warningTimer = setInterval(() => (warningNow.value = Date.now()), 1000);
+    warningTimer = setInterval(tickClock, 1000);
+    document.addEventListener('visibilitychange', syncAfterResume);
     await meta.load();
     users.value = await userApi.list();
     // 兼容旧采购分配页面书签，重定向后仍可查看待分配记录。
     if (route.query.assignedTo === 'unassigned') filters.assignedTo = 'unassigned';
     await refresh();
   });
-  onUnmounted(() => clearInterval(warningTimer));
+  onUnmounted(() => {
+    clearInterval(warningTimer);
+    document.removeEventListener('visibilitychange', syncAfterResume);
+  });
 
   return {
     router,

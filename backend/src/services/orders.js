@@ -16,6 +16,11 @@ import { getFieldDefinitions } from './dictionaries.js';
 import { channelKey } from '../lib/order-identity.js';
 import { priceFactorPatterns } from '../lib/price-factor.js';
 import { shippingWindow } from '../lib/shipping-window.js';
+import {
+  purchaseTimerPatch,
+  PURCHASE_SUCCESS_PATTERN,
+  PURCHASE_UNTRACKED_PATTERN,
+} from '../lib/purchase-timer.js';
 /** 返回前端使用的商品明细快照，不向前端泄露模型关联结构。 */
 export async function getItem(id) {
   const item = await OrderItem.findByPk(id, { include: itemInclude });
@@ -81,8 +86,9 @@ export async function upsertImported(patch, transaction, actor, target = undefin
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
-    if (procurement) await procurement.update(parts.purchase, { transaction });
-    else await Purchase.create({ itemId: existing.id, ...parts.purchase }, { transaction });
+    const purchasePatch = purchaseTimerPatch(procurement, parts.purchase);
+    if (procurement) await procurement.update(purchasePatch, { transaction });
+    else await Purchase.create({ itemId: existing.id, ...purchasePatch }, { transaction });
     return { created: false, id: existing.id };
   }
   const item = await OrderItem.create(
@@ -91,7 +97,12 @@ export async function upsertImported(patch, transaction, actor, target = undefin
   );
   // 采购人员只取已认证的当前账号，不能由上传文件或客户端指定。
   await Purchase.create(
-    { itemId: item.id, ...parts.purchase, assignedTo: actor.id, assignedAt: new Date() },
+    {
+      itemId: item.id,
+      ...purchaseTimerPatch(null, parts.purchase),
+      assignedTo: actor.id,
+      assignedAt: new Date(),
+    },
     { transaction },
   );
   return { created: true, id: item.id };
@@ -203,6 +214,36 @@ export function buildFilters(query, now = Date.now()) {
     // 和手填发货日期、价格等级等条件取交集，空发货日期不匹配。
     where[Op.and] = [...(where[Op.and] || []), { platformShipDate: dates }];
   }
+  if (query.trackingWarning) {
+    assert(
+      ['all', 'waiting', 'yellow', 'red'].includes(query.trackingWarning),
+      '未出跟踪号筛选无效',
+    );
+    const conditions = [
+      sqlWhere(col('purchase.purchaseStatus'), { [Op.regexp]: PURCHASE_SUCCESS_PATTERN }),
+      {
+        [Op.or]: [
+          { '$purchase.purchaseConfirmedAt$': { [Op.ne]: null } },
+          sqlWhere(col('purchase.purchaseStatus'), { [Op.regexp]: PURCHASE_UNTRACKED_PATTERN }),
+        ],
+      },
+      {
+        [Op.or]: [
+          { '$purchase.trackingNumber$': null },
+          sqlWhere(col('purchase.trackingNumber'), { [Op.regexp]: '^[[:space:]]*$' }),
+        ],
+      },
+    ];
+    const hour = 60 * 60 * 1000;
+    const ranges = {
+      waiting: { [Op.gt]: new Date(now - 24 * hour) },
+      yellow: { [Op.gt]: new Date(now - 48 * hour), [Op.lte]: new Date(now - 24 * hour) },
+      red: { [Op.lte]: new Date(now - 48 * hour) },
+    };
+    if (query.trackingWarning !== 'all')
+      conditions.push({ '$purchase.purchaseConfirmedAt$': ranges[query.trackingWarning] });
+    where[Op.and] = [...(where[Op.and] || []), ...conditions];
+  }
   const include = [itemInclude[0], { ...itemInclude[1], where: purchaseWhere, required: true }];
   return { where, include };
 }
@@ -210,7 +251,8 @@ export async function listOrders(query) {
   const page = Math.max(1, Number(query.page) || 1),
     pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 20));
   // 单次查询使用同一时间点，避免跨截止时间时分页与统计条件不同。
-  const filters = buildFilters(query);
+  const now = Date.now();
+  const filters = buildFilters(query, now);
   const result = await OrderItem.findAndCountAll({
     ...filters,
     limit: pageSize,
@@ -232,6 +274,7 @@ export async function listOrders(query) {
     raw: true,
   });
   return {
+    serverNow: new Date().toISOString(),
     rows: result.rows.map(serializeItem),
     total: result.count,
     page,
@@ -294,7 +337,7 @@ export async function editItem(id, input, user) {
       defaults: parts.purchase,
       transaction: t,
     });
-    await purchase.update(parts.purchase, { transaction: t });
+    await purchase.update(purchaseTimerPatch(currentPurchase, parts.purchase), { transaction: t });
     await AuditLog.create(
       {
         userId: user.id,

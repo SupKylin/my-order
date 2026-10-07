@@ -116,6 +116,18 @@ const {
         </div>
         <div class="filter-bar filter-secondary">
           <el-select
+            v-model="filters.trackingWarning"
+            placeholder="未出跟踪号"
+            aria-label="未出跟踪号筛选"
+            clearable
+            @change="search"
+          >
+            <el-option label="未出跟踪号（全部）" value="all" />
+            <el-option label="待填单号（不足24小时）" value="waiting" />
+            <el-option label="黄色提醒（24至48小时）" value="yellow" />
+            <el-option label="强制处理（满48小时）" value="red" />
+          </el-select>
+          <el-select
             v-model="filters.shippingWarning"
             placeholder="全部发货预警"
             aria-label="发货预警筛选"

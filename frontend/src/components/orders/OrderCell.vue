@@ -4,11 +4,14 @@ import { useMeta } from '../../stores/meta';
 import { fmtDate, money } from '../../utils/format';
 import { PLATFORM_TIME_LABEL } from '../../utils/businessTime';
 import { shippingWarningLabels } from '../../utils/shippingWarning';
+import { purchaseWarning, confirmationTime } from '../../utils/purchaseWarning';
 const props = defineProps({
   row: { type: Object, required: true },
   field: { type: Object, required: true },
   warning: String,
+  now: Number,
 });
+const trackingWarning = computed(() => purchaseWarning(props.row, props.now));
 const meta = useMeta();
 const value = computed(() => props.row[props.field.key]);
 const factorLabels = { low: '低', medium: '平', high: '高' };
@@ -55,9 +58,20 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
       >{{ shippingWarningLabels[warning] }}</span
     >
   </template>
-  <el-tag v-else-if="field.key === 'purchaseStatus'" :type="purchaseTag" effect="light" round>{{
-    value || '待填写'
-  }}</el-tag>
+  <div v-else-if="field.key === 'purchaseStatus'" class="purchase-status-cell">
+    <el-tag :type="purchaseTag" effect="light" round>{{ value || '待填写' }}</el-tag>
+    <span
+      v-if="trackingWarning"
+      class="purchase-wait-badge"
+      :class="`purchase-wait-${trackingWarning.level}`"
+      :title="
+        row.purchaseConfirmedAt
+          ? `采购成功时间：${confirmationTime(row.purchaseConfirmedAt)}（北京时间）；连续计时，含夜间和周末`
+          : '状态计时尚未初始化，请联系管理员完成升级'
+      "
+      >{{ trackingWarning.text }}</span
+    >
+  </div>
   <template v-else-if="field.type === 'assignee'">
     <span v-if="row.assignee" class="person-cell"
       ><i>{{ row.assignee.username.slice(0, 1) }}</i

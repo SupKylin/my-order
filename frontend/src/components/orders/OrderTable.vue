@@ -49,11 +49,12 @@ defineExpose({ clearSelection: () => table.value?.clearSelection() });
       :fixed="field.fixed"
       :align="field.type === 'money' ? 'right' : 'left'"
       :show-overflow-tooltip="
-        !['image', 'assignee'].includes(field.type) && field.key !== 'platformShipDate'
+        !['image', 'assignee'].includes(field.type) &&
+        !['platformShipDate', 'purchaseStatus'].includes(field.key)
       "
     >
       <template #default="{ row }"
-        ><OrderCell :row="row" :field="field" :warning="warnings[row.id]"
+        ><OrderCell :row="row" :field="field" :warning="warnings[row.id]" :now="warningNow"
       /></template>
     </el-table-column>
     <el-table-column label="操作" fixed="right" width="180"
