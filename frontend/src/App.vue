@@ -82,7 +82,7 @@ async function signOut() {
           ></el-button>
         </div>
       </aside>
-      <div class="workspace">
+      <div class="workspace" :class="{ 'workspace-orders': route.path === '/orders' }">
         <header class="topbar">
           <span class="breadcrumb"
             >工作空间 <el-icon><ArrowRight /></el-icon>

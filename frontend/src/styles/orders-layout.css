@@ -1,0 +1,100 @@
+/* 订单页优先为表格分配空间；保留现有主题、字号、行高和控件。 */
+.workspace-orders > main {
+  max-width: none;
+  padding: 10px 12px 6px;
+}
+.workspace-orders > .topbar {
+  height: 52px;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+.workspace-orders > footer {
+  padding-top: 4px;
+  padding-bottom: 6px;
+}
+.workspace-orders .shipping-legend {
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.workspace-orders .orders-panel > .panel-heading {
+  padding: 10px 14px;
+  gap: 8px;
+}
+.workspace-orders .panel-heading p {
+  margin-top: 4px;
+}
+.orders-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+}
+.orders-filters > .filter-bar {
+  display: contents;
+}
+.orders-filters .search-input {
+  flex: 1 1 250px;
+}
+.orders-filters .el-select {
+  width: 145px;
+  flex: 0 0 auto;
+}
+.orders-filters .shipping-warning-filter {
+  width: 205px;
+}
+.orders-filters .el-date-editor {
+  flex: 0 1 285px;
+  min-width: 245px;
+}
+.orders-filters .el-button + .el-button {
+  margin-left: 0;
+}
+.workspace-orders .table-footer {
+  padding: 8px 14px;
+  gap: 8px;
+}
+.workspace-orders .expanded-product {
+  padding: 20px 24px;
+}
+.workspace-orders .expanded-content {
+  max-width: none;
+}
+@media (max-width: 900px) {
+  .workspace-orders > .topbar {
+    height: auto;
+    min-height: 52px;
+  }
+  .workspace-orders .order-table-region {
+    height: 65vh;
+    height: 65dvh;
+  }
+}
+@media (max-width: 640px) {
+  .workspace-orders > main {
+    padding: 8px 8px 6px;
+  }
+  .orders-filters {
+    padding: 8px;
+  }
+  .orders-filters .search-input {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+  .orders-filters .el-select,
+  .orders-filters .el-date-editor {
+    min-width: 0;
+    max-width: 100%;
+    flex: 1 1 145px;
+  }
+  .orders-filters .el-date-editor {
+    flex-basis: 245px;
+  }
+  .orders-filters .price-range-inputs {
+    width: 100%;
+  }
+  .orders-filters .price-range-inputs > .el-input {
+    width: 0;
+    flex: 1;
+  }
+}

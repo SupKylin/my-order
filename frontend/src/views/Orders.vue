@@ -84,126 +84,128 @@ const {
           >
         </div>
       </div>
-      <div class="filter-bar">
-        <el-input
-          v-model="filters.q"
-          :prefix-icon="Search"
-          clearable
-          placeholder="搜索订单号、SKU、商品或物流单号"
-          class="search-input"
-          @keyup.enter="search"
-        /><el-select v-model="filters.shopName" placeholder="全部店铺" clearable filterable
-          ><el-option
-            v-for="shop in stats.shops"
-            :key="shop"
-            :label="shop"
-            :value="shop" /></el-select
-        ><el-select v-model="filters.purchaseStatus" placeholder="采购状态" clearable
-          ><el-option
-            v-for="status in meta.fieldMap.purchaseStatus?.options"
-            :key="status"
-            :label="status"
-            :value="status" /></el-select
-        ><el-select v-model="filters.assignedTo" placeholder="全部采购人员" clearable
-          ><el-option label="待分配" value="unassigned" /><el-option
-            v-for="user in users.filter((u) => u.active)"
-            :key="user.id"
-            :label="`${user.username} · ${user.displayName}`"
-            :value="user.id" /></el-select
-        ><el-button type="primary" plain :icon="Search" @click="search">查询</el-button
-        ><el-button text @click="reset">重置</el-button>
-      </div>
-      <div class="filter-bar filter-secondary">
-        <el-select
-          v-model="filters.shippingWarning"
-          placeholder="全部发货预警"
-          aria-label="发货预警筛选"
-          class="shipping-warning-filter"
-          clearable
-          @change="search"
-        >
-          <el-option label="24小时内发货（橙色）" value="orange" />
-          <el-option label="已逾期（红色）" value="red" />
-        </el-select>
-        <el-select
-          v-model="filters.priceFactorLevel"
-          placeholder="价格系数等级"
-          aria-label="价格系数等级"
-          clearable
-          @change="search"
-        >
-          <el-option label="低（< 0.8）" value="low" />
-          <el-option label="平（0.8 ≤ 系数 < 0.85）" value="medium" />
-          <el-option label="高（≥ 0.85）" value="high" />
-        </el-select>
-        <el-select v-model="filters.purchaseChannel" placeholder="采购渠道" clearable filterable>
-          <el-option
-            v-for="channel in meta.fieldMap.purchaseChannel?.options"
-            :key="channel"
-            :label="channel"
-            :value="channel"
-          />
-        </el-select>
-        <el-select v-model="filters.orderStatus" placeholder="订单状态" clearable
-          ><el-option
-            v-for="status in meta.fieldMap.orderStatus?.options"
-            :key="status"
-            :label="status"
-            :value="status" /></el-select
-        ><el-select v-model="filters.allocatable" placeholder="是否可分配" clearable
-          ><el-option label="是" value="是" /><el-option label="否" value="否" /></el-select
-        ><el-select v-model="filters.settlement" placeholder="结算情况" clearable
-          ><el-option label="已结算" value="已结算" /><el-option
-            label="未结算"
-            value="未结算" /></el-select
-        ><el-date-picker
-          v-model="dates"
-          type="daterange"
-          value-format="YYYY-MM-DD"
-          start-placeholder="出单开始日期"
-          end-placeholder="出单结束日期"
-          range-separator="至"
-        /><el-date-picker
-          v-model="shipDates"
-          type="daterange"
-          value-format="YYYY-MM-DD"
-          start-placeholder="平台发货开始日期"
-          end-placeholder="平台发货结束日期"
-          range-separator="至"
-        /><el-button
-          text
-          type="primary"
-          @click="
-            filters.assignedTo = auth.user.id;
-            search();
-          "
-          >只看分配给我的</el-button
-        >
-      </div>
-      <div class="filter-bar filter-price">
-        <el-select v-model="filters.priceType" aria-label="价格类型">
-          <el-option label="商品价格" value="purchaseLinkAmount" />
-          <el-option label="订单金额" value="orderAmount" />
-          <el-option label="采购限价" value="purchaseLimit" />
-        </el-select>
-        <div class="price-range-inputs">
+      <div class="orders-filters">
+        <div class="filter-bar">
           <el-input
-            v-model="filters.minPrice"
-            aria-label="最低价格"
-            inputmode="decimal"
+            v-model="filters.q"
+            :prefix-icon="Search"
             clearable
-            placeholder="最低价格"
+            placeholder="搜索订单号、SKU、商品或物流单号"
+            class="search-input"
             @keyup.enter="search"
-          />
-          <span class="price-range-separator">至</span>
-          <el-input
-            v-model="filters.maxPrice"
-            aria-label="最高价格"
-            inputmode="decimal"
+          /><el-select v-model="filters.shopName" placeholder="全部店铺" clearable filterable
+            ><el-option
+              v-for="shop in stats.shops"
+              :key="shop"
+              :label="shop"
+              :value="shop" /></el-select
+          ><el-select v-model="filters.purchaseStatus" placeholder="采购状态" clearable
+            ><el-option
+              v-for="status in meta.fieldMap.purchaseStatus?.options"
+              :key="status"
+              :label="status"
+              :value="status" /></el-select
+          ><el-select v-model="filters.assignedTo" placeholder="全部采购人员" clearable
+            ><el-option label="待分配" value="unassigned" /><el-option
+              v-for="user in users.filter((u) => u.active)"
+              :key="user.id"
+              :label="`${user.username} · ${user.displayName}`"
+              :value="user.id" /></el-select
+          ><el-button type="primary" plain :icon="Search" @click="search">查询</el-button
+          ><el-button text @click="reset">重置</el-button>
+        </div>
+        <div class="filter-bar filter-secondary">
+          <el-select
+            v-model="filters.shippingWarning"
+            placeholder="全部发货预警"
+            aria-label="发货预警筛选"
+            class="shipping-warning-filter"
             clearable
-            placeholder="最高价格"
-            @keyup.enter="search"
-          />
+            @change="search"
+          >
+            <el-option label="24小时内发货（橙色）" value="orange" />
+            <el-option label="已逾期（红色）" value="red" />
+          </el-select>
+          <el-select
+            v-model="filters.priceFactorLevel"
+            placeholder="价格系数等级"
+            aria-label="价格系数等级"
+            clearable
+            @change="search"
+          >
+            <el-option label="低（< 0.8）" value="low" />
+            <el-option label="平（0.8 ≤ 系数 < 0.85）" value="medium" />
+            <el-option label="高（≥ 0.85）" value="high" />
+          </el-select>
+          <el-select v-model="filters.purchaseChannel" placeholder="采购渠道" clearable filterable>
+            <el-option
+              v-for="channel in meta.fieldMap.purchaseChannel?.options"
+              :key="channel"
+              :label="channel"
+              :value="channel"
+            />
+          </el-select>
+          <el-select v-model="filters.orderStatus" placeholder="订单状态" clearable
+            ><el-option
+              v-for="status in meta.fieldMap.orderStatus?.options"
+              :key="status"
+              :label="status"
+              :value="status" /></el-select
+          ><el-select v-model="filters.allocatable" placeholder="是否可分配" clearable
+            ><el-option label="是" value="是" /><el-option label="否" value="否" /></el-select
+          ><el-select v-model="filters.settlement" placeholder="结算情况" clearable
+            ><el-option label="已结算" value="已结算" /><el-option
+              label="未结算"
+              value="未结算" /></el-select
+          ><el-date-picker
+            v-model="dates"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            start-placeholder="出单开始日期"
+            end-placeholder="出单结束日期"
+            range-separator="至"
+          /><el-date-picker
+            v-model="shipDates"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            start-placeholder="平台发货开始日期"
+            end-placeholder="平台发货结束日期"
+            range-separator="至"
+          /><el-button
+            text
+            type="primary"
+            @click="
+              filters.assignedTo = auth.user.id;
+              search();
+            "
+            >只看分配给我的</el-button
+          >
+        </div>
+        <div class="filter-bar filter-price">
+          <el-select v-model="filters.priceType" aria-label="价格类型">
+            <el-option label="商品价格" value="purchaseLinkAmount" />
+            <el-option label="订单金额" value="orderAmount" />
+            <el-option label="采购限价" value="purchaseLimit" />
+          </el-select>
+          <div class="price-range-inputs">
+            <el-input
+              v-model="filters.minPrice"
+              aria-label="最低价格"
+              inputmode="decimal"
+              clearable
+              placeholder="最低价格"
+              @keyup.enter="search"
+            />
+            <span class="price-range-separator">至</span>
+            <el-input
+              v-model="filters.maxPrice"
+              aria-label="最高价格"
+              inputmode="decimal"
+              clearable
+              placeholder="最高价格"
+              @keyup.enter="search"
+            />
+          </div>
         </div>
       </div>
       <div v-if="selected.length" class="selection-bar">
