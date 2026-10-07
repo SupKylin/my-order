@@ -4,8 +4,18 @@
   display: flex;
   overflow: hidden;
 }
+.sidebar-hover-zone {
+  --sidebar-width: 230px;
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 10px;
+  z-index: 30;
+}
+.sidebar-hover-zone.is-open {
+  width: var(--sidebar-width);
+}
 .sidebar {
-  width: 230px;
+  width: var(--sidebar-width);
   position: fixed;
   inset: 0 auto 0 0;
   background: #10272f;
@@ -13,7 +23,18 @@
   display: flex;
   flex-direction: column;
   padding: 30px 18px 18px;
-  z-index: 30;
+  transform: translateX(-100%);
+  transition: transform 180ms ease;
+}
+.sidebar-hover-zone.is-open .sidebar {
+  transform: translateX(0);
+}
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 39, 47, 0.28);
+  z-index: 29;
 }
 .brand {
   display: flex;
@@ -144,8 +165,7 @@
   color: #a7bdc5;
 }
 .workspace {
-  margin-left: 230px;
-  width: calc(100% - 230px);
+  width: 100%;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -160,6 +180,25 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 34px;
+}
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.sidebar-toggle {
+  flex-shrink: 0;
+}
+@media (hover: none) {
+  .sidebar-backdrop {
+    display: block;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
 }
 .breadcrumb {
   display: flex;

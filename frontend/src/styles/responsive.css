@@ -11,14 +11,12 @@
   }
 }
 @media (max-width: 1200px) {
+  .sidebar-hover-zone {
+    --sidebar-width: 200px;
+  }
   .sidebar {
-    width: 200px;
     padding-left: 12px;
     padding-right: 12px;
-  }
-  .workspace {
-    margin-left: 200px;
-    width: calc(100% - 200px);
   }
   .brand {
     font-size: 15px;
@@ -75,37 +73,8 @@
   .topbar-right {
     margin-left: auto;
   }
-  .sidebar {
-    width: 70px;
-    padding: 25px 8px 16px;
-  }
-  .brand {
-    padding: 0;
-    justify-content: center;
-  }
-  .brand > div:not(.brand-mark),
-  .nav-caption,
-  .sidebar nav span,
-  .sidebar-note,
-  .user-info,
-  .sidebar-user .el-button {
-    display: none;
-  }
-  .sidebar nav {
-    margin-top: 40px;
-  }
-  .sidebar nav a {
-    padding: 15px;
-    justify-content: center;
-  }
-  .sidebar-user {
-    margin-top: auto;
-    justify-content: center;
-    padding-top: 20px;
-  }
-  .workspace {
-    margin-left: 70px;
-    width: calc(100% - 70px);
+  .sidebar-hover-zone {
+    --sidebar-width: min(230px, 85vw);
   }
   .date-label {
     display: none;

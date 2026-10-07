@@ -1,5 +1,5 @@
 <script setup>
-import { defineAsyncComponent, ref } from 'vue';
+import { defineAsyncComponent, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   Box,
@@ -11,6 +11,8 @@ import {
   Key,
   ArrowRight,
   Setting,
+  Expand,
+  Fold,
 } from '@element-plus/icons-vue';
 import { useAuth } from './stores/auth';
 import { useMeta } from './stores/meta';
@@ -38,6 +40,19 @@ const menus = [
   { path: '/settings/purchase-statuses', label: '采购状态维护', icon: Setting },
 ];
 const showPassword = ref(false);
+const sidebarOpen = ref(false);
+watch(
+  () => route.path,
+  () => {
+    sidebarOpen.value = false;
+  },
+);
+function showSidebarOnHover(event) {
+  if (event.pointerType === 'mouse') sidebarOpen.value = true;
+}
+function hideSidebarOnLeave(event) {
+  if (event.pointerType === 'mouse') sidebarOpen.value = false;
+}
 async function signOut() {
   try {
     await ElMessageBox.confirm('确认退出当前账号？', '退出登录', { type: 'info' });
@@ -49,46 +64,67 @@ async function signOut() {
 <template>
   <el-config-provider :locale="zhCn">
     <router-view v-if="route.meta.public" />
-    <div v-else class="app-shell">
-      <aside class="sidebar">
-        <router-link to="/orders" class="brand"
-          ><div class="brand-mark">
-            <el-icon :size="24"><Box /></el-icon>
+    <div v-else class="app-shell" @keydown.esc="sidebarOpen = false">
+      <div
+        class="sidebar-hover-zone"
+        :class="{ 'is-open': sidebarOpen }"
+        @pointerenter="showSidebarOnHover"
+        @pointerleave="hideSidebarOnLeave"
+      >
+        <aside class="sidebar" :inert="!sidebarOpen" :aria-hidden="!sidebarOpen">
+          <router-link to="/orders" class="brand"
+            ><div class="brand-mark">
+              <el-icon :size="24"><Box /></el-icon>
+            </div>
+            <div>订单协作台<small>ORDER WORKSPACE</small></div></router-link
+          >
+          <div class="nav-caption">业务工作台</div>
+          <nav>
+            <router-link
+              v-for="item in menus"
+              :key="item.path"
+              :to="item.path"
+              :class="{ active: route.path === item.path }"
+              ><el-icon :size="19"><component :is="item.icon" /></el-icon
+              ><span>{{ item.label }}</span
+              ><span v-if="route.path === item.path" class="nav-dot"
+            /></router-link>
+          </nav>
+          <div class="sidebar-note">
+            <span class="live-dot" />本地工作空间
+            <p>订单 · 采购 · 协作</p>
           </div>
-          <div>订单协作台<small>ORDER WORKSPACE</small></div></router-link
-        >
-        <div class="nav-caption">业务工作台</div>
-        <nav>
-          <router-link
-            v-for="item in menus"
-            :key="item.path"
-            :to="item.path"
-            :class="{ active: route.path === item.path }"
-            ><el-icon :size="19"><component :is="item.icon" /></el-icon><span>{{ item.label }}</span
-            ><span v-if="route.path === item.path" class="nav-dot"
-          /></router-link>
-        </nav>
-        <div class="sidebar-note">
-          <span class="live-dot" />本地工作空间
-          <p>订单 · 采购 · 协作</p>
-        </div>
-        <div class="sidebar-user">
-          <div class="avatar">{{ auth.user?.displayName?.slice(0, 1) }}</div>
-          <div class="user-info">
-            <strong>{{ auth.user?.displayName }}</strong
-            ><small>{{ meta.roles[auth.user?.role] || '团队成员' }}</small>
+          <div class="sidebar-user">
+            <div class="avatar">{{ auth.user?.displayName?.slice(0, 1) }}</div>
+            <div class="user-info">
+              <strong>{{ auth.user?.displayName }}</strong
+              ><small>{{ meta.roles[auth.user?.role] || '团队成员' }}</small>
+            </div>
+            <el-button text circle aria-label="退出登录" @click="signOut"
+              ><el-icon><SwitchButton /></el-icon
+            ></el-button>
           </div>
-          <el-button text circle aria-label="退出登录" @click="signOut"
-            ><el-icon><SwitchButton /></el-icon
-          ></el-button>
-        </div>
-      </aside>
+        </aside>
+      </div>
+      <div v-if="sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false"></div>
       <div class="workspace" :class="{ 'workspace-orders': route.path === '/orders' }">
         <header class="topbar">
-          <span class="breadcrumb"
-            >工作空间 <el-icon><ArrowRight /></el-icon>
-            <strong>{{ route.meta.title }}</strong></span
-          >
+          <div class="topbar-left">
+            <el-button
+              class="sidebar-toggle"
+              text
+              circle
+              :icon="sidebarOpen ? Fold : Expand"
+              :aria-label="sidebarOpen ? '收起导航' : '展开导航'"
+              :aria-expanded="sidebarOpen"
+              @click="sidebarOpen = !sidebarOpen"
+            />
+            <span class="breadcrumb"
+              >工作空间 <el-icon><ArrowRight /></el-icon>
+              <strong>{{ route.meta.title }}</strong></span
+            >
+          </div>
+          <div id="orders-topbar-warnings" v-show="route.path === '/orders'"></div>
           <div class="topbar-right">
             <BusinessClocks />
             <el-button text :icon="Key" @click="showPassword = true">修改密码</el-button>
@@ -105,7 +141,9 @@ async function signOut() {
           </div>
           <router-view />
         </main>
-        <footer>订单协作台 <span>按商品分配 · 非空字段更新 · 7 天登录有效期</span></footer>
+        <footer v-if="route.path !== '/orders'">
+          订单协作台 <span>按商品分配 · 非空字段更新 · 7 天登录有效期</span>
+        </footer>
       </div>
       <ChangePasswordDialog v-if="showPassword" v-model="showPassword" />
     </div>

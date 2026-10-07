@@ -9,6 +9,7 @@ const props = defineProps({
   columns: { type: Array, required: true },
   loading: Boolean,
   deleting: Boolean,
+  showOperations: Boolean,
   warningNow: { type: Number, required: true },
 });
 const emit = defineEmits(['selection-change', 'edit', 'assign', 'import', 'delete']);
@@ -54,7 +55,7 @@ defineExpose({ clearSelection: () => table.value?.clearSelection() });
         ><OrderCell :row="row" :field="field" :warning="warnings[row.id]" :warning-now="warningNow"
       /></template>
     </el-table-column>
-    <el-table-column label="操作" fixed="right" width="180"
+    <el-table-column v-if="showOperations" label="操作" fixed="right" width="180"
       ><template #default="{ row }">
         <el-button link type="primary" @click="emit('edit', row)">编辑</el-button>
         <el-button link type="primary" @click="emit('assign', row)">分配</el-button>

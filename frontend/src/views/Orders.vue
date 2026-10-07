@@ -13,6 +13,8 @@ import {
   Download,
   CopyDocument,
   EditPen,
+  ArrowDown,
+  ArrowUp,
 } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { useOrders } from '../composables/useOrders';
@@ -74,6 +76,27 @@ const statusDialog = ref(false);
 const statusBusy = ref(false);
 const statusDraft = ref('');
 const statusItems = ref([]);
+const advancedFiltersOpen = ref(false);
+const operationsOpen = ref(false);
+const activeAdvancedFilters = computed(
+  () =>
+    [
+      'trackingWarning',
+      'shippingWarning',
+      'priceFactorLevel',
+      'purchaseChannel',
+      'orderStatus',
+      'allocatable',
+      'afterSales',
+      'settlement',
+      'startDate',
+      'endDate',
+      'shipStartDate',
+      'shipEndDate',
+      'minPrice',
+      'maxPrice',
+    ].filter((key) => filters[key] !== '').length,
+);
 const draftColumns = ref([]);
 const allColumns = computed(() => orderColumns(meta.fields));
 const visibleColumns = computed(() =>
@@ -208,29 +231,50 @@ async function submitStatus() {
 </script>
 <template>
   <div class="orders-page">
-    <div class="shipping-legend">
-      <strong>发货预警：</strong>
-      <span class="shipping-badge shipping-yellow"
-        >黄色≤48小时（{{ shippingCounts.yellow }} 条）</span
-      >
-      <span>·</span>
-      <span class="shipping-badge shipping-orange"
-        >橙色≤24小时（{{ shippingCounts.orange }} 条）</span
-      >
-      <span>·</span>
-      <span class="shipping-badge shipping-red">红色=已逾期（{{ shippingCounts.red }} 条）</span>
-      <span class="muted">当前筛选全部明细</span>
-      <span class="muted">以平台发货日期后一天 15:00（北京时间）为截止时间</span>
-    </div>
+    <Teleport to="#orders-topbar-warnings">
+      <div class="shipping-legend">
+        <strong>发货预警：</strong>
+        <span class="shipping-badge shipping-yellow"
+          >黄色≤48小时（{{ shippingCounts.yellow }} 条）</span
+        >
+        <span>·</span>
+        <span class="shipping-badge shipping-orange"
+          >橙色≤24小时（{{ shippingCounts.orange }} 条）</span
+        >
+        <span>·</span>
+        <span class="shipping-badge shipping-red">红色=已逾期（{{ shippingCounts.red }} 条）</span>
+        <span
+          class="muted shipping-legend-note"
+          title="当前筛选全部明细，以平台发货日期后一天 15:00（北京时间）为截止时间"
+          >当前筛选全部明细，以平台发货日期后一天 15:00（北京时间）为截止时间</span
+        >
+      </div>
+    </Teleport>
     <section class="panel orders-panel">
       <div class="panel-heading">
-        <div>
+        <div class="orders-heading-title">
           <h2>
             订单商品明细<span class="count-label">{{ total }} 条</span>
           </h2>
-          <p>每行对应一条商品明细，可展开查看商品和收件信息，或勾选后进行批量操作。</p>
+          <el-button
+            type="primary"
+            class="advanced-filter-toggle"
+            :icon="advancedFiltersOpen ? ArrowUp : ArrowDown"
+            :aria-expanded="advancedFiltersOpen"
+            @click="advancedFiltersOpen = !advancedFiltersOpen"
+            >{{ advancedFiltersOpen ? '收起筛选' : '更多筛选'
+            }}{{ activeAdvancedFilters ? ` (${activeAdvancedFilters})` : '' }}</el-button
+          >
         </div>
         <div class="button-row">
+          <el-button
+            type="primary"
+            plain
+            :icon="EditPen"
+            :aria-expanded="operationsOpen"
+            @click="operationsOpen = !operationsOpen"
+            >{{ operationsOpen ? '收起操作' : '展开操作' }}</el-button
+          >
           <el-button :icon="Setting" @click="openColumnDialog">表头选择</el-button
           ><el-button :icon="Refresh" @click="refresh">刷新</el-button
           ><el-button :icon="Plus" @click="edit(null)">新增明细</el-button
@@ -291,7 +335,7 @@ async function submitStatus() {
           ><el-button type="primary" plain :icon="Search" @click="search">查询</el-button
           ><el-button text @click="reset">重置</el-button>
         </div>
-        <div class="filter-bar filter-secondary">
+        <div v-show="advancedFiltersOpen" class="filter-bar filter-secondary">
           <el-select
             v-model="filters.trackingWarning"
             placeholder="未出跟踪号"
@@ -372,7 +416,7 @@ async function submitStatus() {
             >只看分配给我的</el-button
           >
         </div>
-        <div class="filter-bar filter-price">
+        <div v-show="advancedFiltersOpen" class="filter-bar filter-price">
           <el-select v-model="filters.priceType" aria-label="价格类型">
             <el-option label="商品价格" value="purchaseLinkAmount" />
             <el-option label="订单金额" value="orderAmount" />
@@ -417,6 +461,7 @@ async function submitStatus() {
           :rows="rows"
           :loading="loading"
           :deleting="deleteBusy"
+          :show-operations="operationsOpen"
           :warning-now="warningNow"
           @selection-change="selected = $event"
           @edit="edit"
