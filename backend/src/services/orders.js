@@ -14,6 +14,8 @@ import { AppError, assert } from '../errors.js';
 import { validatePatch, normalizeValue } from '../validation.js';
 import { getFieldDefinitions } from './dictionaries.js';
 import { channelKey } from '../lib/order-identity.js';
+import { priceFactorPatterns } from '../lib/price-factor.js';
+import { shippingWindow } from '../lib/shipping-window.js';
 /** 返回前端使用的商品明细快照，不向前端泄露模型关联结构。 */
 export async function getItem(id) {
   const item = await OrderItem.findByPk(id, { include: itemInclude });
@@ -94,7 +96,7 @@ export async function upsertImported(patch, transaction, actor, target = undefin
   );
   return { created: true, id: item.id };
 }
-export function buildFilters(query) {
+export function buildFilters(query, now = Date.now()) {
   const where = {},
     purchaseWhere = {};
   if (query.q)
@@ -118,6 +120,53 @@ export function buildFilters(query) {
       ),
       1,
     );
+  }
+  if (query.priceFactorLevel) {
+    const level = query.priceFactorLevel;
+    assert(['low', 'medium', 'high'].includes(level), '价格系数等级筛选无效');
+    const factor = col('purchase.priceFactor');
+    const conditions = [sqlWhere(factor, { [Op.regexp]: priceFactorPatterns.numeric })];
+    for (const grade of ['high', 'medium']) {
+      if (level === grade || level === 'low')
+        conditions.push(
+          sqlWhere(factor, {
+            [level === grade ? Op.regexp : Op.notRegexp]: priceFactorPatterns[grade],
+          }),
+        );
+    }
+    // 和渠道等条件取交集；必须在分页与总数统计前筛选。
+    where[Op.and] = conditions;
+  }
+  const priceFields = {
+    purchaseLinkAmount: purchaseWhere,
+    orderAmount: where,
+    purchaseLimit: purchaseWhere,
+  };
+  const priceType = query.priceType || '';
+  assert(!priceType || Object.hasOwn(priceFields, priceType), '价格类型筛选无效');
+  const priceRange = {};
+  for (const [key, operator] of [
+    ['minPrice', Op.gte],
+    ['maxPrice', Op.lte],
+  ]) {
+    if (query[key] === undefined || query[key] === '') continue;
+    try {
+      priceRange[operator] = normalizeValue({ type: 'money' }, query[key]);
+      assert(priceRange[operator] !== null, '价格为空');
+    } catch {
+      throw new AppError(400, `${key === 'minPrice' ? '最低' : '最高'}价格格式无效`);
+    }
+  }
+  if (Reflect.ownKeys(priceRange).length) {
+    assert(priceType, '请选择价格类型');
+    if (priceRange[Op.gte] && priceRange[Op.lte]) {
+      const scaled = (value) => {
+        const [whole, fraction = ''] = value.split('.');
+        return BigInt(whole + fraction.padEnd(20, '0'));
+      };
+      assert(scaled(priceRange[Op.gte]) <= scaled(priceRange[Op.lte]), '最低价格不能高于最高价格');
+    }
+    priceFields[priceType][priceType] = priceRange;
   }
   if (query.assignedTo === 'unassigned') purchaseWhere.assignedTo = null;
   else if (query.assignedTo) purchaseWhere.assignedTo = Number(query.assignedTo);
@@ -146,14 +195,24 @@ export function buildFilters(query) {
     if (dates.shipStartDate) where.platformShipDate[Op.gte] = dates.shipStartDate;
     if (dates.shipEndDate) where.platformShipDate[Op.lte] = dates.shipEndDate;
   }
+  if (query.shippingWarning) {
+    assert(['orange', 'red'].includes(query.shippingWarning), '发货预警筛选无效');
+    const { first, last } = shippingWindow(now);
+    const dates =
+      query.shippingWarning === 'red' ? { [Op.lt]: first } : { [Op.gte]: first, [Op.lte]: last };
+    // 和手填发货日期、价格等级等条件取交集，空发货日期不匹配。
+    where[Op.and] = [...(where[Op.and] || []), { platformShipDate: dates }];
+  }
   const include = [itemInclude[0], { ...itemInclude[1], where: purchaseWhere, required: true }];
   return { where, include };
 }
 export async function listOrders(query) {
   const page = Math.max(1, Number(query.page) || 1),
     pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 20));
+  // 单次查询使用同一时间点，避免跨截止时间时分页与统计条件不同。
+  const filters = buildFilters(query);
   const result = await OrderItem.findAndCountAll({
-    ...buildFilters(query),
+    ...filters,
     limit: pageSize,
     offset: (page - 1) * pageSize,
     // MySQL 倒序时空日期排最后；同日按 ID 排序，避免分页顺序漂移。
@@ -165,7 +224,6 @@ export async function listOrders(query) {
     subQuery: false,
   });
   // 沿用列表筛选条件，按发货日期聚合全部匹配明细，数量不受分页影响。
-  const filters = buildFilters(query);
   const shippingDates = await OrderItem.findAll({
     where: { [Op.and]: [filters.where, { platformShipDate: { [Op.ne]: null } }] },
     include: filters.include.map((relation) => ({ ...relation, attributes: [], include: [] })),

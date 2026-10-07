@@ -921,15 +921,12 @@ test('采购渠道多选与斜杠导入、历史单选兼容及主管确认新�
   assert.equal(cleared.data.purchaseChannel, null);
 });
 
-test('Excel 上传边界为 50 MB，超过上限在文件解析前拒绝', async () => {
-  for (const extra of [0, 1]) {
-    const body = new FormData();
-    body.append('file', new Blob([Buffer.alloc(50 * 1024 * 1024 + extra)]), `${prefix}-LIMIT.xlsx`);
-    const result = await request('/api/uploads/excel', 'POST', body);
-    assert.equal(result.status, 400);
-    // 边界大小通过上传限制后由格式校验拒绝；超限直接由上传中间件拒绝。
-    assert.match(result.data.message, extra ? /文件过大.*50 MB/ : /不是有效的 XLSX/);
-  }
+test('Excel 上传超过旧 50 MB 上限后仍进入格式校验', async () => {
+  const body = new FormData();
+  body.append('file', new Blob([Buffer.alloc(50 * 1024 * 1024 + 1)]), `${prefix}-LIMIT.xlsx`);
+  const result = await request('/api/uploads/excel', 'POST', body);
+  assert.equal(result.status, 400);
+  assert.match(result.data.message, /不是有效的 XLSX/);
 });
 
 test('订单号与完整渠道组合匹配，SKU 可不填不映射、变更不新增，不覆盖其他渠道', async () => {
@@ -1539,4 +1536,124 @@ test('新增及导入新明细自动绑定当前账号，客户端无法伪造�
   assert.equal(mine.data.total, 1);
   const unassigned = await request('/api/orders?q=' + importedNumber + '&assignedTo=unassigned');
   assert.equal(unassigned.data.total, 0);
+});
+
+test('价格系数等级筛选覆盖全部明细，与渠道交集、分页及预警统计一致', async () => {
+  const group = `${prefix}-FACTOR`;
+  const samples = [
+    ['0.799999999999999999999999999999999999', 'low'],
+    ['-1', 'low'],
+    ['0.8', 'medium'],
+    ['0.849999999999999999999999999999999999', 'medium'],
+    ['0.85', 'high'],
+    ['+001.00', 'high'],
+    ['待定', null],
+    ['', null],
+  ];
+  const created = [];
+  for (const [index, [factor, level]] of samples.entries()) {
+    const orderNumber = `${group}-${index}`;
+    orderNumbers.push(orderNumber);
+    const result = await request('/api/orders', 'POST', {
+      fields: {
+        orderNumber,
+        priceFactor: factor,
+        purchaseChannel: [identityChannels[index % 2]],
+        platformShipDate: '2026-10-01',
+      },
+    });
+    assert.equal(result.status, 201, JSON.stringify(result.data));
+    assert.equal(result.data.orderNumber, orderNumber);
+    assert.equal(result.data.priceFactorLevel, level);
+    created.push(result.data);
+  }
+  for (const level of ['low', 'medium', 'high']) {
+    const ids = [];
+    for (const page of [1, 2]) {
+      const result = await request(
+        `/api/orders?q=${group}&priceFactorLevel=${level}&pageSize=1&page=${page}`,
+      );
+      assert.equal(result.status, 200, JSON.stringify(result.data));
+      assert.equal(result.data.total, 2);
+      assert.equal(result.data.rows.length, 1);
+      assert.equal(result.data.rows[0].priceFactorLevel, level);
+      assert.equal(
+        result.data.shippingDates.reduce((sum, entry) => sum + entry.count, 0),
+        2,
+      );
+      ids.push(result.data.rows[0].id);
+    }
+    assert.equal(new Set(ids).size, 2);
+    const combined = await request(
+      `/api/orders?q=${group}&priceFactorLevel=${level}&purchaseChannel=${encodeURIComponent(identityChannels[0])}`,
+    );
+    assert.equal(combined.status, 200, JSON.stringify(combined.data));
+    assert.equal(combined.data.total, 1);
+    assert.equal(combined.data.rows[0].priceFactorLevel, level);
+  }
+  const changed = await request(`/api/orders/${created[4].id}`, 'PUT', {
+    version: created[4].version,
+    fields: { orderNumber: created[4].orderNumber, priceFactor: '0.79' },
+  });
+  assert.equal(changed.status, 200, JSON.stringify(changed.data));
+  assert.equal(changed.data.orderNumber, created[4].orderNumber);
+  assert.equal(changed.data.priceFactorLevel, 'low');
+  assert.equal((await request(`/api/orders?q=${group}&priceFactorLevel=high`)).data.total, 1);
+  assert.equal((await request(`/api/orders?q=${group}`)).data.total, samples.length);
+  assert.equal((await request(`/api/orders?q=${group}&priceFactorLevel=invalid`)).status, 400);
+});
+
+test('三类价格区间筛选支持单端边界，分页与预警统计一致', async () => {
+  const group = `${prefix}-PRICE-RANGE`;
+  const samples = [
+    ['10.00', '20.00', '30.00'],
+    ['20.00', '10.00', '20.00'],
+    ['30.00', '30.00', '10.00'],
+    [null, null, null],
+  ];
+  for (const [index, [purchaseLinkAmount, orderAmount, purchaseLimit]] of samples.entries()) {
+    const orderNumber = `${group}-${index}`;
+    orderNumbers.push(orderNumber);
+    const result = await request('/api/orders', 'POST', {
+      fields: {
+        orderNumber,
+        purchaseLinkAmount,
+        orderAmount,
+        purchaseLimit,
+        platformShipDate: '2026-10-01',
+      },
+    });
+    assert.equal(result.status, 201, JSON.stringify(result.data));
+  }
+  const cases = [
+    ['purchaseLinkAmount', '&minPrice=20&maxPrice=30', [1, 2]],
+    ['orderAmount', '&maxPrice=20', [0, 1]],
+    ['purchaseLimit', '&minPrice=20', [0, 1]],
+    ['purchaseLimit', '&minPrice=20&maxPrice=20', [1]],
+  ];
+  for (const [priceType, range, indexes] of cases) {
+    const expected = indexes.map((index) => `${group}-${index}`);
+    const query = `/api/orders?q=${group}&priceType=${priceType}${range}&pageSize=1`;
+    const rows = [];
+    for (let page = 1; page <= expected.length; page++) {
+      const result = await request(`${query}&page=${page}`);
+      assert.equal(result.status, 200, JSON.stringify(result.data));
+      assert.equal(result.data.total, expected.length);
+      assert.equal(result.data.rows.length, 1);
+      assert.equal(
+        result.data.shippingDates.reduce((sum, entry) => sum + entry.count, 0),
+        expected.length,
+      );
+      rows.push(result.data.rows[0].orderNumber);
+    }
+    assert.deepEqual(rows.sort(), expected.sort());
+  }
+  for (const range of [
+    '&priceType=unknown&minPrice=1',
+    '&priceType=orderAmount&minPrice=-1',
+    '&priceType=orderAmount&minPrice=2&maxPrice=1',
+    '&minPrice=1',
+  ]) {
+    assert.equal((await request(`/api/orders?q=${group}${range}`)).status, 400);
+  }
 });

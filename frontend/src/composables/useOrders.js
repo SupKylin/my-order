@@ -38,6 +38,10 @@ export function useOrders() {
     orderStatus: '',
     purchaseStatus: '',
     purchaseChannel: '',
+    priceFactorLevel: '',
+    priceType: 'purchaseLinkAmount',
+    minPrice: '',
+    maxPrice: '',
     assignedTo: '',
     allocatable: '',
     settlement: '',
@@ -45,6 +49,7 @@ export function useOrders() {
     endDate: '',
     shipStartDate: '',
     shipEndDate: '',
+    shippingWarning: '',
     page: 1,
     pageSize: 20,
   });
@@ -80,6 +85,10 @@ export function useOrders() {
       orderStatus: '',
       purchaseStatus: '',
       purchaseChannel: '',
+      priceFactorLevel: '',
+      priceType: 'purchaseLinkAmount',
+      minPrice: '',
+      maxPrice: '',
       assignedTo: '',
       allocatable: '',
       settlement: '',
@@ -87,6 +96,7 @@ export function useOrders() {
       endDate: '',
       shipStartDate: '',
       shipEndDate: '',
+      shippingWarning: '',
       page: 1,
     });
     dates.value = [];

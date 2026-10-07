@@ -1,6 +1,6 @@
 # 订单协作台
 
-1本地部署的运营与采购管理系统。前端 Vue 3 / Element Plus / Pinia / Vue Router / Vite / Axios；后端 Node.js / Express / Sequelize；数据库 MySQL `my_order`。
+本地部署的运营与采购管理系统。前端 Vue 3 / Element Plus / Pinia / Vue Router / Vite / Axios；后端 Node.js / Express / Sequelize；数据库 MySQL `my_order`。
 
 ## 本地运行
 
@@ -17,10 +17,15 @@ npm run dev
 
 首次账号保存在本机 `.local-access.txt` 中，登录后可以通过右上角修改密码。该文件和 `backend/.env` 已加入 Git 忽略。
 
-新环境：复制 `backend/.env.example` 为 `backend/.env`，填写数据库、至少 32 字符的随机会话密钥和至少 8 字符的管理员密码，然后执行 `npm run db:init`。普通初始化只创建缺失的表，不清空已有数据。需要显式重置时才运行 `node backend/scripts/init-db.js --reset --confirm=my_order`，该命令会彻底清空 `my_order`，请勿在生产环境误用。日常启动不执行自动删表或变更表结构。
+新环境：复制 `backend/.env.example` 为 `backend/.env`，填写数据库、至少 32 字符的随机会话密钥和至少 8 字符的管理员密码，然后执行 `npm run db:init`。数据库名取自 `DB_NAME`，默认 `my_order`，支持宝塔预先创建的 `my-order-test`。普通初始化只创建缺失的表并执行增量迁移，不清空已有数据。需要显式重置时才运行 `node backend/scripts/init-db.js --reset --confirm=实际数据库名`，确认名必须与 `DB_NAME` 完全一致，该命令会彻底清空目标数据库，请勿在生产环境误用。日常启动不执行自动删表或变更表结构。
+
+宝塔测试部署和 `fix1` 更新步骤见 [宝塔部署说明](docs/baota-deployment.md)。
 
 ## 业务规则
 
+- 发货预警可筛选“24小时内发货（橙色）”或“已逾期（红色）”。按平台发货日期在固定 EST 当天 23:59:59 的截止时间判断；橙色包含剩余 0 至 24 小时，红色为已超过截止时间，未填日期不匹配。可与其他筛选组合，分页和预警统计使用同一查询条件。
+- 订单列表支持按商品价格（采购商品链接金额）、订单金额或采购限价查询价格区间。最低价、最高价均包含边界，可只填一端；留空两端不限制价格。
+- 订单号旁独立显示价格系数标记：小于 0.8 为红色“低”，0.8（含）至 0.85（不含）为透明背景“平”，0.85 及以上为绿色“高”。空值或非数字不标记；标记不写入订单号。订单列表可按价格系数等级筛选，筛选作用于全部明细并同步分页总数和发货预警统计。
 - 导入优先按 **订单号＋采购渠道** 匹配商品明细，再按订单号匹配剩余的**无采购渠道旧明细**；店铺和 SKU 不参与匹配。一个订单可保留多条明细，分别分配采购。多选渠道按完整集合匹配，忽略顺序；已有渠道的明细不被其他渠道或未填写渠道的导入行覆盖。补全旧明细渠道时同步更新匹配键。
 - 每条商品明细只有一条采购记录和一个当前采购人员；采购商家为该记录中的单一商家字段。采购限价和价格系数人工输入。
 - 订单管理统一提供新增、导入、单条/批量采购分配、取消分配及人员筛选，不再单设采购分配页面；旧 `/allocation` 地址跳转至订单管理的待分配筛选。新增或导入新明细时，采购人员由服务端绑定当前登录账号，列表显示用户名；重复导入已有明细保留原采购人员，仍可手工重新分配。
@@ -40,7 +45,7 @@ npm run dev
 
 升级匹配规则时，迁移会允许 SKU 为空，并将订单 ID＋采购渠道集合摘要的唯一约束替换为普通索引，保留所有明细和采购记录。旧规则生成但尚未提交的导入预览需要重新生成。
 
-支持 `.xlsx`（旧 `.xls` 请在 Excel 中另存为 `.xlsx`），支持不同工作表和 1–100 行范围内的表头。默认上限 50 MB / 10000 数据行，图片上限 15 MB。
+支持 `.xlsx`（旧 `.xls` 请在 Excel 中另存为 `.xlsx`），支持不同工作表和 1–100 行范围内的表头。上传上限 2 GB（2 × 1024³ 字节），Excel 解压后内容上限仍为 300 MB / 10000 数据行，图片上限 15 MB。上传流写入磁盘临时文件，上传失败或断开连接时清理；解析仍受上述限制，大文件并不保证可导入。
 
 采购金额和价格系数为字符串（最多 255 个字符），支持非数字内容，不做小数位数校验或金额格式化；税费、订单金额、采购商品链接金额和采购限价仍最多支持 20 位小数。Excel 高精度数据请使用文本单元格；Excel 数值本身已丢失的有效位无法恢复。
 
@@ -139,5 +144,5 @@ npm run format:check  # 只检查格式，可用于提交前或 CI
 1. 备份并迁移 `my_order` 和整个 `backend/storage/`，保持两者一致；不要在新服务器执行清空重置命令。
 2. 部署 Node / MySQL，设置生产 `.env`：`NODE_ENV=production`、新数据库凭据、随机 `SESSION_SECRET`、`PUBLIC_BASE_URL=https://实际域名`、`APP_ORIGIN=https://实际域名`、`COOKIE_SECURE=true`、`TRUST_PROXY=true`。
 3. `npm ci` 后 `npm run build`，用进程管理器运行 `npm start`。Express 会托管 `frontend/dist`，生产无需暴露 Vite。
-4. Nginx 用 HTTPS 反代 `127.0.0.1:3000`，转发 `Host`、`X-Forwarded-Proto`、`X-Forwarded-For`，将上传限额设为至少 `65m`，导入请求超时设为 `180s`。
+4. Nginx 用 HTTPS 反代 `127.0.0.1:3000`，转发 `Host`、`X-Forwarded-Proto`、`X-Forwarded-For`，将上传限额设为`2050m`（为 2 GB 文件预留 multipart 开销），`client_body_timeout`、`proxy_read_timeout`、`proxy_send_timeout` 设为 `7200s`，并设置 `proxy_request_buffering off`。
 5. 仅开放 80/443，数据库保持内网访问，验证公网图片地址、登录 Cookie 和文件备份。迁移后旧会话会因新密钥失效，用户重新登录即可。

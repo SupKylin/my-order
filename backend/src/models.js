@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { fields } from './fields.js';
 import { decimalText } from './lib/decimal.js';
 import { storedChannels } from './lib/channels.js';
+import { priceFactorLevel } from './lib/price-factor.js';
 export const db = new Sequelize(config.db.database, config.db.username, config.db.password, {
   dialect: 'mysql',
   host: config.db.host,
@@ -203,6 +204,7 @@ export function serializeItem(instance) {
     assignedTo: value.purchase?.assignedTo || null,
     assignedAt: value.purchase?.assignedAt || null,
     assignee: value.purchase?.assignee || null,
+    priceFactorLevel: priceFactorLevel(value.purchase?.priceFactor),
   };
   for (const f of fields) {
     if (f.key === 'orderNumber') continue;

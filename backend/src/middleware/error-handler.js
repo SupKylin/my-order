@@ -8,7 +8,7 @@ export function errorHandler(error, req, res, next) {
     return res.status(400).json({
       message:
         error.code === 'LIMIT_FILE_SIZE'
-          ? '文件过大：Excel 上限 50 MB，图片上限 15 MB'
+          ? '文件过大：Excel 上限 2 GB，图片上限 15 MB'
           : '上传格式错误',
     });
   }

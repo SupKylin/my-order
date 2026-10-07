@@ -139,9 +139,33 @@
 .filter-secondary > .el-select {
   width: 145px;
 }
+.filter-secondary > .shipping-warning-filter {
+  width: 205px;
+}
 .filter-secondary > .el-date-editor {
   max-width: 285px;
   min-width: 245px;
+}
+.filter-price {
+  padding-top: 0;
+  padding-bottom: 18px;
+}
+.filter-price > .el-select {
+  width: 160px;
+}
+.price-range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+}
+.price-range-inputs > .el-input {
+  width: min(150px, calc((100vw - 85px) / 2));
+}
+.price-range-separator {
+  flex-shrink: 0;
+  color: #687f89;
+  font-size: 12px;
 }
 .el-input__wrapper,
 .el-select__wrapper {
@@ -184,6 +208,38 @@
   background: white;
   vertical-align: middle;
   cursor: zoom-in;
+}
+.order-number-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.order-number-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.price-factor-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 22px;
+  font-weight: 600;
+  user-select: none;
+}
+.price-factor-low {
+  color: #b42318;
+  background: #fee4e2;
+}
+.price-factor-medium {
+  color: #606266;
+  background: transparent;
+}
+.price-factor-high {
+  color: #167442;
+  background: #dcfce7;
 }
 .orders-panel > .panel-heading {
   flex-wrap: wrap;

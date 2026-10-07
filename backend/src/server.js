@@ -11,6 +11,8 @@ try {
   const server = createApp().listen(config.port, config.host, () =>
     console.log(`订单系统后端已启动：http://${config.host}:${config.port}`),
   );
+  // 允许大文件在慢速网络上传输，保留有限的请求时长。
+  server.requestTimeout = 2 * 60 * 60 * 1000;
   const cleanup = setInterval(
     () =>
       Session.destroy({ where: { expiresAt: { [Op.lt]: new Date() } } }).catch((e) =>
