@@ -1,6 +1,6 @@
 const DAY_MS = 86400000;
-// 平台日期按固定 EST（UTC−5）当天 23:59:59 截止，与前端预警一致。
-const DEADLINE_OFFSET_MS = DAY_MS + 5 * 3600000 - 1000;
+// 平台日期按次日北京时间 15:00 截止，与前端预警一致。
+const DEADLINE_OFFSET_MS = DAY_MS + 7 * 3600000;
 
 export function shippingWindow(now = Date.now()) {
   const firstDay = Math.ceil((now - DEADLINE_OFFSET_MS) / DAY_MS);

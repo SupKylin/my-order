@@ -1,8 +1,9 @@
-export const PLATFORM_TIME_LABEL = '美国东部标准时间 EST';
-export const PLATFORM_UTC_OFFSET = '-05:00';
-// EST 固定 UTC−5，不使用会自动切换夏令时的 America/New_York。
-export const PLATFORM_TIME_ZONE = 'Etc/GMT+5';
+export const PLATFORM_TIME_LABEL = '美国西部标准时间 PST';
+export const PLATFORM_UTC_OFFSET = '-08:00';
+// PST 固定 UTC−8，不使用会自动切换夏令时的 America/Los_Angeles。
+export const PLATFORM_TIME_ZONE = 'Etc/GMT+8';
 export const CHINA_TIME_ZONE = 'Asia/Shanghai';
+export const CHINA_UTC_OFFSET = '+08:00';
 
 const clockFormatter = (timeZone) =>
   new Intl.DateTimeFormat('en-CA', {

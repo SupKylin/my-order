@@ -16,8 +16,8 @@ onUnmounted(() => clearInterval(timer));
     <div>
       <span>中国 · 北京时间</span><time>{{ clocks.china }}</time>
     </div>
-    <div title="美国东部标准时间，固定 UTC−5，不切换夏令时">
-      <span>美国 · EST（UTC−5）</span><time>{{ clocks.platform }}</time>
+    <div title="美国西部标准时间，固定 UTC−8，不切换夏令时">
+      <span>美国 · PST（UTC−8）</span><time>{{ clocks.platform }}</time>
     </div>
   </div>
 </template>

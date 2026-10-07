@@ -19,7 +19,6 @@ import { useOrders } from '../composables/useOrders';
 import { orderApi } from '../api/orders';
 import OrderTable from '../components/orders/OrderTable.vue';
 import { orderColumns } from '../components/orders/orderColumns';
-import { PLATFORM_TIME_LABEL } from '../utils/businessTime';
 // 弹窗只在打开时挂载，因此不会提前下载编辑表单和图片上传逻辑。
 const OrderEditor = defineAsyncComponent(() => import('../components/OrderEditor.vue'));
 const AssignmentDialog = defineAsyncComponent(
@@ -212,7 +211,7 @@ async function submitStatus() {
     <div class="shipping-legend">
       <strong>发货预警：</strong>
       <span class="shipping-badge shipping-yellow"
-        >黄色=剩2天（{{ shippingCounts.yellow }} 条）</span
+        >黄色≤48小时（{{ shippingCounts.yellow }} 条）</span
       >
       <span>·</span>
       <span class="shipping-badge shipping-orange"
@@ -221,7 +220,7 @@ async function submitStatus() {
       <span>·</span>
       <span class="shipping-badge shipping-red">红色=已逾期（{{ shippingCounts.red }} 条）</span>
       <span class="muted">当前筛选全部明细</span>
-      <span class="muted">以平台发货日期当天 23:59:59（{{ PLATFORM_TIME_LABEL }}）为截止时间</span>
+      <span class="muted">以平台发货日期后一天 15:00（北京时间）为截止时间</span>
     </div>
     <section class="panel orders-panel">
       <div class="panel-heading">

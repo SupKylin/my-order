@@ -8,7 +8,7 @@ import { shippingWarning } from '../../frontend/src/utils/shippingWarning.js';
 
 test('服务端日期边界与橙红预警一致，覆盖截止毫秒、24小时、跨年及夏令时日期', () => {
   for (const date of ['2026-01-01', '2026-03-08', '2026-07-15', '2026-11-01', '2026-12-31']) {
-    const deadline = Date.parse(`${date}T23:59:59-05:00`);
+    const deadline = Date.parse(`${date}T00:00:00+08:00`) + 86400000 + 15 * 3600000;
     for (const delta of [-86400001, -86400000, -1, 0, 1, 1000, 86400000]) {
       const now = deadline + delta;
       const { first, last } = shippingWindow(now);
@@ -23,7 +23,7 @@ test('服务端日期边界与橙红预警一致，覆盖截止毫秒、24小时
 });
 
 test('预警与日期、价格、渠道取交集，清空预警恢复原筛选，拒绝非法值', () => {
-  const now = Date.parse('2026-10-06T12:00:00-05:00');
+  const now = Date.parse('2026-10-06T12:00:00+08:00');
   for (const level of ['orange', 'red']) {
     const result = buildFilters(
       {
@@ -46,8 +46,8 @@ test('预警与日期、价格、渠道取交集，清空预警恢复原筛选�
     assert.deepEqual(
       result.where[Op.and][3].platformShipDate,
       level === 'red'
-        ? { [Op.lt]: '2026-10-06' }
-        : { [Op.gte]: '2026-10-06', [Op.lte]: '2026-10-06' },
+        ? { [Op.lt]: '2026-10-05' }
+        : { [Op.gte]: '2026-10-05', [Op.lte]: '2026-10-05' },
     );
     assert.ok(result.include[1].where[Op.and]);
   }
