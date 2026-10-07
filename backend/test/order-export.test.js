@@ -14,10 +14,10 @@ test('导出工作簿包含完整字段、中文表头和勾选明细', async ()
       id: 2,
       order: { orderNumber: 'TEST-2' },
       platformTrackingNumber: 'PLATFORM-TRACK-2',
-      sku: 'SKU-002',
-      purchase: { purchaseChannel: ['渠道A', '渠道B'], assignee: { displayName: '采购员甲' } },
+      walmartSku: 'SKU-002',
+      purchase: { purchaseSku: 'BUY-002', purchaseChannel: ['渠道A', '渠道B'], assignee: { displayName: '采购员甲' } },
     },
-    { id: 1, order: { orderNumber: 'TEST-1' }, sku: 'SKU-001', purchase: {} },
+    { id: 1, order: { orderNumber: 'TEST-1' }, walmartSku: 'SKU-001', purchase: {} },
   ];
   try {
     OrderItem.count = async () => items.length;
@@ -35,7 +35,8 @@ test('导出工作簿包含完整字段、中文表头和勾选明细', async ()
     const headers = sheet.getRow(1).values;
     assert.equal(sheet.rowCount, 3);
     assert.equal(sheet.getRow(2).getCell(headers.indexOf('订单号')).value, 'TEST-2');
-    assert.equal(sheet.getRow(2).getCell(headers.indexOf('SKU')).value, 'SKU-002');
+    assert.equal(sheet.getRow(2).getCell(headers.indexOf('WalmartSku')).value, 'SKU-002');
+    assert.equal(sheet.getRow(2).getCell(headers.indexOf('采购Sku')).value, 'BUY-002');
     assert.equal(
       sheet.getRow(2).getCell(headers.indexOf('平台发货物流单号')).value,
       'PLATFORM-TRACK-2',

@@ -98,8 +98,8 @@ onMounted(async () => {
         ><el-table-column v-if="details.errors.length" label="错误原因" prop="message" /><template
           v-else
           ><el-table-column label="订单号" prop="patch.orderNumber" /><el-table-column
-            label="SKU"
-            prop="patch.sku" /><el-table-column label="商品" prop="patch.productName" /></template
+            label="WalmartSku"
+            prop="patch.walmartSku" /><el-table-column label="商品" prop="patch.productName" /></template
       ></el-table>
       <p class="muted">预览最多显示 100 条明细、200 个错误；完整有效数据会整体提交。</p></template
     ><template #footer

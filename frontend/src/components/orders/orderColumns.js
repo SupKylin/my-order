@@ -12,6 +12,7 @@ const orderKeys = [
   'tax',
 ];
 const purchaseKeys = [
+  'purchaseSku',
   'purchaseStatus',
   'merchantName',
   'purchaseLinkAmount',

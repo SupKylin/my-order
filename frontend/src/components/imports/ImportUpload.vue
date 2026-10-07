@@ -30,7 +30,7 @@ function pasteFile(event) {
     <div class="import-rule">
       <span class="rule-number">01</span>
       <div>
-        <strong>按订单号、SKU、店铺名匹配</strong>
+        <strong>按店铺名、订单号、WalmartSku 匹配</strong>
         <p>空值只匹配对应空值；多出的商品明细会新增。</p>
       </div>
     </div>

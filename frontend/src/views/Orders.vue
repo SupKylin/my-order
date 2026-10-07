@@ -257,7 +257,7 @@ async function submitStatus() {
             v-model="filters.q"
             :prefix-icon="Search"
             clearable
-            placeholder="搜索订单号、SKU、商品或物流单号"
+            placeholder="搜索订单号、WalmartSku、采购Sku、商品或物流单号"
             class="search-input"
             @keyup.enter="search"
           /><el-button :icon="Search" @click="openBatchOrderDialog"
@@ -426,7 +426,7 @@ async function submitStatus() {
         />
       </div>
       <div class="table-footer">
-        <span class="muted">导入按订单号＋SKU＋店铺名匹配；重复行按顺序更新</span
+        <span class="muted">订单导入按店铺名＋订单号＋WalmartSku 匹配</span
         ><el-pagination
           v-model:current-page="filters.page"
           v-model:page-size="filters.pageSize"

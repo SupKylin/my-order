@@ -21,7 +21,7 @@ const fieldType = (f) => {
   if (f.type === 'date') return DataTypes.DATEONLY;
   if (f.type === 'datetime') return DataTypes.DATE;
   if (['textarea', 'url', 'image'].includes(f.type)) return DataTypes.TEXT;
-  return DataTypes.STRING(f.key === 'sku' ? 191 : 255);
+  return DataTypes.STRING(['walmartSku', 'purchaseSku'].includes(f.key) ? 191 : 255);
 };
 const attrs = (group) =>
   Object.fromEntries(
@@ -77,6 +77,7 @@ export const OrderItem = db.define(
     orderId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
     purchaseChannelKey: { type: DataTypes.STRING(64), allowNull: false },
     orderIdentityKey: { type: DataTypes.STRING(64), allowNull: true },
+    sku: { type: DataTypes.STRING(191), allowNull: true },
     ...attrs('item'),
     version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
   },
@@ -218,5 +219,6 @@ export function serializeItem(instance) {
         ? decimalText(stored, f.type === 'money' ? 2 : 4)
         : stored;
   }
+  result.sku = result.walmartSku;
   return result;
 }

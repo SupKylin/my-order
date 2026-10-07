@@ -47,7 +47,7 @@ function purchaseTemplate(zone) {
     mappings: template.mappings.filter(
       (mapping) =>
         !mapping.field ||
-        ['orderNumber', 'sku', 'shopName'].includes(mapping.field) ||
+        ['orderNumber', 'walmartSku', 'shopName'].includes(mapping.field) ||
         meta.fieldMap[mapping.field]?.group === 'purchase',
     ),
   };

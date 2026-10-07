@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import { storedChannels } from './channels.js';
 
-export const IMPORT_MATCH_RULE = 'order-sku-shop-v4';
+export const IMPORT_MATCH_RULE = 'order-walmart-sku-shop-v5';
 
 /** 空值统一为空字符串，保留大小写和前导零；JSON 元组避免分隔符碰撞。 */
 export function orderIdentityKey(patch) {
-  const values = [patch.sku, patch.shopName].map((value) => String(value ?? '').trim());
+  const values = [patch.walmartSku !== undefined ? patch.walmartSku : patch.sku, patch.shopName].map((value) =>
+    String(value ?? '').trim(),
+  );
   return createHash('sha256').update(JSON.stringify(values)).digest('hex');
 }
 

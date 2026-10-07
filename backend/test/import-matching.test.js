@@ -3,17 +3,19 @@ import assert from 'node:assert/strict';
 import { orderIdentityKey } from '../src/lib/order-identity.js';
 import { matchImportRows } from '../src/lib/import-matching.js';
 
-const row = (orderNumber, sku, shopName, purchaseChannel) => ({
-  patch: { orderNumber, sku, shopName, purchaseChannel },
+const row = (orderNumber, walmartSku, shopName, purchaseChannel, purchaseSku) => ({
+  patch: { orderNumber, walmartSku, shopName, purchaseChannel, purchaseSku },
 });
-const item = (id, orderNumber, sku, shopName, purchaseChannel) => ({
+const item = (id, orderNumber, walmartSku, shopName, purchaseChannel, purchaseSku) => ({
   id,
   orderNumber,
-  sku,
+  walmartSku,
   shopName,
   purchaseChannel,
+  purchaseSku,
 });
-const ids = (rows, existing) => matchImportRows(rows, existing).map((target) => target?.id ?? null);
+const ids = (rows, existing, kind = 'order') =>
+  matchImportRows(rows, existing, kind).map((target) => target?.id ?? null);
 
 test('三项完全匹配，渠道变化不改变目标，不匹配其他订单', () => {
   assert.deepEqual(
@@ -70,4 +72,40 @@ test('去除首尾空格，保留前导零和大小写，分隔符不会碰撞',
     [{ shopName: 'Shop' }, { shopName: 'shop' }],
   ])
     assert.notEqual(orderIdentityKey(a), orderIdentityKey(b));
+  assert.notEqual(
+    orderIdentityKey({ walmartSku: null, sku: '旧值', shopName: '店' }),
+    orderIdentityKey({ walmartSku: '旧值', shopName: '店' }),
+  );
+});
+
+test('采购 SKU 为空总是新增，非空按店铺、订单号、WalmartSku 更新', () => {
+  const existing = [item(1, 'A', 'W-1', '店', null, 'P-1')];
+  assert.deepEqual(
+    ids(
+      [
+        row('A', 'W-1', '店', null, ''),
+        row('A', 'W-1', '店', null, 'P-2'),
+        row('A', 'W-2', '店', null, 'P-1'),
+        row('A', 'W-1', '别店', null, 'P-1'),
+      ],
+      existing,
+      'purchase',
+    ),
+    [null, 1, null, null],
+  );
+});
+
+test('采购导入优先选同采购 SKU 的旧明细，同一批不重复使用旧明细', () => {
+  assert.deepEqual(
+    ids(
+      [
+        row('A', 'W', '店', null, 'P-2'),
+        row('A', 'W', '店', null, 'P-1'),
+        row('A', 'W', '店', null, 'P-3'),
+      ],
+      [item(1, 'A', 'W', '店', null, 'P-1'), item(2, 'A', 'W', '店', null, 'P-2')],
+      'purchase',
+    ),
+    [2, 1, null],
+  );
 });

@@ -17,7 +17,7 @@ export async function migrateOrderIdentity() {
       allowNull: true,
     });
   const items = await OrderItem.findAll({
-    attributes: ['id', 'orderId', 'purchaseChannelKey', 'orderIdentityKey', 'sku', 'shopName'],
+    attributes: ['id', 'orderId', 'purchaseChannelKey', 'orderIdentityKey', 'walmartSku', 'shopName'],
     include: [{ model: Purchase, as: 'purchase', attributes: ['purchaseChannel'] }],
   });
   const indexes = await query.showIndex('order_items');

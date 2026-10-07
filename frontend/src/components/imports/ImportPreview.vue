@@ -18,11 +18,8 @@ const meta = useMeta();
       :title="`模板绑定渠道：${preview.purchaseChannel}。Excel 非空渠道优先，空白或未映射时使用模板渠道。`"
     />
     <div class="preview-stats">
-      <div v-if="kind === 'order'">
+      <div>
         <span>新增商品明细</span><strong class="success-text">{{ preview.added }}</strong>
-      </div>
-      <div v-else>
-        <span>上传文件</span><strong>{{ preview.sources?.length || 1 }}</strong>
       </div>
       <div>
         <span>更新已有明细</span><strong>{{ preview.updated }}</strong>
@@ -44,8 +41,8 @@ const meta = useMeta();
       v-else
       :title="
         kind === 'purchase'
-          ? '预览通过。采购字段仅更新匹配的已有商品明细，未填写的字段保留原值。'
-          : '预览通过。按订单号＋SKU＋店铺名匹配；多出的商品明细会新增。仅更新非空的已映射字段。'
+          ? '预览通过。采购Sku为空或未找到对应明细时新增；其他非空字段更新匹配明细。'
+          : '预览通过。按店铺名＋订单号＋WalmartSku 匹配；不同组合新增。仅更新非空的已映射字段。'
       "
       type="success"
       show-icon
@@ -95,8 +92,13 @@ const meta = useMeta();
           ></template
         ></el-table-column
       ><el-table-column label="订单号" prop="patch.orderNumber" min-width="170" /><el-table-column
-        label="SKU"
-        prop="patch.sku"
+        label="WalmartSku"
+        prop="patch.walmartSku"
+        min-width="145"
+      /><el-table-column
+        v-if="kind === 'purchase'"
+        label="采购Sku"
+        prop="patch.purchaseSku"
         min-width="145"
       /><el-table-column
         label="商品名称"

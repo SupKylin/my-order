@@ -74,7 +74,7 @@ export function normalizeValue(f, value) {
     throw new Error('请上传图片，或使用 Excel 嵌入图片');
   const max = ['textarea', 'url', 'image'].includes(f.type)
     ? 12000
-    : ['orderNumber', 'sku'].includes(f.key)
+    : ['orderNumber', 'walmartSku', 'purchaseSku'].includes(f.key)
       ? 191
       : 255;
   if (text.length > max) throw new Error(`内容不能超过 ${max} 个字符`);
@@ -89,8 +89,11 @@ export function validatePatch(
     throw new AppError(400, '字段格式错误');
   const patch = {},
     errors = [];
-  for (const [key, value] of Object.entries(input)) {
-    if (!Object.hasOwn(allowedFields, key)) throw new AppError(400, `不支持的字段：${key}`);
+  if (Object.hasOwn(input, 'sku') && Object.hasOwn(input, 'walmartSku'))
+    throw new AppError(400, 'SKU 与 WalmartSku 不能同时提交');
+  for (const [inputKey, value] of Object.entries(input)) {
+    const key = inputKey === 'sku' ? 'walmartSku' : inputKey;
+    if (!Object.hasOwn(allowedFields, key)) throw new AppError(400, `不支持的字段：${inputKey}`);
     const f = allowedFields[key];
     if (skipBlank && isBlank(value)) continue;
     try {
@@ -140,7 +143,7 @@ export function validateTemplate(input) {
     .map((m) => ({
       column: Number(m.column),
       header: String(m.header || ''),
-      field: isBlank(m.field) ? '' : m.field,
+      field: isBlank(m.field) ? '' : m.field === 'sku' ? 'walmartSku' : m.field,
     }));
   const columns = new Map(),
     targets = new Map();

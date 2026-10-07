@@ -102,7 +102,7 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
   <span
     v-else
     :class="{
-      mono: ['orderNumber', 'sku', 'trackingNumber', 'platformTrackingNumber'].includes(field.key),
+      mono: ['orderNumber', 'walmartSku', 'purchaseSku', 'trackingNumber', 'platformTrackingNumber'].includes(field.key),
     }"
     >{{ value ?? '—' }}</span
   >

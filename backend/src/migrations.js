@@ -1,5 +1,5 @@
-import { DataTypes } from 'sequelize';
-import { db, DictionaryOption } from './models.js';
+import { DataTypes, Op, col } from 'sequelize';
+import { db, DictionaryOption, ImportTemplate, OrderItem } from './models.js';
 import { dictionaryKinds } from './dictionaries.js';
 import { fields } from './fields.js';
 import { migrateOrderIdentity } from './migrations/order-identity.js';
@@ -27,6 +27,32 @@ export async function migrateDictionaries() {
 /** 仅扩展指定列的容量，保留旧数据；不使用 sync alter/force 重建业务表。 */
 export async function migrateOrderFields() {
   const query = db.getQueryInterface();
+  const itemColumns = await query.describeTable('order_items');
+  if (!itemColumns.walmartSku) {
+    await query.addColumn('order_items', 'walmartSku', {
+      type: DataTypes.STRING(191),
+      allowNull: true,
+    });
+    await OrderItem.update(
+      { walmartSku: col('sku') },
+      { where: { sku: { [Op.ne]: null } }, silent: true },
+    );
+  }
+  const purchaseColumns = await query.describeTable('purchases');
+  if (!purchaseColumns.purchaseSku)
+    await query.addColumn('purchases', 'purchaseSku', {
+      type: DataTypes.STRING(191),
+      allowNull: true,
+    });
+  const templates = await ImportTemplate.findAll();
+  for (const template of templates) {
+    if (!template.mappings.some((mapping) => mapping.field === 'sku')) continue;
+    await template.update({
+      mappings: template.mappings.map((mapping) =>
+        mapping.field === 'sku' ? { ...mapping, field: 'walmartSku' } : mapping,
+      ),
+    });
+  }
   for (const table of ['order_items', 'purchases']) {
     const columns = await query.describeTable(table);
     if (table === 'order_items' && !columns.platformTrackingNumber)

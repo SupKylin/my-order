@@ -36,7 +36,7 @@ export async function createItem(input, actor) {
   });
   const result = await db.transaction(async (transaction) => {
     const created = await upsertImported(patch, transaction, actor);
-    assert(created.created, '订单号＋SKU＋店铺名已存在，请编辑已有记录', 409);
+    assert(created.created, '店铺名＋订单号＋WalmartSku 已存在，请编辑已有记录', 409);
     await AuditLog.create(
       { userId: actor.id, action: 'create_item', entityId: String(created.id) },
       { transaction },
@@ -75,6 +75,7 @@ export async function upsertImported(patch, transaction, actor, target = undefin
         })
       : target;
   const parts = splitPatch(patch);
+  if (Object.hasOwn(parts.item, 'walmartSku')) parts.item.sku = parts.item.walmartSku;
   if (existing) {
     const identity = {
       orderIdentityKey: orderIdentityKey({ ...existing.toJSON(), ...parts.item }),
@@ -125,7 +126,8 @@ export function buildFilters(query, now = Date.now()) {
   if (query.q)
     where[Op.or] = [
       { productName: { [Op.like]: `%${String(query.q).slice(0, 100)}%` } },
-      { sku: { [Op.like]: `%${String(query.q).slice(0, 100)}%` } },
+      { walmartSku: { [Op.like]: `%${String(query.q).slice(0, 100)}%` } },
+      { '$purchase.purchaseSku$': { [Op.like]: `%${String(query.q).slice(0, 100)}%` } },
       { '$order.orderNumber$': { [Op.like]: `%${String(query.q).slice(0, 100)}%` } },
       { '$purchase.trackingNumber$': { [Op.like]: `%${String(query.q).slice(0, 100)}%` } },
     ];
@@ -342,6 +344,7 @@ export async function editItem(id, input, user) {
       transaction: t,
     });
     const parts = splitPatch(patch);
+    if (Object.hasOwn(parts.item, 'walmartSku')) parts.item.sku = parts.item.walmartSku;
     const purchaseChannelKey = channelKey(
       Object.hasOwn(patch, 'purchaseChannel')
         ? patch.purchaseChannel
@@ -356,7 +359,7 @@ export async function editItem(id, input, user) {
         transaction: t,
         lock: t.LOCK.UPDATE,
       });
-      assert(!conflict, '订单号＋SKU＋店铺名已存在，请编辑已有记录', 409);
+      assert(!conflict, '店铺名＋订单号＋WalmartSku 已存在，请编辑已有记录', 409);
     }
     await item.update(
       {
@@ -415,7 +418,7 @@ export async function assignItems(input, user) {
       if (assignee)
         assert(
           purchase.allocatable !== '否',
-          `商品 ${item.sku || item.id} 标记为不可分配，请先修改可分配状态`,
+          `商品 ${item.walmartSku || item.id} 标记为不可分配，请先修改可分配状态`,
         );
       await purchase.update(
         { assignedTo: assignee?.id || null, assignedAt: assignee ? new Date() : null },

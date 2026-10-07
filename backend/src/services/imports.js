@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Op } from 'sequelize';
-import { db, Upload, ImportTemplate, ImportJob, OrderItem, Order, AuditLog } from '../models.js';
+import { db, Upload, ImportTemplate, ImportJob, OrderItem, Order, Purchase, AuditLog } from '../models.js';
 import { uploadPath, saveImage } from './storage.js';
 import { validatePatch } from '../validation.js';
 import { templatePayload } from './templates.js';
@@ -11,13 +11,16 @@ import { IMPORT_MATCH_RULE } from '../lib/order-identity.js';
 import { matchImportRows } from '../lib/import-matching.js';
 import { fieldMap } from '../fields.js';
 
+const importRowOrder = (a, b) =>
+  a.patch.orderNumber.localeCompare(b.patch.orderNumber) || a.rowNumber - b.rowNumber;
+
 export function validateImportMappings(template, kind) {
   if (kind === 'legacy') return;
   const selected = template.mappings.filter((mapping) => mapping.field);
   const allowed = (field) =>
     kind === 'order'
       ? field.group !== 'purchase'
-      : ['orderNumber', 'sku', 'shopName'].includes(field.key) || field.group === 'purchase';
+      : ['orderNumber', 'walmartSku', 'shopName'].includes(field.key) || field.group === 'purchase';
   const invalid = selected.find((mapping) => !allowed(fieldMap[mapping.field]));
   assert(
     !invalid,
@@ -80,7 +83,15 @@ export async function prepareImport(input, user, kind = 'legacy') {
       fieldDefinitions,
     );
     for (const key of ['rows', 'errors', 'warnings'])
-      data[key].push(...extracted[key].map((row) => ({ ...row, sourceName: upload.originalName })));
+      data[key].push(
+        ...extracted[key].map((row) => ({
+          ...row,
+          sourceName: upload.originalName,
+          ...(key === 'rows'
+            ? { purchaseSkuMapped: template.mappings.some((mapping) => mapping.field === 'purchaseSku') }
+            : {}),
+        })),
+      );
     snapshots.push({
       uploadId: upload.id,
       name: upload.originalName,
@@ -101,42 +112,42 @@ export async function prepareImport(input, user, kind = 'legacy') {
   const orderNumbers = [...new Set(data.rows.map((r) => r.patch.orderNumber))];
   const existing = orderNumbers.length
     ? await OrderItem.findAll({
-        include: [{ model: Order, as: 'order', where: { orderNumber: { [Op.in]: orderNumbers } } }],
-        attributes: ['id', 'sku', 'shopName', 'version'],
+        include: [
+          { model: Order, as: 'order', where: { orderNumber: { [Op.in]: orderNumbers } } },
+          { model: Purchase, as: 'purchase', attributes: ['purchaseSku'], required: false },
+        ],
+        attributes: ['id', 'walmartSku', 'shopName', 'version'],
         order: [['id', 'ASC']],
       })
     : [];
-  const targets = matchImportRows(
-    data.rows,
+  const sortedRows = [...data.rows].sort(importRowOrder);
+  const sortedTargets = matchImportRows(
+    sortedRows,
     existing.map((item) => ({
       id: item.id,
       version: item.version,
       orderNumber: item.order.orderNumber,
-      sku: item.sku,
+      walmartSku: item.walmartSku,
       shopName: item.shopName,
+      purchaseSku: item.purchase?.purchaseSku,
     })),
+    kind,
   );
-  for (const [index, row] of data.rows.entries()) {
-    const old = targets[index];
-    row.action = old ? 'update' : kind === 'purchase' ? 'missing' : 'create';
+  for (const [index, row] of sortedRows.entries()) {
+    const old = sortedTargets[index];
+    row.action = old ? 'update' : 'create';
     row.expectedId = old?.id || null;
     row.expectedVersion = old?.version || null;
     if (
       kind === 'purchase' &&
-      !Object.keys(row.patch).some((key) => fieldMap[key]?.group === 'purchase')
+      !Object.keys(row.patch).some((key) => fieldMap[key]?.group === 'purchase') &&
+      !row.purchaseSkuMapped
     )
       data.errors.push({
         row: row.rowNumber,
         sourceName: row.sourceName,
         label: '采购字段',
         message: '本行没有可更新的采购字段',
-      });
-    if (kind === 'purchase' && !old)
-      data.errors.push({
-        row: row.rowNumber,
-        sourceName: row.sourceName,
-        label: '订单匹配',
-        message: '未找到订单号＋SKU＋店铺名相同的商品明细，采购导入不会新建订单',
       });
   }
   const job = await ImportJob.create({
@@ -183,11 +194,6 @@ export async function commitImport(id, user, kind = 'legacy') {
       409,
     );
     assert(!job.errors.length, '存在错误行，请修正 Excel 后重新预览');
-    if (kind === 'purchase')
-      assert(
-        job.rows.every((row) => row.expectedId),
-        '采购导入存在未匹配的订单，请重新预览',
-      );
     assert(
       Date.now() - new Date(job.createdAt).getTime() < 2 * 60 * 60 * 1000,
       '预览已超过 2 小时，请重新生成',
@@ -195,9 +201,7 @@ export async function commitImport(id, user, kind = 'legacy') {
     let added = 0,
       updated = 0;
     // 统一锁顺序，降低多人导入相同订单时死锁的概率。
-    const sorted = [...job.rows].sort(
-      (a, b) => a.patch.orderNumber.localeCompare(b.patch.orderNumber) || a.rowNumber - b.rowNumber,
-    );
+    const sorted = [...job.rows].sort(importRowOrder);
     const orderRows = new Map();
     for (const row of sorted) {
       const number = row.patch.orderNumber;
@@ -211,6 +215,7 @@ export async function commitImport(id, user, kind = 'legacy') {
       // 同订单只读取一次锁定快照，本批新增不能改变后续行的目标。
       const items = await OrderItem.findAll({
         where: { orderId: order.id },
+        include: [{ model: Purchase, as: 'purchase', attributes: ['purchaseSku'], required: false }],
         order: [['id', 'ASC']],
         transaction: t,
         lock: t.LOCK.UPDATE,
@@ -222,9 +227,11 @@ export async function commitImport(id, user, kind = 'legacy') {
           id: item.id,
           version: item.version,
           orderNumber,
-          sku: item.sku,
+          walmartSku: item.walmartSku,
           shopName: item.shopName,
+          purchaseSku: item.purchase?.purchaseSku,
         })),
+        kind,
       );
       rows.forEach((row, index) => targets.set(row, byId.get(matches[index]?.id) || null));
     }

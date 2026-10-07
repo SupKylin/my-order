@@ -50,7 +50,7 @@ export function selectedMappings(mappings = []) {
   return mappings.filter((mapping) => typeof mapping?.field === 'string' && mapping.field.trim());
 }
 
-/** 只校验已选择系统字段的关系；订单号是唯一必填映射，SKU 可选。 */
+/** 只校验已选择系统字段的关系；订单号是唯一必填映射，WalmartSku 可选。 */
 export function mappingIssues(mappings = [], fields = []) {
   const issues = [];
   const fieldMap = new Map(fields.map((field) => [field.key, field]));

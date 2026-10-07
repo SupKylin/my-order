@@ -6,7 +6,7 @@ const cards = [
   {
     label: '商品明细总数',
     icon: Box,
-    caption: '按订单号＋SKU＋店铺名统计',
+    caption: '按店铺名＋订单号＋WalmartSku 统计',
     kind: 'all',
     valueKey: 'total',
   },

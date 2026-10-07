@@ -34,7 +34,7 @@ export async function extractRows(loaded, template, savePicture, fieldDefinition
       else {
         mappingWarnings.push({
           row: template.headerRow,
-          message: ['sku', 'shopName'].includes(m.field)
+          message: ['walmartSku', 'shopName'].includes(m.field)
             ? `本次缺少“${m.header}”列，该项按空值匹配，只匹配对应空值的旧明细`
             : `本次缺少“${m.header}”列，对应字段将保留原值`,
         });

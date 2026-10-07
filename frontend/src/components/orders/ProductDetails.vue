@@ -21,7 +21,7 @@ const meta = useMeta();
       <h3>{{ row.productName || '未填写商品名称' }}</h3>
       <div class="product-grid">
         <div>
-          <label>SKU / 数量</label><span>{{ row.sku || '—' }} / {{ row.quantity ?? '—' }}</span>
+          <label>WalmartSku / 数量</label><span>{{ row.walmartSku || '—' }} / {{ row.quantity ?? '—' }}</span>
         </div>
         <div>
           <label>收件人 / 电话</label

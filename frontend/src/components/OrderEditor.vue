@@ -55,7 +55,7 @@ async function save() {
     ><div class="drawer-intro">
       <span class="pill">{{ item?.orderNumber || '新订单' }}</span
       ><span class="muted">{{
-        item?.sku || '订单号＋SKU＋店铺名识别明细，SKU、店铺名可留空'
+        item?.walmartSku || '店铺名＋订单号＋WalmartSku 识别明细，WalmartSku、店铺名可留空'
       }}</span>
     </div>
     <el-form label-position="top"

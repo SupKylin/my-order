@@ -9,7 +9,7 @@ const template = (fields, purchaseChannelId = null) => ({
 });
 
 test('订单入口拒绝采购字段和采购渠道绑定', () => {
-  assert.doesNotThrow(() => validateImportMappings(template(['orderNumber', 'sku']), 'order'));
+  assert.doesNotThrow(() => validateImportMappings(template(['orderNumber', 'walmartSku']), 'order'));
   assert.throws(
     () => validateImportMappings(template(['orderNumber', 'purchaseNote']), 'order'),
     /不属于订单导入字段/,
@@ -23,12 +23,12 @@ test('订单入口拒绝采购字段和采购渠道绑定', () => {
 test('采购入口需要采购字段且拒绝订单业务字段', () => {
   assert.doesNotThrow(() =>
     validateImportMappings(
-      template(['orderNumber', 'sku', 'shopName', 'purchaseNote']),
+      template(['orderNumber', 'walmartSku', 'shopName', 'purchaseSku', 'purchaseNote']),
       'purchase',
     ),
   );
   assert.throws(
-    () => validateImportMappings(template(['orderNumber', 'sku']), 'purchase'),
+    () => validateImportMappings(template(['orderNumber', 'walmartSku']), 'purchase'),
     /至少需要映射一个采购字段/,
   );
   assert.throws(
