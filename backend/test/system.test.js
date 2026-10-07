@@ -921,15 +921,12 @@ test('采购渠道多选与斜杠导入、历史单选兼容及主管确认新�
   assert.equal(cleared.data.purchaseChannel, null);
 });
 
-test('Excel 上传边界为 50 MB，超过上限在文件解析前拒绝', async () => {
-  for (const extra of [0, 1]) {
-    const body = new FormData();
-    body.append('file', new Blob([Buffer.alloc(50 * 1024 * 1024 + extra)]), `${prefix}-LIMIT.xlsx`);
-    const result = await request('/api/uploads/excel', 'POST', body);
-    assert.equal(result.status, 400);
-    // 边界大小通过上传限制后由格式校验拒绝；超限直接由上传中间件拒绝。
-    assert.match(result.data.message, extra ? /文件过大.*50 MB/ : /不是有效的 XLSX/);
-  }
+test('Excel 上传超过旧 50 MB 上限后仍进入格式校验', async () => {
+  const body = new FormData();
+  body.append('file', new Blob([Buffer.alloc(50 * 1024 * 1024 + 1)]), `${prefix}-LIMIT.xlsx`);
+  const result = await request('/api/uploads/excel', 'POST', body);
+  assert.equal(result.status, 400);
+  assert.match(result.data.message, /不是有效的 XLSX/);
 });
 
 test('订单号与完整渠道组合匹配，SKU 可不填不映射、变更不新增，不覆盖其他渠道', async () => {

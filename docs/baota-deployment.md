@@ -52,16 +52,20 @@ npm run build
 为测试域名或测试站点添加反向代理至 `http://127.0.0.1:3000`。在宝塔站点对应的 Nginx 配置中设置下列内容；已有反向代理时编辑其 `location /`，不要重复添加：
 
 ```nginx
-client_max_body_size 65m;
+client_max_body_size 2050m;
+client_body_timeout 7200s;
 location / {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Host $http_host;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_read_timeout 180s;
-    proxy_send_timeout 180s;
+    proxy_read_timeout 7200s;
+    proxy_send_timeout 7200s;
+    proxy_request_buffering off;
 }
 ```
+
+上传上限为 2 GB（2 × 1024³ 字节）；Nginx 使用 2050m 给 multipart 请求预留空间。请修改实际访问站点的配置（不是宝塔面板本身），检查配置后重载 Nginx。直接访问 Docker 的 Node 端口时不经过 Nginx。Excel 解析仍限制解压后内容不超过 300 MB、10000 行；不要为大文件移除该保护。上传临时文件位于 `backend/storage/.tmp-uploads`，应保证存储盘有足够空间；异常断电留下的临时文件仅在确认没有上传进行时清理。
 
 由 Node 提供页面，不要把整个源码目录直接公开为静态网站。站点入口端口需要在宝塔防火墙和云服务器安全组放行；通过反代访问时不必开放 3000 或数据库端口。
 

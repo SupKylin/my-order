@@ -12,7 +12,7 @@ defineProps({ uploading: Boolean, upload: { type: Function, required: true } });
       :disabled="uploading"
       ><el-icon class="upload-icon"><UploadFilled /></el-icon>
       <h3>{{ uploading ? '正在读取文件与工作表…' : '拖拽 Excel 到这里，或点击选择文件' }}</h3>
-      <p>支持 .xlsx，最大 50 MB；可读取嵌入式图片。</p>
+      <p>支持 .xlsx，上传最大 2 GB；解压后内容最多 300 MB、最多 10000 行，可读取嵌入式图片。</p>
       <el-button type="primary" :loading="uploading">选择 Excel 文件</el-button></el-upload
     >
     <div class="import-rule">

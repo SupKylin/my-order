@@ -45,7 +45,7 @@ npm run dev
 
 升级匹配规则时，迁移会允许 SKU 为空，并将订单 ID＋采购渠道集合摘要的唯一约束替换为普通索引，保留所有明细和采购记录。旧规则生成但尚未提交的导入预览需要重新生成。
 
-支持 `.xlsx`（旧 `.xls` 请在 Excel 中另存为 `.xlsx`），支持不同工作表和 1–100 行范围内的表头。默认上限 50 MB / 10000 数据行，图片上限 15 MB。
+支持 `.xlsx`（旧 `.xls` 请在 Excel 中另存为 `.xlsx`），支持不同工作表和 1–100 行范围内的表头。上传上限 2 GB（2 × 1024³ 字节），Excel 解压后内容上限仍为 300 MB / 10000 数据行，图片上限 15 MB。上传流写入磁盘临时文件，上传失败或断开连接时清理；解析仍受上述限制，大文件并不保证可导入。
 
 采购金额和价格系数为字符串（最多 255 个字符），支持非数字内容，不做小数位数校验或金额格式化；税费、订单金额、采购商品链接金额和采购限价仍最多支持 20 位小数。Excel 高精度数据请使用文本单元格；Excel 数值本身已丢失的有效位无法恢复。
 
@@ -144,5 +144,5 @@ npm run format:check  # 只检查格式，可用于提交前或 CI
 1. 备份并迁移 `my_order` 和整个 `backend/storage/`，保持两者一致；不要在新服务器执行清空重置命令。
 2. 部署 Node / MySQL，设置生产 `.env`：`NODE_ENV=production`、新数据库凭据、随机 `SESSION_SECRET`、`PUBLIC_BASE_URL=https://实际域名`、`APP_ORIGIN=https://实际域名`、`COOKIE_SECURE=true`、`TRUST_PROXY=true`。
 3. `npm ci` 后 `npm run build`，用进程管理器运行 `npm start`。Express 会托管 `frontend/dist`，生产无需暴露 Vite。
-4. Nginx 用 HTTPS 反代 `127.0.0.1:3000`，转发 `Host`、`X-Forwarded-Proto`、`X-Forwarded-For`，将上传限额设为至少 `65m`，导入请求超时设为 `180s`。
+4. Nginx 用 HTTPS 反代 `127.0.0.1:3000`，转发 `Host`、`X-Forwarded-Proto`、`X-Forwarded-For`，将上传限额设为`2050m`（为 2 GB 文件预留 multipart 开销），`client_body_timeout`、`proxy_read_timeout`、`proxy_send_timeout` 设为 `7200s`，并设置 `proxy_request_buffering off`。
 5. 仅开放 80/443，数据库保持内网访问，验证公网图片地址、登录 Cookie 和文件备份。迁移后旧会话会因新密钥失效，用户重新登录即可。

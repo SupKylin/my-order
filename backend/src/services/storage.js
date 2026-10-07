@@ -63,11 +63,18 @@ export async function saveImage(buffer, userId, originalName = '嵌入图片') {
 export async function saveExcel(file, userId) {
   if (!file || !/\.xlsx$/i.test(file.originalname))
     throw new AppError(400, '请上传 .xlsx 文件；旧版 .xls 请先另存为 .xlsx');
-  if (file.buffer[0] !== 0x50 || file.buffer[1] !== 0x4b)
+  const handle = await fs.open(file.path, 'r');
+  const signature = Buffer.alloc(2);
+  try {
+    await handle.read(signature, 0, 2, 0);
+  } finally {
+    await handle.close();
+  }
+  if (signature[0] !== 0x50 || signature[1] !== 0x4b)
     throw new AppError(400, '文件不是有效的 XLSX 工作簿');
   const id = randomUUID(),
     filename = `${id}.xlsx`;
-  await fs.writeFile(path.join(excelDir, filename), file.buffer);
+  await fs.rename(file.path, path.join(excelDir, filename));
   try {
     return await Upload.create({
       id,
