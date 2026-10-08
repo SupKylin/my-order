@@ -1,6 +1,7 @@
 <script setup>
 import { Box } from '@element-plus/icons-vue';
 import { useMeta } from '../../stores/meta';
+import WalmartDetails from './WalmartDetails.vue';
 defineProps({ row: { type: Object, required: true } });
 const meta = useMeta();
 </script>
@@ -14,6 +15,14 @@ const meta = useMeta();
       preview-teleported
       class="product-thumb"
     />
+    <el-image
+      v-else-if="row.walmart?.imageUrl"
+      :src="row.walmart.imageUrl"
+      :preview-src-list="[row.walmart.imageUrl]"
+      fit="contain"
+      preview-teleported
+      class="product-thumb"
+    />
     <div v-else class="image-placeholder">
       <el-icon :size="25"><Box /></el-icon><span>暂无图片</span>
     </div>
@@ -21,11 +30,15 @@ const meta = useMeta();
       <h3>{{ row.productName || '未填写商品名称' }}</h3>
       <div class="product-grid">
         <div>
-          <label>WalmartSku / 数量</label><span>{{ row.walmartSku || '—' }} / {{ row.quantity ?? '—' }}</span>
+          <label>WalmartSku / 数量</label
+          ><span>{{ row.walmartSku || '—' }} / {{ row.quantity ?? '—' }}</span>
         </div>
         <div>
           <label>收件人 / 电话</label
           ><span>{{ row.recipientName || '—' }} / {{ row.phone || '—' }}</span>
+        </div>
+        <div class="wide">
+          <label>商品规格</label><span>{{ row.productSpecification || '—' }}</span>
         </div>
         <div class="wide">
           <label>收件地址</label
@@ -42,6 +55,7 @@ const meta = useMeta();
           <label>跟单备注</label><span>{{ row.followupNote || '—' }}</span>
         </div>
       </div>
+      <WalmartDetails v-if="row.walmart" :value="row.walmart" />
     </div>
   </div>
 </template>

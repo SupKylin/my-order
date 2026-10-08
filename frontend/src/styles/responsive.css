@@ -11,7 +11,7 @@
   }
 }
 @media (max-width: 1200px) {
-  .sidebar-hover-zone {
+  .app-shell {
     --sidebar-width: 200px;
   }
   .sidebar {
@@ -73,7 +73,7 @@
   .topbar-right {
     margin-left: auto;
   }
-  .sidebar-hover-zone {
+  .app-shell {
     --sidebar-width: min(230px, 85vw);
   }
   .date-label {

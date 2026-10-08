@@ -10,7 +10,7 @@ export function securityHeaders() {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'blob:', config.publicBase],
+        imgSrc: ["'self'", 'data:', 'blob:', config.publicBase, 'https://*.walmartimages.com'],
         connectSrc: ["'self'"],
         upgradeInsecureRequests: config.secure ? [] : null,
       },

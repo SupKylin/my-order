@@ -8,6 +8,7 @@ const orderKeys = [
   'platformDeliveryDate',
   'actualDeliveryDate',
   'orderStatus',
+  'platformOrderStatus',
   'orderAmount',
   'tax',
 ];
@@ -35,6 +36,7 @@ const widths = {
   platformShipDate: 155,
   platformTrackingNumber: 200,
   orderStatus: 210,
+  platformOrderStatus: 145,
   purchaseStatus: 200,
   purchaseChannel: 190,
   trackingNumber: 200,

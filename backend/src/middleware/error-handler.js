@@ -2,7 +2,7 @@
 export function errorHandler(error, req, res, next) {
   if (res.headersSent) return next(error);
   if (error.name === 'SequelizeUniqueConstraintError') {
-    return res.status(409).json({ message: '账号、模板名或店铺名＋订单号＋WalmartSku 已存在' });
+    return res.status(409).json({ message: '名称或订单标识已存在，请修改后重试' });
   }
   if (error.name === 'MulterError') {
     return res.status(400).json({

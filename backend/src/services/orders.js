@@ -149,6 +149,7 @@ export function buildFilters(query, now = Date.now()) {
     if (names.length) where.shopName = { [Op.in]: [...new Set(names)] };
   } else if (query.shopName) where.shopName = String(query.shopName);
   if (query.orderStatus) where.orderStatus = String(query.orderStatus);
+  if (query.platformOrderStatus) where.platformOrderStatus = String(query.platformOrderStatus);
   for (const key of ['purchaseStatus', 'settlement', 'allocatable', 'afterSales'])
     if (query[key]) purchaseWhere[key] = String(query[key]);
   if (query.purchaseChannel) {
@@ -242,8 +243,11 @@ export function buildFilters(query, now = Date.now()) {
     const { first, last } = shippingWindow(now);
     const dates =
       query.shippingWarning === 'red' ? { [Op.lt]: first } : { [Op.gte]: first, [Op.lte]: last };
-    // 和手填发货日期、价格等级等条件取交集，空发货日期不匹配。
-    where[Op.and] = [...(where[Op.and] || []), { platformShipDate: dates }];
+    // 仅已确认的平台订单预警，并与日期、价格等筛选条件取交集。
+    where[Op.and] = [
+      ...(where[Op.and] || []),
+      { platformShipDate: dates, platformOrderStatus: '已确认' },
+    ];
   }
   if (query.trackingWarning) {
     assert(
@@ -296,9 +300,14 @@ export async function listOrders(query) {
     distinct: true,
     subQuery: false,
   });
-  // 沿用列表筛选条件，按发货日期聚合全部匹配明细，数量不受分页影响。
+  // 只统计已确认的明细，沿用列表筛选条件且不受分页影响。
   const shippingDates = await OrderItem.findAll({
-    where: { [Op.and]: [filters.where, { platformShipDate: { [Op.ne]: null } }] },
+    where: {
+      [Op.and]: [
+        filters.where,
+        { platformShipDate: { [Op.ne]: null }, platformOrderStatus: '已确认' },
+      ],
+    },
     include: filters.include.map((relation) => ({ ...relation, attributes: [], include: [] })),
     attributes: ['platformShipDate', [fn('COUNT', col('OrderItem.id')), 'count']],
     group: [col('OrderItem.platformShipDate')],
@@ -449,7 +458,7 @@ export async function updateOrderStatus(input, user) {
     '商品明细参数错误',
   );
   assert(new Set(entries.map((entry) => entry.id)).size === entries.length, '商品明细不能重复');
-  assert(typeof input.orderStatus === 'string' && input.orderStatus.trim(), '请选择订单状态');
+  assert(typeof input.orderStatus === 'string' && input.orderStatus.trim(), '请选择运营订单状态');
   await db.transaction(async (transaction) => {
     const definitions = await getFieldDefinitions(transaction);
     const { orderStatus } = validatePatch(

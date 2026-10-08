@@ -1,18 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import { Op } from 'sequelize';
-import { db, Upload, ImportTemplate, ImportJob, OrderItem, Order, Purchase, AuditLog } from '../models.js';
+import {
+  db,
+  Upload,
+  ImportTemplate,
+  ImportJob,
+  OrderItem,
+  Order,
+  Purchase,
+  AuditLog,
+} from '../models.js';
 import { uploadPath, saveImage } from './storage.js';
 import { validatePatch } from '../validation.js';
 import { templatePayload } from './templates.js';
 import { getFieldDefinitions } from './dictionaries.js';
 import { upsertImported } from './orders.js';
 import { AppError, assert } from '../errors.js';
-import { IMPORT_MATCH_RULE } from '../lib/order-identity.js';
-import { matchImportRows } from '../lib/import-matching.js';
+import { IMPORT_MATCH_RULE, PURCHASE_MATCH_RULE } from '../lib/order-identity.js';
+import { matchImportRows, matchPurchaseRows } from '../lib/import-matching.js';
 import { fieldMap } from '../fields.js';
 
 const importRowOrder = (a, b) =>
-  a.patch.orderNumber.localeCompare(b.patch.orderNumber) || a.rowNumber - b.rowNumber;
+  a.patch.orderNumber.localeCompare(b.patch.orderNumber) ||
+  (a.sequence ?? a.rowNumber) - (b.sequence ?? b.rowNumber);
 
 export function validateImportMappings(template, kind) {
   if (kind === 'legacy') return;
@@ -26,12 +36,17 @@ export function validateImportMappings(template, kind) {
     !invalid,
     `“${fieldMap[invalid?.field]?.label}”不属于${kind === 'order' ? '订单' : '采购'}导入字段`,
   );
-  if (kind === 'purchase')
+  if (kind === 'purchase') {
     assert(
       selected.some((mapping) => fieldMap[mapping.field].group === 'purchase'),
       '采购导入至少需要映射一个采购字段',
     );
-  else assert(!template.purchaseChannelId, '订单导入不能绑定采购渠道');
+    for (const key of ['shopName', 'orderNumber', 'walmartSku'])
+      assert(
+        selected.some((mapping) => mapping.field === key),
+        `采购导入必须映射${fieldMap[key].label}`,
+      );
+  } else assert(!template.purchaseChannelId, '订单导入不能绑定采购渠道');
 }
 export async function getExcelUpload(id) {
   const file = await Upload.findByPk(id);
@@ -88,7 +103,11 @@ export async function prepareImport(input, user, kind = 'legacy') {
           ...row,
           sourceName: upload.originalName,
           ...(key === 'rows'
-            ? { purchaseSkuMapped: template.mappings.some((mapping) => mapping.field === 'purchaseSku') }
+            ? {
+                purchaseSkuMapped: template.mappings.some(
+                  (mapping) => mapping.field === 'purchaseSku',
+                ),
+              }
             : {}),
         })),
       );
@@ -100,7 +119,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
   }
   const template = {
     ...firstTemplate,
-    matchRule: IMPORT_MATCH_RULE,
+    matchRule: kind === 'purchase' ? PURCHASE_MATCH_RULE : IMPORT_MATCH_RULE,
     importKind: kind,
     sources: snapshots,
     purchaseChannel: snapshots.length === 1 ? firstTemplate.purchaseChannel : null,
@@ -121,27 +140,37 @@ export async function prepareImport(input, user, kind = 'legacy') {
       })
     : [];
   const sortedRows = [...data.rows].sort(importRowOrder);
-  const sortedTargets = matchImportRows(
-    sortedRows,
-    existing.map((item) => ({
-      id: item.id,
-      version: item.version,
-      orderNumber: item.order.orderNumber,
-      walmartSku: item.walmartSku,
-      shopName: item.shopName,
-      purchaseSku: item.purchase?.purchaseSku,
-    })),
-    kind,
-  );
+  // 采购重复行按上传文件顺序、文件内行顺序更新，后面的非空字段生效。
+  if (kind === 'purchase') {
+    data.rows.forEach((row, index) => {
+      row.sequence = index;
+    });
+    sortedRows.sort(importRowOrder);
+  }
+  const existingRows = existing.map((item) => ({
+    id: item.id,
+    version: item.version,
+    orderNumber: item.order.orderNumber,
+    walmartSku: item.walmartSku,
+    shopName: item.shopName,
+    purchaseSku: item.purchase?.purchaseSku,
+  }));
+  const purchaseMatches = kind === 'purchase' ? matchPurchaseRows(sortedRows, existingRows) : [];
+  const sortedTargets =
+    kind === 'purchase'
+      ? purchaseMatches.map((match) => match.target)
+      : matchImportRows(sortedRows, existingRows, kind);
   for (const [index, row] of sortedRows.entries()) {
     const old = sortedTargets[index];
-    row.action = old ? 'update' : 'create';
+    row.action = old ? 'update' : kind === 'purchase' ? 'missing' : 'create';
     row.expectedId = old?.id || null;
     row.expectedVersion = old?.version || null;
+    if (row.action === 'missing') row.skipReason = purchaseMatches[index].reason;
     if (
       kind === 'purchase' &&
       !Object.keys(row.patch).some((key) => fieldMap[key]?.group === 'purchase') &&
-      !row.purchaseSkuMapped
+      !row.purchaseSkuMapped &&
+      row.action !== 'missing'
     )
       data.errors.push({
         row: row.rowNumber,
@@ -168,6 +197,7 @@ export function previewResult(job) {
     total: rows.length,
     added: rows.filter((r) => r.action === 'create').length,
     updated: rows.filter((r) => r.action === 'update').length,
+    ...skippedResult(rows),
     errorCount: job.errors.length,
     errors: job.errors.slice(0, 200),
     warnings: job.warnings.slice(0, 100),
@@ -179,6 +209,21 @@ export function previewResult(job) {
     createdAt: job.createdAt,
   };
 }
+
+/** 完整保留未匹配清单，预览、提交结果及历史记录使用同一份报告。 */
+function skippedResult(rows) {
+  const skippedRows = rows
+    .filter((row) => row.action === 'missing')
+    .map((row) => ({
+      rowNumber: row.rowNumber,
+      sourceName: row.sourceName,
+      shopName: row.patch.shopName || '',
+      orderNumber: row.patch.orderNumber,
+      walmartSku: row.patch.walmartSku || '',
+      reason: row.skipReason || '系统内不存在三项完全一致的订单商品明细',
+    }));
+  return { skipped: skippedRows.length, skippedRows };
+}
 /** 幂等提交预览；版本冲突或任意错误都会中止整个事务。 */
 export async function commitImport(id, user, kind = 'legacy') {
   return db.transaction(async (t) => {
@@ -187,9 +232,16 @@ export async function commitImport(id, user, kind = 'legacy') {
     assert(job.createdBy === user.id, '请由生成预览的账号确认导入', 403);
     assert((job.templateSnapshot.importKind || 'legacy') === kind, '请使用对应的导入入口确认', 409);
     if (job.status === 'completed')
-      return { id: job.id, added: job.added, updated: job.updated, alreadyCompleted: true };
+      return {
+        id: job.id,
+        added: job.added,
+        updated: job.updated,
+        ...skippedResult(job.rows),
+        alreadyCompleted: true,
+      };
     assert(
-      job.templateSnapshot.matchRule === IMPORT_MATCH_RULE,
+      job.templateSnapshot.matchRule ===
+        (kind === 'purchase' ? PURCHASE_MATCH_RULE : IMPORT_MATCH_RULE),
       '导入匹配规则已更新，请重新预览',
       409,
     );
@@ -201,7 +253,10 @@ export async function commitImport(id, user, kind = 'legacy') {
     let added = 0,
       updated = 0;
     // 统一锁顺序，降低多人导入相同订单时死锁的概率。
-    const sorted = [...job.rows].sort(importRowOrder);
+    // 未匹配行只生成报告，不查找/创建订单，提交时也不会转为新增。
+    const sorted = job.rows
+      .filter((row) => kind !== 'purchase' || row.action === 'update')
+      .sort(importRowOrder);
     const orderRows = new Map();
     for (const row of sorted) {
       const number = row.patch.orderNumber;
@@ -210,12 +265,18 @@ export async function commitImport(id, user, kind = 'legacy') {
     }
     const targets = new Map();
     for (const [orderNumber, rows] of orderRows) {
-      const [order] = await Order.findOrCreate({ where: { orderNumber }, transaction: t });
+      const order =
+        kind === 'purchase'
+          ? await Order.findOne({ where: { orderNumber }, transaction: t, lock: t.LOCK.UPDATE })
+          : (await Order.findOrCreate({ where: { orderNumber }, transaction: t }))[0];
+      assert(order, '匹配订单在预览后已被删除，请重新预览', 409);
       await order.reload({ transaction: t, lock: t.LOCK.UPDATE });
       // 同订单只读取一次锁定快照，本批新增不能改变后续行的目标。
       const items = await OrderItem.findAll({
         where: { orderId: order.id },
-        include: [{ model: Purchase, as: 'purchase', attributes: ['purchaseSku'], required: false }],
+        include: [
+          { model: Purchase, as: 'purchase', attributes: ['purchaseSku'], required: false },
+        ],
         order: [['id', 'ASC']],
         transaction: t,
         lock: t.LOCK.UPDATE,
@@ -236,6 +297,16 @@ export async function commitImport(id, user, kind = 'legacy') {
       rows.forEach((row, index) => targets.set(row, byId.get(matches[index]?.id) || null));
     }
     const fieldDefinitions = await getFieldDefinitions(t);
+    // 同一 Excel 多行可更新同一已有明细，先核对导入前版本，再按文件/行顺序写入。
+    for (const row of sorted) {
+      const item = targets.get(row);
+      if ((item?.id || null) !== row.expectedId || (item?.version || null) !== row.expectedVersion)
+        throw new AppError(
+          409,
+          `第 ${row.rowNumber} 行对应商品在预览后发生变化，请重新预览，避免覆盖他人修改`,
+        );
+      if (kind === 'purchase') assert(item, '采购导入仅允许更新已有商品明细，请重新预览', 409);
+    }
     for (const row of sorted) {
       // 预览与提交之间字典可能发生变化；重新验证，防止写入已停用或旧名称。
       try {
@@ -249,11 +320,6 @@ export async function commitImport(id, user, kind = 'legacy') {
         throw new AppError(409, `第 ${row.rowNumber} 行的下拉选项已变化，请重新预览`);
       }
       const item = targets.get(row);
-      if ((item?.id || null) !== row.expectedId || (item?.version || null) !== row.expectedVersion)
-        throw new AppError(
-          409,
-          `第 ${row.rowNumber} 行对应商品在预览后发生变化，请重新预览，避免覆盖他人修改`,
-        );
       const result = await upsertImported(row.patch, t, user, item);
       result.created ? added++ : updated++;
     }
@@ -269,13 +335,14 @@ export async function commitImport(id, user, kind = 'legacy') {
         details: {
           added,
           updated,
+          skipped: skippedResult(job.rows).skipped,
           filename: (await Upload.findByPk(job.uploadId, { transaction: t }))?.originalName,
           filenames: job.templateSnapshot.sources?.map((source) => source.name),
         },
       },
       { transaction: t },
     );
-    return { id: job.id, added, updated };
+    return { id: job.id, added, updated, ...skippedResult(job.rows) };
   });
 }
 

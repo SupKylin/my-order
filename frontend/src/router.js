@@ -9,17 +9,18 @@ const router = createRouter({
     {
       path: '/orders',
       component: () => import('./views/Orders.vue'),
-      meta: { title: '订单管理', subtitle: '从订单导入到采购交付，让每一件商品都有迹可循。' },
+      meta: { title: '订单管理', subtitle: '同步 Walmart 官方订单，管理采购与交付进度。' },
     },
     {
       path: '/allocation',
       redirect: { path: '/orders', query: { assignedTo: 'unassigned' } },
     },
-    {
-      path: '/imports/new',
-      component: () => import('./views/Import.vue'),
-      meta: { title: '导入订单', subtitle: '映射表头、检查预览，将每日订单有序同步到系统。' },
-    },
+    // 订单统一从 Walmart API 接入；保留原页面与路由代码。
+    // {
+    //   path: '/imports/new',
+    //   component: () => import('./views/Import.vue'),
+    //   meta: { title: '导入订单', subtitle: '映射表头、检查预览，将每日订单有序同步到系统。' },
+    // },
     {
       path: '/imports/purchases/new',
       component: () => import('./views/PurchaseImport.vue'),
@@ -43,9 +44,17 @@ const router = createRouter({
       component: () => import('./views/Users.vue'),
       meta: { title: '账号管理', subtitle: '维护团队账号与角色，当前三个角色均开放全部业务功能。' },
     },
+    {
+      path: '/stores',
+      component: () => import('./views/Stores.vue'),
+      meta: {
+        title: '店铺管理',
+        subtitle: '维护 Walmart 店铺与系统店铺名称，并保存 Client ID 和 Client Secret。',
+      },
+    },
     ...[
       ['channels', '采购渠道维护', 'purchaseChannel'],
-      ['order-statuses', '订单状态维护', 'orderStatus'],
+      ['order-statuses', '运营订单状态维护', 'orderStatus'],
       ['purchase-statuses', '采购状态维护', 'purchaseStatus'],
     ].map(([path, title, dictionaryKind]) => ({
       path: `/settings/${path}`,

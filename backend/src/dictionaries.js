@@ -2,7 +2,7 @@ import { CHANNELS, ORDER_STATUSES, PURCHASE_STATUSES } from './fields.js';
 
 export const dictionaryKinds = {
   purchaseChannel: { label: '采购渠道', defaults: CHANNELS },
-  orderStatus: { label: '订单状态', defaults: ORDER_STATUSES },
+  orderStatus: { label: '运营订单状态', defaults: ORDER_STATUSES },
   purchaseStatus: { label: '采购状态', defaults: PURCHASE_STATUSES },
 };
 

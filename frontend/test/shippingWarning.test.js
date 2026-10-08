@@ -2,9 +2,39 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   shippingWarning,
+  orderShippingWarning,
   shippingRemainingHours,
   countShippingWarnings,
 } from '../src/utils/shippingWarning.js';
+
+test('仅平台已确认明细预警，其他、空值和混合状态在所有预警区间均不预警', () => {
+  const deadline = Date.parse('2026-10-03T15:00:00+08:00');
+  for (const [remaining, expected] of [
+    [36 * 3600000, 'yellow'],
+    [12 * 3600000, 'orange'],
+    [-1, 'red'],
+  ]) {
+    for (const platformOrderStatus of [
+      '已确认',
+      '待确认',
+      '已发货',
+      '已取消',
+      '已送达',
+      '',
+      null,
+      undefined,
+      '已确认, 已发货',
+    ]) {
+      assert.equal(
+        orderShippingWarning(
+          { platformOrderStatus, platformShipDate: '2026-10-02' },
+          deadline - remaining,
+        ),
+        platformOrderStatus === '已确认' ? expected : '',
+      );
+    }
+  }
+});
 
 test('平台发货预警按次日北京时间 15:00 截止，正确处理 48/24 小时及逾期边界', () => {
   const deadline = Date.parse('2026-10-03T15:00:00+08:00');

@@ -78,6 +78,8 @@ export const OrderItem = db.define(
     purchaseChannelKey: { type: DataTypes.STRING(64), allowNull: false },
     orderIdentityKey: { type: DataTypes.STRING(64), allowNull: true },
     sku: { type: DataTypes.STRING(191), allowNull: true },
+    walmartSourceKey: { type: DataTypes.STRING(64), allowNull: true, unique: true },
+    walmart: { type: DataTypes.JSON, allowNull: true },
     ...attrs('item'),
     version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
   },
@@ -143,6 +145,18 @@ export const DictionaryOption = db.define(
     version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
   },
   { tableName: 'dictionary_options', indexes: [{ unique: true, fields: ['kind', 'value'] }] },
+);
+export const Store = db.define(
+  'Store',
+  {
+    id: id(),
+    walmartStoreName: { type: DataTypes.STRING(191), allowNull: false, unique: true },
+    systemStoreName: { type: DataTypes.STRING(191), allowNull: false, unique: true },
+    clientId: { type: DataTypes.STRING(255), allowNull: true },
+    clientSecret: { type: DataTypes.TEXT, allowNull: true },
+    version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+  },
+  { tableName: 'stores' },
 );
 export const ImportJob = db.define(
   'ImportJob',
@@ -210,6 +224,7 @@ export function serializeItem(instance) {
     assignee: value.purchase?.assignee || null,
     priceFactorLevel: priceFactorLevel(value.purchase?.priceFactor),
     purchaseConfirmedAt: value.purchase?.purchaseConfirmedAt || null,
+    walmart: value.walmart || null,
   };
   for (const f of fields) {
     if (f.key === 'orderNumber') continue;

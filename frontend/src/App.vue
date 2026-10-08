@@ -1,5 +1,5 @@
 <script setup>
-import { defineAsyncComponent, ref, watch } from 'vue';
+import { defineAsyncComponent, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   Box,
@@ -30,29 +30,19 @@ const auth = useAuth(),
   router = useRouter();
 const menus = [
   { path: '/orders', label: '订单管理', icon: Box },
-  { path: '/imports/new', label: '导入订单', icon: Upload },
+  // 订单统一由 Walmart API 接入，保留 Excel 导入入口代码。
+  // { path: '/imports/new', label: '导入订单', icon: Upload },
   { path: '/imports/purchases/new', label: '导入采购', icon: Upload },
   { path: '/templates', label: '导入模板', icon: Document },
   { path: '/imports', label: '导入记录', icon: Clock },
   { path: '/users', label: '账号管理', icon: User },
+  { path: '/stores', label: '店铺管理', icon: Setting },
   { path: '/settings/channels', label: '采购渠道维护', icon: Setting },
-  { path: '/settings/order-statuses', label: '订单状态维护', icon: Setting },
+  { path: '/settings/order-statuses', label: '运营订单状态维护', icon: Setting },
   { path: '/settings/purchase-statuses', label: '采购状态维护', icon: Setting },
 ];
 const showPassword = ref(false);
 const sidebarOpen = ref(false);
-watch(
-  () => route.path,
-  () => {
-    sidebarOpen.value = false;
-  },
-);
-function showSidebarOnHover(event) {
-  if (event.pointerType === 'mouse') sidebarOpen.value = true;
-}
-function hideSidebarOnLeave(event) {
-  if (event.pointerType === 'mouse') sidebarOpen.value = false;
-}
 async function signOut() {
   try {
     await ElMessageBox.confirm('确认退出当前账号？', '退出登录', { type: 'info' });
@@ -64,14 +54,14 @@ async function signOut() {
 <template>
   <el-config-provider :locale="zhCn">
     <router-view v-if="route.meta.public" />
-    <div v-else class="app-shell" @keydown.esc="sidebarOpen = false">
-      <div
-        class="sidebar-hover-zone"
-        :class="{ 'is-open': sidebarOpen }"
-        @pointerenter="showSidebarOnHover"
-        @pointerleave="hideSidebarOnLeave"
-      >
-        <aside class="sidebar" :inert="!sidebarOpen" :aria-hidden="!sidebarOpen">
+    <div v-else class="app-shell">
+      <div class="sidebar-container" :class="{ 'is-open': sidebarOpen }">
+        <aside
+          id="sidebar-navigation"
+          class="sidebar"
+          :inert="!sidebarOpen"
+          :aria-hidden="!sidebarOpen"
+        >
           <router-link to="/orders" class="brand"
             ><div class="brand-mark">
               <el-icon :size="24"><Box /></el-icon>
@@ -106,8 +96,13 @@ async function signOut() {
           </div>
         </aside>
       </div>
-      <div v-if="sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false"></div>
-      <div class="workspace" :class="{ 'workspace-orders': route.path === '/orders' }">
+      <div
+        class="workspace"
+        :class="{
+          'workspace-orders': route.path === '/orders',
+          'workspace-sidebar-open': sidebarOpen,
+        }"
+      >
         <header class="topbar">
           <div class="topbar-left">
             <el-button
@@ -117,6 +112,7 @@ async function signOut() {
               :icon="sidebarOpen ? Fold : Expand"
               :aria-label="sidebarOpen ? '收起导航' : '展开导航'"
               :aria-expanded="sidebarOpen"
+              aria-controls="sidebar-navigation"
               @click="sidebarOpen = !sidebarOpen"
             />
             <span class="breadcrumb"

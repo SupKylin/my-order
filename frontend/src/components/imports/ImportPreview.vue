@@ -1,6 +1,7 @@
 <script setup>
 import { Check } from '@element-plus/icons-vue';
 import { useMeta } from '../../stores/meta';
+import SkippedImportRows from './SkippedImportRows.vue';
 defineProps({
   preview: { type: Object, required: true },
   busy: Boolean,
@@ -19,7 +20,8 @@ const meta = useMeta();
     />
     <div class="preview-stats">
       <div>
-        <span>新增商品明细</span><strong class="success-text">{{ preview.added }}</strong>
+        <span>{{ kind === 'purchase' ? '跳过明细' : '新增商品明细' }}</span
+        ><strong>{{ kind === 'purchase' ? preview.skipped : preview.added }}</strong>
       </div>
       <div>
         <span>更新已有明细</span><strong>{{ preview.updated }}</strong>
@@ -41,7 +43,7 @@ const meta = useMeta();
       v-else
       :title="
         kind === 'purchase'
-          ? '预览通过。采购Sku为空或未找到对应明细时新增；其他非空字段更新匹配明细。'
+          ? '仅按系统店铺名＋客户订单号＋Walmart SKU 唯一匹配已有明细；未匹配或存在多条匹配的行跳过，不新增订单。重复导入行按文件及行顺序更新，后面的非空采购字段生效。'
           : '预览通过。按店铺名＋订单号＋WalmartSku 匹配；不同组合新增。仅更新非空的已映射字段。'
       "
       type="success"
@@ -68,6 +70,7 @@ const meta = useMeta();
       :closable="false"
       class="warning-row"
     />
+    <SkippedImportRows :rows="preview.skippedRows" />
     <div class="preview-heading">
       <h3>商品明细预览</h3>
       <span class="muted">共 {{ preview.total }} 条，显示前 {{ preview.previewLimit }} 条</span>
@@ -91,7 +94,11 @@ const meta = useMeta();
             }}</el-tag
           ></template
         ></el-table-column
-      ><el-table-column label="订单号" prop="patch.orderNumber" min-width="170" /><el-table-column
+      ><el-table-column label="系统店铺名" prop="patch.shopName" min-width="120" /><el-table-column
+        label="订单号"
+        prop="patch.orderNumber"
+        min-width="170"
+      /><el-table-column
         label="WalmartSku"
         prop="patch.walmartSku"
         min-width="145"
@@ -140,9 +147,11 @@ const meta = useMeta();
       }}</el-button
       ><el-button v-if="preview.errorCount" @click="emit('reset')" type="primary"
         >重新上传文件</el-button
-      ><el-button v-else type="primary" :loading="busy" :icon="Check" @click="emit('commit')"
-        >确认导入 {{ preview.total }} 条</el-button
-      >
+      ><el-button v-else type="primary" :loading="busy" :icon="Check" @click="emit('commit')">{{
+        kind === 'purchase'
+          ? `确认更新 ${preview.updated} 行（跳过 ${preview.skipped} 行）`
+          : `确认导入 ${preview.total} 条`
+      }}</el-button>
     </div>
   </div>
 </template>

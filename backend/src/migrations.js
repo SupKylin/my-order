@@ -1,5 +1,5 @@
 import { DataTypes, Op, col } from 'sequelize';
-import { db, DictionaryOption, ImportTemplate, OrderItem } from './models.js';
+import { db, DictionaryOption, ImportTemplate, OrderItem, Store } from './models.js';
 import { dictionaryKinds } from './dictionaries.js';
 import { fields } from './fields.js';
 import { migrateOrderIdentity } from './migrations/order-identity.js';
@@ -21,6 +21,28 @@ export async function migrateDictionaries() {
       await DictionaryOption.bulkCreate(
         definition.defaults.map((value, sortOrder) => ({ kind, value, sortOrder })),
       );
+  }
+}
+
+/** 店铺配置是独立业务表，只创建表，不改写已有订单数据。 */
+export async function migrateStores() {
+  await Store.sync();
+  const query = db.getQueryInterface();
+  const columns = await query.describeTable('stores');
+  if (!columns.clientId)
+    await query.addColumn('stores', 'clientId', {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    });
+  if (!columns.clientSecret) {
+    if (columns.secretInfo) {
+      await query.renameColumn('stores', 'secretInfo', 'clientSecret');
+    } else {
+      await query.addColumn('stores', 'clientSecret', {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      });
+    }
   }
 }
 

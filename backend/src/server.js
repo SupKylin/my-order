@@ -3,6 +3,7 @@ import { db, Session } from './models.js';
 import { Op } from 'sequelize';
 import { ensureStorage } from './services/storage.js';
 import { createApp } from './app.js';
+import { startWalmartScheduler } from './services/walmart/sync.js';
 try {
   if (config.secret.length < 32) throw new Error('请先配置 .env 中的 SESSION_SECRET');
   await db.authenticate();
@@ -21,9 +22,11 @@ try {
     60 * 60 * 1000,
   );
   cleanup.unref();
+  const stopWalmart = startWalmartScheduler();
   const stop = () =>
     server.close(async () => {
       clearInterval(cleanup);
+      await stopWalmart();
       await db.close();
       process.exit(0);
     });

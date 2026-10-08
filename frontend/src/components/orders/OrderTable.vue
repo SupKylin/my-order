@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { Upload } from '@element-plus/icons-vue';
-import { shippingWarning } from '../../utils/shippingWarning';
+import { orderShippingWarning } from '../../utils/shippingWarning';
 import OrderCell from './OrderCell.vue';
 import ProductDetails from './ProductDetails.vue';
 const props = defineProps({
@@ -16,7 +16,7 @@ const emit = defineEmits(['selection-change', 'edit', 'assign', 'import', 'delet
 const table = ref();
 const warnings = computed(() =>
   Object.fromEntries(
-    props.rows.map((row) => [row.id, shippingWarning(row.platformShipDate, props.warningNow)]),
+    props.rows.map((row) => [row.id, orderShippingWarning(row, props.warningNow)]),
   ),
 );
 const shippingRowClass = ({ row }) =>
@@ -65,8 +65,10 @@ defineExpose({ clearSelection: () => table.value?.clearSelection() });
       </template></el-table-column
     >
     <template #empty
-      ><el-empty description="暂无匹配的商品明细" :image-size="90">
+      ><el-empty description="暂无匹配的商品明细，请在店铺管理中同步 Walmart 订单" :image-size="90">
+        <!-- 订单来源统一为 Walmart API，保留原 Excel 导入按钮。
         <el-button type="primary" :icon="Upload" @click="emit('import')">导入第一份订单</el-button>
+        -->
       </el-empty></template
     >
   </el-table>

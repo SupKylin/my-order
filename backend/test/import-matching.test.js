@@ -78,7 +78,7 @@ test('去除首尾空格，保留前导零和大小写，分隔符不会碰撞',
   );
 });
 
-test('采购 SKU 为空总是新增，非空按店铺、订单号、WalmartSku 更新', () => {
+test('采购 SKU 为空也匹配同一目标，仅按店铺、订单号、WalmartSku 更新', () => {
   const existing = [item(1, 'A', 'W-1', '店', null, 'P-1')];
   assert.deepEqual(
     ids(
@@ -91,11 +91,11 @@ test('采购 SKU 为空总是新增，非空按店铺、订单号、WalmartSku �
       existing,
       'purchase',
     ),
-    [null, 1, null, null],
+    [1, 1, null, null],
   );
 });
 
-test('采购导入优先选同采购 SKU 的旧明细，同一批不重复使用旧明细', () => {
+test('采购导入遇到多条三项相同的旧明细时跳过，不用采购 SKU 消除歧义', () => {
   assert.deepEqual(
     ids(
       [
@@ -106,6 +106,6 @@ test('采购导入优先选同采购 SKU 的旧明细，同一批不重复使用
       [item(1, 'A', 'W', '店', null, 'P-1'), item(2, 'A', 'W', '店', null, 'P-2')],
       'purchase',
     ),
-    [2, 1, null],
+    [null, null, null],
   );
 });

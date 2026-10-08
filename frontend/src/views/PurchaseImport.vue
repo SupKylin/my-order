@@ -10,6 +10,9 @@ import { importApi } from '../api/imports';
 import { excelFileFromClipboard } from '../utils/clipboardExcel';
 
 const ImportPreview = defineAsyncComponent(() => import('../components/imports/ImportPreview.vue'));
+const SkippedImportRows = defineAsyncComponent(
+  () => import('../components/imports/SkippedImportRows.vue'),
+);
 const router = useRouter();
 const meta = useMeta();
 let nextZoneId = 0;
@@ -25,7 +28,8 @@ function canImportPurchase(template) {
     .filter((mapping) => mapping.field)
     .map((mapping) => mapping.field);
   return (
-    fields.includes('orderNumber') && fields.some((key) => meta.fieldMap[key]?.group === 'purchase')
+    ['orderNumber', 'shopName', 'walmartSku'].every((key) => fields.includes(key)) &&
+    fields.some((key) => meta.fieldMap[key]?.group === 'purchase')
   );
 }
 const purchaseTemplates = computed(() => templates.value.filter(canImportPurchase));
@@ -125,6 +129,12 @@ function reset() {
 
 <template>
   <section v-if="stage === 'upload'" class="purchase-import-page">
+    <el-alert
+      title="按系统店铺名＋客户订单号＋Walmart SKU 匹配，仅更新唯一匹配的已有明细；未匹配或有重复明细的行跳过，并在结果中列出。"
+      type="info"
+      :closable="false"
+      show-icon
+    />
     <div class="purchase-upload-summary">
       <div class="purchase-upload-heading">
         <h2>
@@ -177,7 +187,9 @@ function reset() {
           :key="template.id"
           :value="template.id"
           :label="
-            canImportPurchase(template) ? template.name : `${template.name}（需映射采购字段）`
+            canImportPurchase(template)
+              ? template.name
+              : `${template.name}（需映射三项匹配字段及采购字段）`
           "
           :disabled="!canImportPurchase(template)"
         />
@@ -222,7 +234,7 @@ function reset() {
     </section>
     <el-empty
       v-if="!purchaseTemplates.length"
-      description="暂无可用模板，请在现有导入模板中映射订单号和采购字段"
+      description="暂无可用模板，请映射店铺名、订单号、Walmart SKU 及采购字段"
     >
       <el-button type="primary" @click="router.push('/templates')">前往导入模板</el-button>
     </el-empty>
@@ -241,13 +253,14 @@ function reset() {
       <el-result
         icon="success"
         title="采购导入完成"
-        :sub-title="`已更新 ${result.updated} 条商品明细。`"
+        :sub-title="`已处理 ${result.updated} 行更新，跳过 ${result.skipped} 行，未新增订单。`"
       >
         <template #extra>
           <el-button @click="reset">继续导入</el-button>
           <el-button type="primary" @click="router.push('/orders')">查看订单</el-button>
         </template>
       </el-result>
+      <SkippedImportRows :rows="result.skippedRows" />
     </div>
   </section>
 </template>

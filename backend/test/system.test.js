@@ -588,7 +588,7 @@ test('错误行阻止整批提交；同一文件重复行全部保留', async ()
   assert.equal((await request(`/api/imports/${d.data.id}/commit`, 'POST')).status, 200);
   assert.equal((await request('/api/orders?q=' + number)).data.total, 2);
 });
-test('订单与采购导入入口隔离；采购 SKU 非空按订单组合更新，空值或无匹配新增', async () => {
+test('订单与采购导入入口隔离；采购仅按三项匹配更新，无匹配跳过且不新增', async () => {
   const number = `${prefix}-SPLIT-IMPORT`;
   orderNumbers.push(number);
   const order = await previewRows(
@@ -657,8 +657,8 @@ test('订单与采购导入入口隔离；采购 SKU 非空按订单组合更新
   });
   assert.equal(duplicate.status, 200, JSON.stringify(duplicate.data));
   jobIds.push(duplicate.data.id);
-  assert.equal(duplicate.data.updated, 1);
-  assert.equal(duplicate.data.added, 1);
+  assert.equal(duplicate.data.updated, 2);
+  assert.equal(duplicate.data.added, 0);
   assert.equal(duplicate.data.errorCount, 0);
   assert.equal(
     (await request(`/api/imports/purchases/${duplicate.data.id}/commit`, 'POST')).status,
@@ -669,7 +669,8 @@ test('订单与采购导入入口隔离；采购 SKU 非空按订单组合更新
   const unmatched = await request('/api/imports/purchases/preview', 'POST', { sources: [missing] });
   assert.equal(unmatched.status, 200, JSON.stringify(unmatched.data));
   jobIds.push(unmatched.data.id);
-  assert.equal(unmatched.data.added, 1);
+  assert.equal(unmatched.data.added, 0);
+  assert.equal(unmatched.data.skipped, 1);
   assert.equal(unmatched.data.errorCount, 0);
   assert.equal(
     (await request(`/api/imports/purchases/${unmatched.data.id}/commit`, 'POST')).status,
@@ -680,8 +681,8 @@ test('订单与采购导入入口隔离；采购 SKU 非空按订单组合更新
   const blankPreview = await request('/api/imports/purchases/preview', 'POST', { sources: [blank] });
   assert.equal(blankPreview.status, 200, JSON.stringify(blankPreview.data));
   jobIds.push(blankPreview.data.id);
-  assert.equal(blankPreview.data.added, 1);
-  assert.equal(blankPreview.data.updated, 0);
+  assert.equal(blankPreview.data.added, 0);
+  assert.equal(blankPreview.data.updated, 1);
   assert.equal((await request(`/api/imports/purchases/${blankPreview.data.id}/commit`, 'POST')).status, 200);
 
   const valid = await request('/api/imports/purchases/preview', 'POST', { sources: [first] });
@@ -695,12 +696,10 @@ test('订单与采购导入入口隔离；采购 SKU 非空按订单组合更新
     200,
   );
   const rows = (await request('/api/orders?q=' + encodeURIComponent(number))).data.rows;
-  assert.equal(rows.length, 4);
+  assert.equal(rows.length, 1);
   assert.equal(rows.find((row) => row.purchaseSku === 'P-1').productName, '原商品');
   assert.equal(rows.find((row) => row.purchaseSku === 'P-1').purchaseNote, '第一次采购');
-  assert.equal(rows.find((row) => row.purchaseSku === 'P-2').purchaseNote, '第二次采购');
-  assert.equal(rows.find((row) => row.purchaseSku === 'P-3').walmartSku, 'NOT-FOUND');
-  assert.equal(rows.find((row) => row.purchaseNote === '空采购Sku新增').purchaseSku, null);
+  assert.equal(rows[0].walmartSku, 'SPLIT-1');
 });
 test('复用模板时列顺序变化可重定位，缺少可选列仍保留原值', async () => {
   const p = await previewRows(
@@ -1395,6 +1394,7 @@ test('发货预警统计覆盖全部筛选明细，不受分页影响且忽略�
       fields: {
         orderNumber,
         platformShipDate: date,
+        platformOrderStatus: '已确认',
         shopName: index < 2 ? '预警店铺A' : '预警店铺B',
         settlement: index < 2 ? '已结算' : '未结算',
       },

@@ -25,6 +25,11 @@ export function shippingWarning(value, now = Date.now()) {
   return '';
 }
 
+/** 仅平台状态为已确认的明细参与预警，空状态和混合状态均不预警。 */
+export function orderShippingWarning(row, now = Date.now()) {
+  return row.platformOrderStatus === '已确认' ? shippingWarning(row.platformShipDate, now) : '';
+}
+
 /** 返回预警中的整小时倒计时，按向上取整避免隐藏不足一小时的剩余时间。 */
 export function shippingRemainingHours(value, now = Date.now()) {
   const deadline = shippingDeadline(value);

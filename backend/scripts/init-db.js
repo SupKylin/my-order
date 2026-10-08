@@ -1,9 +1,10 @@
 import mysql from 'mysql2/promise';
+import { migrateWalmart } from '../src/migrations/walmart.js';
 import { config } from '../src/config.js';
 import { db, User } from '../src/models.js';
 import { hashPassword } from '../src/auth.js';
 import { ensureStorage } from '../src/services/storage.js';
-import { migrateDictionaries, migrateOrderFields } from '../src/migrations.js';
+import { migrateDictionaries, migrateOrderFields, migrateStores } from '../src/migrations.js';
 const reset = process.argv.includes('--reset');
 const database = config.db.database;
 let connection;
@@ -53,7 +54,9 @@ try {
   connection = null;
   await db.sync();
   await migrateDictionaries();
+  await migrateStores();
   await migrateOrderFields();
+  await migrateWalmart();
   const username = process.env.ADMIN_USERNAME || 'admin';
   if (!(await User.findOne({ where: { username } })))
     await User.create({

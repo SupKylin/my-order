@@ -86,6 +86,7 @@ const activeAdvancedFilters = computed(
       'priceFactorLevel',
       'purchaseChannel',
       'orderStatus',
+      'platformOrderStatus',
       'allocatable',
       'afterSales',
       'settlement',
@@ -215,14 +216,14 @@ function openStatusDialog() {
   statusDialog.value = true;
 }
 async function submitStatus() {
-  if (!statusDraft.value) return ElMessage.warning('请选择订单状态');
+  if (!statusDraft.value) return ElMessage.warning('请选择运营订单状态');
   if (statusBusy.value) return;
   statusBusy.value = true;
   try {
     const result = await orderApi.updateStatus(statusItems.value, statusDraft.value);
     statusDialog.value = false;
     table.value?.clearSelection();
-    ElMessage.success(`已更新 ${result.updated} 条商品明细的订单状态`);
+    ElMessage.success(`已更新 ${result.updated} 条商品明细的运营订单状态`);
     await refresh();
   } finally {
     statusBusy.value = false;
@@ -245,8 +246,8 @@ async function submitStatus() {
         <span class="shipping-badge shipping-red">红色=已逾期（{{ shippingCounts.red }} 条）</span>
         <span
           class="muted shipping-legend-note"
-          title="当前筛选全部明细，以平台发货日期后一天 15:00（北京时间）为截止时间"
-          >当前筛选全部明细，以平台发货日期后一天 15:00（北京时间）为截止时间</span
+          title="仅统计当前筛选中平台订单状态为已确认的明细，以平台发货日期后一天 15:00（北京时间）为截止时间"
+          >仅已确认订单，以平台发货日期后一天 15:00（北京时间）为截止时间</span
         >
       </div>
     </Teleport>
@@ -276,9 +277,11 @@ async function submitStatus() {
             >{{ operationsOpen ? '收起操作' : '展开操作' }}</el-button
           >
           <el-button :icon="Setting" @click="openColumnDialog">表头选择</el-button
-          ><el-button :icon="Refresh" @click="refresh">刷新</el-button
-          ><el-button :icon="Plus" @click="edit(null)">新增明细</el-button
-          ><el-button :icon="User" :disabled="!selected.length" @click="openAssign()"
+          ><el-button :icon="Refresh" @click="refresh">刷新</el-button>
+          <!-- 订单统一由 Walmart API 接入，保留人工新增入口代码。
+          <el-button :icon="Plus" @click="edit(null)">新增明细</el-button>
+          -->
+          <el-button :icon="User" :disabled="!selected.length" @click="openAssign()"
             >分配采购</el-button
           ><el-button
             type="danger"
@@ -288,9 +291,11 @@ async function submitStatus() {
             :loading="deleteBusy"
             @click="remove()"
             >批量删除</el-button
-          ><el-button type="primary" :icon="Upload" @click="router.push('/imports/new')"
-            >导入订单</el-button
-          ><el-button :icon="Download" :loading="exportBusy" @click="exportOrderRows"
+          >
+          <!-- 保留 Excel 订单导入代码，暂不开放入口。
+          <el-button type="primary" :icon="Upload" @click="router.push('/imports/new')">导入订单</el-button>
+          -->
+          <el-button :icon="Download" :loading="exportBusy" @click="exportOrderRows"
             >导出订单</el-button
           >
         </div>
@@ -331,9 +336,8 @@ async function submitStatus() {
               v-for="user in users.filter((u) => u.active)"
               :key="user.id"
               :label="`${user.username} · ${user.displayName}`"
-              :value="user.id" /></el-select
-          ><el-button type="primary" plain :icon="Search" @click="search">查询</el-button
-          ><el-button text @click="reset">重置</el-button>
+              :value="user.id"
+          /></el-select>
         </div>
         <div v-show="advancedFiltersOpen" class="filter-bar filter-secondary">
           <el-select
@@ -378,7 +382,21 @@ async function submitStatus() {
               :value="channel"
             />
           </el-select>
-          <el-select v-model="filters.orderStatus" placeholder="订单状态" clearable
+          <el-select
+            v-model="filters.platformOrderStatus"
+            placeholder="平台订单状态"
+            aria-label="平台订单状态筛选"
+            clearable
+            @change="search"
+          >
+            <el-option
+              v-for="status in ['待确认', '已确认', '已发货', '已取消', '已送达']"
+              :key="status"
+              :label="status"
+              :value="status"
+            />
+          </el-select>
+          <el-select v-model="filters.orderStatus" placeholder="运营订单状态" clearable
             ><el-option
               v-for="status in meta.fieldMap.orderStatus?.options"
               :key="status"
@@ -406,15 +424,7 @@ async function submitStatus() {
             start-placeholder="平台发货开始日期"
             end-placeholder="平台发货结束日期"
             range-separator="至"
-          /><el-button
-            text
-            type="primary"
-            @click="
-              filters.assignedTo = auth.user.id;
-              search();
-            "
-            >只看分配给我的</el-button
-          >
+          />
         </div>
         <div v-show="advancedFiltersOpen" class="filter-bar filter-price">
           <el-select v-model="filters.priceType" aria-label="价格类型">
@@ -442,6 +452,19 @@ async function submitStatus() {
             />
           </div>
         </div>
+        <div class="filter-actions">
+          <el-button type="primary" plain :icon="Search" @click="search">查询</el-button>
+          <el-button text @click="reset">重置</el-button>
+          <el-button
+            text
+            type="primary"
+            @click="
+              filters.assignedTo = auth.user.id;
+              search();
+            "
+            >只看分配给我的</el-button
+          >
+        </div>
       </div>
       <div v-if="selected.length" class="selection-bar">
         <span
@@ -449,7 +472,7 @@ async function submitStatus() {
         ><el-button type="primary" size="small" :icon="User" @click="openAssign()"
           >批量分配采购</el-button
         ><el-button size="small" :icon="EditPen" @click="openStatusDialog"
-          >批量更改订单状态</el-button
+          >批量更改运营订单状态</el-button
         ><el-button size="small" :icon="CopyDocument" @click="copyTrackingNumbers"
           >复制物流单号</el-button
         ><el-button text size="small" @click="table.clearSelection()">取消选择</el-button>
@@ -467,11 +490,10 @@ async function submitStatus() {
           @edit="edit"
           @assign="openAssign"
           @delete="remove"
-          @import="router.push('/imports/new')"
         />
       </div>
       <div class="table-footer">
-        <span class="muted">订单导入按店铺名＋订单号＋WalmartSku 匹配</span
+        <span class="muted">订单来源：Walmart 官方接口 · 采购导入仅更新已有明细</span
         ><el-pagination
           v-model:current-page="filters.page"
           v-model:page-size="filters.pageSize"
@@ -496,7 +518,7 @@ async function submitStatus() {
   />
   <el-dialog
     v-model="statusDialog"
-    title="批量更改订单状态"
+    title="批量更改运营订单状态"
     width="460px"
     :close-on-click-modal="!statusBusy"
     :close-on-press-escape="!statusBusy"
@@ -505,8 +527,8 @@ async function submitStatus() {
     <p class="dialog-description">将选中的 {{ statusItems.length }} 条商品明细更改为：</p>
     <el-select
       v-model="statusDraft"
-      placeholder="选择订单状态"
-      aria-label="批量选择订单状态"
+      placeholder="选择运营订单状态"
+      aria-label="批量选择运营订单状态"
       filterable
       style="width: 100%"
     >

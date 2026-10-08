@@ -43,6 +43,7 @@ test('预警与日期、价格、渠道取交集，清空预警恢复原筛选�
     });
     assert.deepEqual(result.where.orderAmount, { [Op.gte]: '10.00' });
     assert.equal(result.where[Op.and].length, 4);
+    assert.equal(result.where[Op.and][3].platformOrderStatus, '已确认');
     assert.deepEqual(
       result.where[Op.and][3].platformShipDate,
       level === 'red'
@@ -52,6 +53,7 @@ test('预警与日期、价格、渠道取交集，清空预警恢复原筛选�
     assert.ok(result.include[1].where[Op.and]);
   }
   assert.equal(buildFilters({ shippingWarning: '' }, now).where[Op.and], undefined);
+  assert.equal(buildFilters({}, now).where.platformOrderStatus, undefined);
   assert.throws(() => buildFilters({ shippingWarning: 'unknown' }), /发货预警筛选无效/);
 });
 
@@ -70,7 +72,25 @@ test('分页和预警统计复用同一时刻生成的条件，统计不受分�
   assert.equal(rowQuery.offset, 1);
   assert.equal(statsQuery.where[Op.and][0], rowQuery.where);
   assert.equal(statsQuery.limit, undefined);
-  assert.deepEqual(statsQuery.where[Op.and][1], { platformShipDate: { [Op.ne]: null } });
+  assert.deepEqual(statsQuery.where[Op.and][1], {
+    platformShipDate: { [Op.ne]: null },
+    platformOrderStatus: '已确认',
+  });
   assert.equal(result.total, 7);
   assert.deepEqual(result.shippingDates, [{ date: '2026-10-06', count: 7 }]);
+});
+
+test('未选择预警筛选时列表包含全部状态，但顶部预警数量仅统计已确认', async (t) => {
+  t.mock.method(OrderItem, 'findAndCountAll', async (query) => {
+    assert.equal(query.where.platformOrderStatus, undefined);
+    assert.equal(query.where[Op.and], undefined);
+    return { rows: [], count: 12 };
+  });
+  t.mock.method(OrderItem, 'findAll', async (query) => {
+    assert.equal(query.where[Op.and][1].platformOrderStatus, '已确认');
+    return [{ platformShipDate: '2026-10-06', count: '2' }];
+  });
+  const result = await listOrders({});
+  assert.equal(result.total, 12);
+  assert.deepEqual(result.shippingDates, [{ date: '2026-10-06', count: 2 }]);
 });

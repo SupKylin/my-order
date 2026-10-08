@@ -1,6 +1,5 @@
 import { Router } from 'express';
-import { Op } from 'sequelize';
-import { OrderItem, Purchase, DictionaryOption } from '../models.js';
+import { OrderItem, Purchase, DictionaryOption, Store } from '../models.js';
 import { ROLES } from '../fields.js';
 import { getFieldDefinitions } from '../services/dictionaries.js';
 import { config } from '../config.js';
@@ -28,15 +27,13 @@ export function createDashboardRouter() {
     const unassigned = await Purchase.count({ where: { assignedTo: null } });
     const inProgress = await Purchase.count({ where: { purchaseStatus: '采购中' } });
     const afterSales = await Purchase.count({ where: { afterSales: '是' } });
+    // 筛选选项以店铺管理为准，使用系统店铺名与订单字段匹配。
     const shops = (
-      await OrderItem.findAll({
-        attributes: ['shopName'],
-        group: ['shopName'],
-        where: { shopName: { [Op.ne]: null } },
+      await Store.findAll({
+        attributes: ['systemStoreName'],
+        order: [['systemStoreName', 'ASC']],
       })
-    )
-      .map((item) => item.shopName)
-      .filter(Boolean);
+    ).map((store) => store.systemStoreName);
     res.json({ total, unassigned, inProgress, afterSales, shops });
   });
   return router;

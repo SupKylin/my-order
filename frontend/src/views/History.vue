@@ -1,10 +1,13 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, defineAsyncComponent } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { importApi } from '../api/imports';
 import { fmtDate } from '../utils/format';
 import { useMeta } from '../stores/meta';
 import { useAuth } from '../stores/auth';
+const SkippedImportRows = defineAsyncComponent(
+  () => import('../components/imports/SkippedImportRows.vue'),
+);
 const rows = ref([]),
   busy = ref(false),
   details = ref(null),
@@ -31,9 +34,12 @@ async function commit() {
       '确认导入',
     );
     committing.value = true;
-    const result = await importApi.commit(details.value.id);
-    ElMessage.success(`已新增 ${result.added} 条，更新 ${result.updated} 条`);
-    show.value = false;
+    // 历史订单导入仅供查看；采购预览使用采购入口提交。
+    if (details.value.importKind !== 'purchase') return;
+    const result = await importApi.commitPurchases(details.value.id);
+    ElMessage.success(`已更新 ${result.updated} 行，跳过 ${result.skipped} 行`);
+    const createdBy = details.value.createdBy;
+    details.value = { ...(await importApi.get(result.id)), createdBy };
     await load();
   } catch {
   } finally {
@@ -86,7 +92,7 @@ onMounted(async () => {
   </section>
   <el-dialog v-model="show" title="导入详情" width="760px"
     ><template v-if="details"
-      ><el-descriptions :column="3" border
+      ><SkippedImportRows :rows="details.skippedRows" /><el-descriptions :column="3" border
         ><el-descriptions-item label="新增">{{ details.added }}</el-descriptions-item
         ><el-descriptions-item label="更新">{{ details.updated }}</el-descriptions-item
         ><el-descriptions-item label="错误">{{
@@ -99,14 +105,20 @@ onMounted(async () => {
           v-else
           ><el-table-column label="订单号" prop="patch.orderNumber" /><el-table-column
             label="WalmartSku"
-            prop="patch.walmartSku" /><el-table-column label="商品" prop="patch.productName" /></template
+            prop="patch.walmartSku" /><el-table-column
+            label="商品"
+            prop="patch.productName" /></template
       ></el-table>
-      <p class="muted">预览最多显示 100 条明细、200 个错误；完整有效数据会整体提交。</p></template
+      <p class="muted">
+        预览最多显示 100 条明细、200
+        个错误；跳过清单可翻页查看全部。采购导入仅更新唯一匹配的已有明细。
+      </p></template
     ><template #footer
       ><el-button @click="show = false">关闭</el-button
       ><el-button
         v-if="
           details?.status === 'preview' &&
+          details?.importKind === 'purchase' &&
           !details?.errorCount &&
           details?.createdBy === auth.user?.id
         "

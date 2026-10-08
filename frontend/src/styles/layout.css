@@ -1,17 +1,17 @@
 .app-shell {
+  --sidebar-width: 230px;
   height: 100vh;
   height: 100dvh;
   display: flex;
   overflow: hidden;
 }
-.sidebar-hover-zone {
-  --sidebar-width: 230px;
+.sidebar-container {
   position: fixed;
   inset: 0 auto 0 0;
-  width: 10px;
+  width: 0;
   z-index: 30;
 }
-.sidebar-hover-zone.is-open {
+.sidebar-container.is-open {
   width: var(--sidebar-width);
 }
 .sidebar {
@@ -26,15 +26,8 @@
   transform: translateX(-100%);
   transition: transform 180ms ease;
 }
-.sidebar-hover-zone.is-open .sidebar {
+.sidebar-container.is-open .sidebar {
   transform: translateX(0);
-}
-.sidebar-backdrop {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(16, 39, 47, 0.28);
-  z-index: 29;
 }
 .brand {
   display: flex;
@@ -170,6 +163,13 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  transition:
+    margin-left 180ms ease,
+    width 180ms ease;
+}
+.workspace-sidebar-open {
+  width: calc(100% - var(--sidebar-width));
+  margin-left: var(--sidebar-width);
 }
 .topbar {
   flex-shrink: 0;
@@ -190,13 +190,9 @@
 .sidebar-toggle {
   flex-shrink: 0;
 }
-@media (hover: none) {
-  .sidebar-backdrop {
-    display: block;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
-  .sidebar {
+  .sidebar,
+  .workspace {
     transition: none;
   }
 }

@@ -9,6 +9,8 @@ import { createUploadsRouter } from './uploads.js';
 import { createImportsRouter } from './imports.js';
 import { createDashboardRouter } from './dashboard.js';
 import { createDictionariesRouter } from './dictionaries.js';
+import { createStoresRouter } from './stores.js';
+import { createWalmartRouter } from './walmart.js';
 
 /** 统一注册 API 边界；业务路由默认受登录和 CSRF 保护。 */
 export function createApiRouter() {
@@ -22,5 +24,7 @@ export function createApiRouter() {
   router.use('/uploads', createUploadsRouter());
   router.use('/imports', createImportsRouter());
   router.use('/dictionaries', createDictionariesRouter());
+  router.use('/stores', createStoresRouter());
+  router.use('/stores/:storeId/walmart', createWalmartRouter());
   return router;
 }
