@@ -5,7 +5,31 @@ import ExcelJS from 'exceljs';
 import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { config } from '../src/config.js';
-import { db, User, Order, OrderItem, Purchase, Upload, ImportJob } from '../src/models.js';
+import {
+  db,
+  User,
+  Order,
+  OrderItem,
+  Purchase,
+  Upload,
+  ImportJob,
+  DictionaryOption,
+  Store,
+} from '../src/models.js';
+import {
+  getItem,
+  editItem,
+  assignItems,
+  updateOrderStatus,
+  listOrders,
+} from '../src/services/orders.js';
+import { persistOrder } from '../src/services/walmart/persistence.js';
+import { exportOrders } from '../src/services/order-export.js';
+import { Writable } from 'node:stream';
+import express from 'express';
+import { createOrdersRouter } from '../src/routes/orders.js';
+import { createImportsRouter } from '../src/routes/imports.js';
+import { errorHandler } from '../src/middleware/error-handler.js';
 import { prepareImport, commitImport, getImportPreview } from '../src/services/imports.js';
 import { ensureStorage, uploadPath } from '../src/services/storage.js';
 import { orderIdentityKey, channelKey, IMPORT_MATCH_RULE } from '../src/lib/order-identity.js';
@@ -154,4 +178,174 @@ test('提交时目标删除或出现歧义则拒绝，不回退到新增；旧�
   const job = await ImportJob.findByPk(ambiguous.id);
   await job.update({ templateSnapshot: { ...job.templateSnapshot, matchRule: IMPORT_MATCH_RULE } });
   await assert.rejects(commitImport(ambiguous.id, actor, 'purchase'), /匹配规则已更新/);
+});
+
+test('采购预览跳过 WFS；提交时再次识别新变为 WFS 的行，普通订单继续且历史报告保留', async () => {
+  const wfs = await createItem('WFS-SKIP');
+  const changed = await createItem('WFS-CHANGED');
+  const normal = await createItem('NORMAL-UPDATE');
+  await wfs.update({ fulfillmentParty: 'WFSFulfilled' });
+  const count = await OrderItem.count();
+  const p = await preview([
+    ['店铺A', 'WFS-SKIP', '001', '', '禁止更新'],
+    ['店铺A', 'WFS-CHANGED', '001', '', '禁止更新'],
+    ['店铺A', 'NORMAL-UPDATE', '001', '', '正常更新'],
+    ['店铺A', 'NOT-FOUND', '001', '', '禁止新增'],
+  ]);
+  assert.equal(p.skipped, 2);
+  assert.match(p.skippedRows.find((row) => row.orderNumber === 'WFS-SKIP').reason, /WFS/);
+  await changed.update({ fulfillmentParty: ' wfs ', version: changed.version + 1 });
+  const result = await commitImport(p.id, actor, 'purchase');
+  assert.equal(result.updated, 1);
+  assert.equal(result.added, 0);
+  assert.equal(result.skipped, 3);
+  assert.equal((await getImportPreview(p.id)).skipped, 3);
+  assert.equal((await commitImport(p.id, actor, 'purchase')).skipped, 3);
+  for (const item of [wfs, changed])
+    assert.equal((await Purchase.findOne({ where: { itemId: item.id } })).purchaseNote, '原备注');
+  assert.equal((await Purchase.findOne({ where: { itemId: normal.id } })).purchaseNote, '正常更新');
+  assert.equal(await OrderItem.count(), count);
+});
+
+test('WFS 编辑和批量写入均拒绝，混合批次回滚；普通订单不允许改身份或履约方', async () => {
+  await DictionaryOption.bulkCreate([
+    { kind: 'purchaseChannel', value: '测试渠道' },
+    { kind: 'orderStatus', value: '测试状态' },
+  ]);
+  const normal = await createItem('WRITABLE');
+  const wfs = await createItem('READONLY');
+  await wfs.update({ fulfillmentParty: 'WFSFulfilled' });
+  const entries = [normal, wfs].map(({ id, version }) => ({ id, version }));
+  assert.equal((await getItem(wfs.id)).manualEditable, false);
+  assert.equal((await getItem(normal.id)).manualEditable, true);
+  await assert.rejects(
+    editItem(
+      wfs.id,
+      {
+        version: wfs.version,
+        fields: { orderNumber: 'READONLY', fulfillmentParty: 'SellerFulfilled' },
+      },
+      actor,
+    ),
+    /WFS/,
+  );
+  await assert.rejects(
+    assignItems({ items: entries, purchaseChannel: ['测试渠道'] }, actor),
+    /WFS/,
+  );
+  await assert.rejects(
+    updateOrderStatus({ items: entries, orderStatus: '测试状态' }, actor),
+    /WFS/,
+  );
+  await normal.reload();
+  assert.equal(normal.version, entries[0].version);
+  assert.equal(normal.orderStatus, null);
+  assert.equal((await Purchase.findOne({ where: { itemId: normal.id } })).purchaseChannel, null);
+  for (const fields of [
+    { orderNumber: 'NEW-ORDER' },
+    { orderNumber: 'WRITABLE', shopName: '改店铺' },
+    { orderNumber: 'WRITABLE', fulfillmentParty: 'WFS' },
+  ])
+    await assert.rejects(
+      editItem(normal.id, { version: normal.version, fields }, actor),
+      /Walmart/,
+    );
+  assert.equal(await Order.count({ where: { orderNumber: 'NEW-ORDER' } }), 0);
+  await editItem(
+    normal.id,
+    { version: normal.version, fields: { orderNumber: 'WRITABLE', purchaseNote: '允许更新' } },
+    actor,
+  );
+  assert.equal((await Purchase.findOne({ where: { itemId: normal.id } })).purchaseNote, '允许更新');
+});
+
+test('履约方筛选兼容两种 WFS 值，列表分页、预警统计和导出使用相同条件', async () => {
+  const rows = await OrderItem.findAll({ where: { fulfillmentParty: ['WFSFulfilled', ' wfs '] } });
+  for (const row of rows) {
+    await row.update({ platformShipDate: '2026-10-10' });
+    await Purchase.update({ priceFactor: '0.7' }, { where: { itemId: row.id } });
+  }
+  const filters = { fulfillmentParty: 'WFS', priceFactorLevel: 'low', pageSize: 1 };
+  const result = await listOrders(filters);
+  assert.equal(result.total, 3);
+  assert.equal(result.rows.length, 1);
+  assert.equal(
+    result.shippingDates.reduce((sum, row) => sum + row.count, 0),
+    3,
+  );
+  assert.ok(result.rows.every((row) => !row.manualEditable));
+  const chunks = [];
+  const stream = new Writable({
+    write(chunk, _encoding, done) {
+      chunks.push(chunk);
+      done();
+    },
+  });
+  stream.setHeader = () => {};
+  await exportOrders({ filters }, stream, true);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(Buffer.concat(chunks));
+  assert.equal(workbook.worksheets[0].rowCount - 1, 3);
+});
+
+test('所有角色的 HTTP 新增、旧导入及删除入口拒绝，不能通过隐藏入口修改数据', async () => {
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.user = actor;
+    next();
+  });
+  app.use(createOrdersRouter());
+  app.use('/imports', createImportsRouter());
+  app.use(errorHandler);
+  const server = await new Promise((resolve) => {
+    const server = app.listen(0, '127.0.0.1', () => resolve(server));
+  });
+  const before = await OrderItem.count();
+  try {
+    for (const [method, path] of [
+      ['POST', '/orders'],
+      ['DELETE', '/orders/1'],
+      ['POST', '/orders/batch-delete'],
+      ['POST', '/imports/orders/preview'],
+      ['POST', '/imports/preview'],
+      ['POST', '/imports/orders/old/commit'],
+      ['POST', '/imports/old/commit'],
+    ]) {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      assert.equal(response.status, 403, path);
+    }
+    assert.equal(await OrderItem.count(), before);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('官方同步仍可创建和更新 WFS 订单', async () => {
+  const store = await Store.create({ walmartStoreName: 'WFS-Test', systemStoreName: 'WFS-Test' });
+  const remote = {
+    purchaseOrderId: 'WFS-PO',
+    customerOrderId: 'WFS-CUSTOMER',
+    shipNode: { type: 'WFSFulfilled' },
+    orderLines: {
+      orderLine: [
+        {
+          lineNumber: '1',
+          item: { sku: 'WFS-SKU', productName: '官方商品' },
+          orderLineQuantity: { amount: '1' },
+          orderLineStatuses: { orderLineStatus: [{ status: 'Acknowledged' }] },
+        },
+      ],
+    },
+  };
+  assert.equal((await persistOrder(store, remote, new Map(), actor)).added, 1);
+  remote.orderLines.orderLine[0].item.productName = '官方更新';
+  assert.equal((await persistOrder(store, remote, new Map(), actor)).updated, 1);
+  const item = await OrderItem.findOne({ where: { shopName: 'WFS-Test' } });
+  assert.equal(item.productName, '官方更新');
+  assert.equal((await getItem(item.id)).manualEditable, false);
 });

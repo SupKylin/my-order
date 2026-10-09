@@ -58,7 +58,7 @@ export function orderColumns(fields) {
   return [
     ...groupColumns('order', orderKeys),
     ...groupColumns('purchase', purchaseKeys),
-    { key: 'assignee', label: '采购人员', type: 'assignee' },
+    { key: 'storeOwner', label: '店铺所属账号', type: 'storeOwner' },
   ].map((field) => ({
     ...field,
     label: labels[field.key] || field.label,

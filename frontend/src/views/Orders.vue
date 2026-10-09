@@ -6,7 +6,6 @@ import {
   Upload,
   Refresh,
   User,
-  Delete,
   Setting,
   Check,
   CircleClose,
@@ -20,6 +19,7 @@ import { ElMessage } from 'element-plus';
 import { useOrders } from '../composables/useOrders';
 import { orderApi } from '../api/orders';
 import OrderTable from '../components/orders/OrderTable.vue';
+import { canEditOrder } from '../utils/orderWritePolicy';
 import { orderColumns } from '../components/orders/orderColumns';
 // 弹窗只在打开时挂载，因此不会提前下载编辑表单和图片上传逻辑。
 const OrderEditor = defineAsyncComponent(() => import('../components/OrderEditor.vue'));
@@ -39,9 +39,8 @@ const {
   editor,
   assignDialog,
   assignmentItems,
-  assignee,
+  assignmentChannels,
   assignBusy,
-  deleteBusy,
   stats,
   shippingCounts,
   warningNow,
@@ -56,7 +55,6 @@ const {
   edit,
   openAssign,
   assign,
-  remove,
 } = useOrders();
 const storageKey = `my-order-order-columns-${auth.user?.id || 'default'}`;
 function savedHiddenColumns() {
@@ -88,6 +86,7 @@ const activeAdvancedFilters = computed(
       'purchaseChannel',
       'orderStatus',
       'platformOrderStatus',
+      'fulfillmentParty',
       'allocatable',
       'afterSales',
       'settlement',
@@ -233,6 +232,8 @@ async function copyTrackingNumbers() {
   }
 }
 function openStatusDialog() {
+  if (selected.value.some((item) => !canEditOrder(item)))
+    return ElMessage.warning('WFS 订单不能修改状态，请重新选择');
   statusItems.value = selected.value.map(({ id, version }) => ({ id, version }));
   if (!statusItems.value.length) return ElMessage.warning('请先勾选商品明细');
   statusDraft.value = '';
@@ -307,15 +308,7 @@ async function submitStatus() {
           <el-button :icon="Plus" @click="edit(null)">新增明细</el-button>
           -->
           <el-button :icon="User" :disabled="!selected.length" @click="openAssign()"
-            >分配采购</el-button
-          ><el-button
-            type="danger"
-            plain
-            :icon="Delete"
-            :disabled="!selected.length || loading"
-            :loading="deleteBusy"
-            @click="remove()"
-            >批量删除</el-button
+            >批量分配采购渠道</el-button
           >
           <!-- 保留 Excel 订单导入代码，暂不开放入口。
           <el-button type="primary" :icon="Upload" @click="router.push('/imports/new')">导入订单</el-button>
@@ -359,15 +352,26 @@ async function submitStatus() {
               :key="status"
               :label="status"
               :value="status" /></el-select
-          ><el-select v-model="filters.assignedTo" placeholder="全部采购人员" clearable
-            ><el-option label="待分配" value="unassigned" /><el-option
-              v-for="user in users.filter((u) => u.active)"
+          ><el-select v-model="filters.storeOwnerId" placeholder="店铺所属账号" clearable filterable
+            ><el-option label="未绑定" value="unbound" /><el-option
+              v-for="user in users"
               :key="user.id"
               :label="`${user.username} · ${user.displayName}`"
               :value="user.id"
           /></el-select>
         </div>
         <div v-show="advancedFiltersOpen" class="filter-bar filter-secondary">
+          <el-select
+            v-model="filters.fulfillmentParty"
+            placeholder="履约方"
+            aria-label="履约方筛选"
+            clearable
+            @change="search"
+          >
+            <el-option label="WFS" value="WFS" />
+            <el-option label="卖家履约（SellerFulfilled）" value="SellerFulfilled" />
+            <el-option label="第三方履约（3PLFulfilled）" value="3PLFulfilled" />
+          </el-select>
           <el-select
             v-model="filters.trackingWarning"
             placeholder="未出跟踪号"
@@ -403,6 +407,7 @@ async function submitStatus() {
             <el-option label="高（≥ 0.85）" value="high" />
           </el-select>
           <el-select v-model="filters.purchaseChannel" placeholder="采购渠道" clearable filterable>
+            <el-option label="未分配" :value="true" />
             <el-option
               v-for="channel in meta.fieldMap.purchaseChannel?.options"
               :key="channel"
@@ -458,7 +463,7 @@ async function submitStatus() {
         </div>
         <div v-show="advancedFiltersOpen" class="filter-bar filter-price">
           <el-select v-model="filters.priceType" aria-label="价格类型">
-            <el-option label="商品价格" value="purchaseLinkAmount" />
+            <el-option label="采购商品链接金额" value="purchaseLinkAmount" />
             <el-option label="订单金额" value="orderAmount" />
             <el-option label="采购限价" value="purchaseLimit" />
           </el-select>
@@ -489,10 +494,10 @@ async function submitStatus() {
             text
             type="primary"
             @click="
-              filters.assignedTo = auth.user.id;
+              filters.storeOwnerId = auth.user.id;
               search();
             "
-            >只看分配给我的</el-button
+            >只看我的店铺</el-button
           >
         </div>
       </div>
@@ -500,7 +505,7 @@ async function submitStatus() {
         <span
           >已选中 <strong>{{ selected.length }}</strong> 条商品明细</span
         ><el-button type="primary" size="small" :icon="User" @click="openAssign()"
-          >批量分配采购</el-button
+          >批量分配采购渠道</el-button
         ><el-button size="small" :icon="EditPen" @click="openStatusDialog"
           >批量更改运营订单状态</el-button
         ><el-button size="small" :icon="CopyDocument" @click="copyTrackingNumbers"
@@ -513,13 +518,11 @@ async function submitStatus() {
           :columns="visibleColumns"
           :rows="rows"
           :loading="loading"
-          :deleting="deleteBusy"
           :show-operations="operationsOpen"
           :warning-now="warningNow"
           @selection-change="selected = $event"
           @edit="edit"
           @assign="openAssign"
-          @delete="remove"
         />
       </div>
       <div class="table-footer">
@@ -540,9 +543,8 @@ async function submitStatus() {
   <AssignmentDialog
     v-if="assignDialog"
     v-model="assignDialog"
-    v-model:assignee="assignee"
+    v-model:channels="assignmentChannels"
     :count="assignmentItems.length"
-    :users="users"
     :assign-busy="assignBusy"
     @submit="assign"
   />

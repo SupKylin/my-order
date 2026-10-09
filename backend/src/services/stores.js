@@ -1,4 +1,4 @@
-import { db, AuditLog, Store } from '../models.js';
+import { db, AuditLog, Store, User, storeOwnerInclude } from '../models.js';
 import { assert } from '../errors.js';
 
 function validateInput(input, editing) {
@@ -23,6 +23,8 @@ function serializeStore(store) {
     id: value.id,
     walmartStoreName: value.walmartStoreName,
     systemStoreName: value.systemStoreName,
+    ownerId: value.ownerId ?? null,
+    owner: value.owner || null,
     clientId: value.clientId || '',
     clientSecret: value.clientSecret || '',
     version: value.version,
@@ -33,6 +35,7 @@ function serializeStore(store) {
 
 export async function listStores() {
   const stores = await Store.findAll({
+    include: [storeOwnerInclude],
     order: [
       ['systemStoreName', 'ASC'],
       ['id', 'ASC'],
@@ -55,6 +58,15 @@ export async function saveStore(id, input, actor) {
     ...(patch.clientSecret.trim() ? { clientSecret: patch.clientSecret } : {}),
   };
   const result = await db.transaction(async (transaction) => {
+    if (Object.hasOwn(input, 'ownerId')) {
+      const ownerId = input.ownerId;
+      assert(ownerId === null || (Number.isSafeInteger(ownerId) && ownerId > 0), '所属账号无效');
+      if (ownerId !== null) {
+        const owner = await User.findByPk(ownerId, { transaction, lock: transaction.LOCK.SHARE });
+        assert(owner && (owner.active || existing?.ownerId === ownerId), '所属账号不存在或已停用');
+      }
+      data.ownerId = ownerId;
+    }
     const store = existing
       ? await existing.update({ ...data, version: existing.version + 1 }, { transaction })
       : await Store.create({ ...data, version: 1 }, { transaction });
@@ -69,5 +81,6 @@ export async function saveStore(id, input, actor) {
     );
     return store;
   });
+  await result.reload({ include: [storeOwnerInclude] });
   return serializeStore(result);
 }

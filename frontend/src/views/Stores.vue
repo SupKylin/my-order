@@ -4,6 +4,7 @@ import { defineAsyncComponent, reactive, ref } from 'vue';
 import { Plus } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { storeApi } from '../api/stores';
+import { userApi } from '../api/users';
 import { fmtDate } from '../utils/format';
 
 const list = ref(null);
@@ -14,9 +15,11 @@ const syncingStore = ref(null);
 const saving = ref(false);
 const dialog = ref(false);
 const editing = ref(null);
+const users = ref([]);
 const form = reactive({
   walmartStoreName: '',
   systemStoreName: '',
+  ownerId: null,
   clientId: '',
   clientSecret: '',
 });
@@ -25,7 +28,8 @@ async function load() {
   await list.value?.refresh();
 }
 
-function edit(row = null) {
+async function edit(row = null) {
+  users.value = await userApi.list();
   editing.value = row;
   Object.assign(
     form,
@@ -33,10 +37,17 @@ function edit(row = null) {
       ? {
           walmartStoreName: row.walmartStoreName,
           systemStoreName: row.systemStoreName,
+          ownerId: row.ownerId ?? null,
           clientId: row.clientId,
           clientSecret: row.clientSecret,
         }
-      : { walmartStoreName: '', systemStoreName: '', clientId: '', clientSecret: '' },
+      : {
+          walmartStoreName: '',
+          systemStoreName: '',
+          ownerId: null,
+          clientId: '',
+          clientSecret: '',
+        },
   );
   dialog.value = true;
 }
@@ -48,7 +59,7 @@ async function save() {
     return ElMessage.warning('请填写 Client ID 和 Client Secret');
   saving.value = true;
   try {
-    const payload = { ...form, version: editing.value?.version };
+    const payload = { ...form, ownerId: form.ownerId || null, version: editing.value?.version };
     if (editing.value) await storeApi.update(editing.value.id, payload);
     else await storeApi.create(payload);
     dialog.value = false;
@@ -74,6 +85,9 @@ async function save() {
 
     <el-table-column label="Walmart 店铺名" prop="walmartStoreName" min-width="220" />
     <el-table-column label="系统店铺名" prop="systemStoreName" min-width="220" />
+    <el-table-column label="店铺所属账号" min-width="160">
+      <template #default="{ row }">{{ row.owner?.displayName || '未绑定' }}</template>
+    </el-table-column>
     <el-table-column label="Client ID" prop="clientId" min-width="260" show-overflow-tooltip />
     <el-table-column
       label="Client Secret"
@@ -119,6 +133,17 @@ async function save() {
       </el-form-item>
       <el-form-item label="系统店铺名" required>
         <el-input v-model="form.systemStoreName" maxlength="191" />
+      </el-form-item>
+      <el-form-item label="店铺所属账号">
+        <el-select v-model="form.ownerId" placeholder="选择所属账号，可留空" clearable filterable>
+          <el-option
+            v-for="user in users.filter((entry) => entry.active || entry.id === editing?.ownerId)"
+            :key="user.id"
+            :value="user.id"
+            :label="`${user.displayName} · ${user.username}${user.active ? '' : '（已停用）'}`"
+            :disabled="!user.active"
+          />
+        </el-select>
       </el-form-item>
       <el-form-item :label="editing ? 'Client ID（留空保留原值）' : 'Client ID'" required>
         <el-input v-model="form.clientId" maxlength="255" />

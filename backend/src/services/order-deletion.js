@@ -1,9 +1,11 @@
 import { Op } from 'sequelize';
 import { db, OrderItem, Purchase, AuditLog } from '../models.js';
-import { assert } from '../errors.js';
+import { AppError, assert } from '../errors.js';
 
 /** 单条与批量共用事务；校验所有版本后才删除，避免误删他人刚更新的明细。 */
 export async function deleteItems(input, user) {
+  // 禁止所有订单删除；保留原事务实现，旧客户端请求也不能删除数据。
+  throw new AppError(403, '系统不允许删除订单或批量删除订单');
   const entries = input?.items;
   assert(
     Array.isArray(entries) && entries.length > 0 && entries.length <= 500,

@@ -4,6 +4,7 @@ import { fields } from './fields.js';
 import { decimalText } from './lib/decimal.js';
 import { storedChannels } from './lib/channels.js';
 import { priceFactorLevel } from './lib/price-factor.js';
+import { isWfsOrder } from './lib/order-write-policy.js';
 export const db = new Sequelize(config.db.database, config.db.username, config.db.password, {
   dialect: 'mysql',
   host: config.db.host,
@@ -153,6 +154,7 @@ export const Store = db.define(
     id: id(),
     walmartStoreName: { type: DataTypes.STRING(191), allowNull: false, unique: true },
     systemStoreName: { type: DataTypes.STRING(191), allowNull: false, unique: true },
+    ownerId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
     clientId: { type: DataTypes.STRING(255), allowNull: true },
     clientSecret: { type: DataTypes.TEXT, allowNull: true },
     version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
@@ -217,6 +219,20 @@ OrderItem.belongsTo(Order, { as: 'order', foreignKey: 'orderId' });
 OrderItem.hasOne(Purchase, { as: 'purchase', foreignKey: 'itemId', onDelete: 'CASCADE' });
 Purchase.belongsTo(OrderItem, { foreignKey: 'itemId' });
 Purchase.belongsTo(User, { as: 'assignee', foreignKey: 'assignedTo', onDelete: 'SET NULL' });
+Store.belongsTo(User, { as: 'owner', foreignKey: 'ownerId', onDelete: 'SET NULL' });
+// 历史订单允许没有店铺配置；通过系统店铺名实时读取归属，不复制账号到每条订单。
+OrderItem.belongsTo(Store, {
+  as: 'store',
+  foreignKey: 'shopName',
+  targetKey: 'systemStoreName',
+  constraints: false,
+});
+export const storeOwnerInclude = {
+  model: User,
+  as: 'owner',
+  attributes: ['id', 'username', 'displayName'],
+  required: false,
+};
 // 不建立外键约束：普通地址无需存在于风险地址表；读取时实时匹配，维护立即作用于历史订单。
 OrderItem.belongsTo(RiskAddress, {
   as: 'riskAddress',
@@ -234,6 +250,13 @@ export const itemInclude = [
     ],
   },
   { model: RiskAddress, as: 'riskAddress', required: false },
+  {
+    model: Store,
+    as: 'store',
+    attributes: ['id', 'systemStoreName', 'ownerId'],
+    required: false,
+    include: [storeOwnerInclude],
+  },
 ];
 export function serializeItem(instance) {
   const value = instance.toJSON ? instance.toJSON() : instance;
@@ -246,6 +269,8 @@ export function serializeItem(instance) {
     assignedTo: value.purchase?.assignedTo || null,
     assignedAt: value.purchase?.assignedAt || null,
     assignee: value.purchase?.assignee || null,
+    storeOwner: value.store?.owner || null,
+    manualEditable: !isWfsOrder(value),
     priceFactorLevel: priceFactorLevel(value.purchase?.priceFactor),
     purchaseConfirmedAt: value.purchase?.purchaseConfirmedAt || null,
     walmart: value.walmart || null,

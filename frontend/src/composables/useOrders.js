@@ -6,6 +6,7 @@ import { userApi } from '../api/users';
 import { useMeta } from '../stores/meta';
 import { useAuth } from '../stores/auth';
 import { countShippingWarnings } from '../utils/shippingWarning';
+import { canEditOrder } from '../utils/orderWritePolicy';
 
 /** 统一管理订单查询、编辑与采购分配，每次页面挂载独立创建状态。 */
 export function useOrders() {
@@ -22,7 +23,7 @@ export function useOrders() {
     editor = ref(false),
     assignDialog = ref(false),
     assignmentItems = ref([]),
-    assignee = ref(''),
+    assignmentChannels = ref([]),
     assignBusy = ref(false),
     deleteBusy = ref(false);
   const stats = reactive({ total: 0, unassigned: 0, inProgress: 0, afterSales: 0, shops: [] });
@@ -48,13 +49,14 @@ export function useOrders() {
     shopNames: [],
     orderStatus: '',
     platformOrderStatus: '',
+    fulfillmentParty: '',
     purchaseStatus: '',
     purchaseChannel: '',
     priceFactorLevel: '',
     priceType: 'purchaseLinkAmount',
     minPrice: '',
     maxPrice: '',
-    assignedTo: '',
+    storeOwnerId: '',
     allocatable: '',
     afterSales: '',
     settlement: '',
@@ -102,13 +104,14 @@ export function useOrders() {
       shopNames: [],
       orderStatus: '',
       platformOrderStatus: '',
+      fulfillmentParty: '',
       purchaseStatus: '',
       purchaseChannel: '',
       priceFactorLevel: '',
       priceType: 'purchaseLinkAmount',
       minPrice: '',
       maxPrice: '',
-      assignedTo: '',
+      storeOwnerId: '',
       allocatable: '',
       afterSales: '',
       settlement: '',
@@ -125,35 +128,38 @@ export function useOrders() {
     await load();
   }
   async function cardFilter(kind) {
-    Object.assign(filters, { assignedTo: '', purchaseStatus: '', page: 1 });
+    Object.assign(filters, { purchaseChannel: '', purchaseStatus: '', page: 1 });
     filters.afterSales = '';
-    if (kind === 'unassigned') filters.assignedTo = 'unassigned';
+    if (kind === 'unassigned') filters.purchaseChannel = true;
     if (kind === 'progress') filters.purchaseStatus = '采购中';
     if (kind === 'afterSales') filters.afterSales = '是';
     await load();
   }
   function edit(row) {
+    if (row && !canEditOrder(row)) return ElMessage.warning('WFS 订单只读，不能修改');
     editing.value = row ? { ...row } : null;
     editor.value = true;
   }
   async function openAssign(row) {
     // 单行分配独立于表格勾选，避免取消分配弹框后批量删除使用了错误的选择。
     assignmentItems.value = row ? [row] : [...selected.value];
+    if (assignmentItems.value.some((item) => !canEditOrder(item)))
+      return ElMessage.warning('WFS 订单不能分配采购渠道，请重新选择');
     if (!assignmentItems.value.length) return ElMessage.warning('请先勾选商品明细');
-    users.value = await userApi.list();
-    assignee.value = '';
+    await meta.load(true);
+    assignmentChannels.value = [];
     assignDialog.value = true;
   }
   /** 分配携带每条明细的版本，冲突时由后端拒绝整批覆盖。 */
   async function assign() {
-    if (assignee.value === '') return ElMessage.warning('请先选择采购人员或明确选择取消分配');
+    if (!assignmentChannels.value.length) return ElMessage.warning('请先选择采购渠道');
     assignBusy.value = true;
     try {
       await orderApi.assign(
         assignmentItems.value.map((item) => ({ id: item.id, version: item.version })),
-        assignee.value === 'unassign' ? null : assignee.value,
+        assignmentChannels.value,
       );
-      ElMessage.success(assignee.value === 'unassign' ? '已取消采购分配' : '采购人员已分配');
+      ElMessage.success('采购渠道已分配');
       assignDialog.value = false;
       await refresh();
     } finally {
@@ -210,7 +216,7 @@ export function useOrders() {
   watch(
     () => route.query.assignedTo,
     async (value) => {
-      filters.assignedTo = value === 'unassigned' ? 'unassigned' : '';
+      filters.purchaseChannel = value === 'unassigned' ? true : '';
       await search();
     },
   );
@@ -221,7 +227,7 @@ export function useOrders() {
     await meta.load();
     users.value = await userApi.list();
     // 兼容旧采购分配页面书签，重定向后仍可查看待分配记录。
-    if (route.query.assignedTo === 'unassigned') filters.assignedTo = 'unassigned';
+    if (route.query.assignedTo === 'unassigned') filters.purchaseChannel = true;
     await refresh();
   });
   onUnmounted(() => {
@@ -242,7 +248,7 @@ export function useOrders() {
     editor,
     assignDialog,
     assignmentItems,
-    assignee,
+    assignmentChannels,
     assignBusy,
     deleteBusy,
     stats,

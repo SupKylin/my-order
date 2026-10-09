@@ -4,6 +4,9 @@ import { ElMessage } from 'element-plus';
 import FieldInput from './FieldInput.vue';
 import { useMeta } from '../stores/meta';
 import { orderApi } from '../api/orders';
+import { canEditOrder } from '../utils/orderWritePolicy';
+const platformReadOnly = (field) =>
+  field.group === 'product' || ['orderNumber', 'shopName', 'fulfillmentParty'].includes(field.key);
 const props = defineProps({ modelValue: Boolean, item: Object });
 const emit = defineEmits(['update:modelValue', 'saved']);
 const meta = useMeta(),
@@ -33,6 +36,7 @@ watch(
 );
 /** 仅提交可编辑字段；用户主动清空的 null 必须保留，商品字段由官方同步维护。 */
 async function save() {
+  if (!canEditOrder(props.item)) return ElMessage.warning('WFS 订单只读，不能修改');
   busy.value = true;
   try {
     const fields = Object.fromEntries(
@@ -87,7 +91,7 @@ async function save() {
               :label="field.label"
               :required="field.required"
               :class="{ 'full-width': ['textarea', 'url'].includes(field.type) }"
-              ><template v-if="section.key === 'product'">
+              ><template v-if="platformReadOnly(field)">
                 <el-image
                   v-if="field.type === 'image' && form[field.key]"
                   :src="meta.imageUrl(form[field.key], true)"

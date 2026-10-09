@@ -81,12 +81,12 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
       >{{ trackingWarning.text }}</span
     >
   </div>
-  <template v-else-if="field.type === 'assignee'">
-    <span v-if="row.assignee" class="person-cell"
-      ><i>{{ row.assignee.username.slice(0, 1) }}</i
-      >{{ row.assignee.username }}</span
+  <template v-else-if="field.type === 'storeOwner'">
+    <span v-if="row.storeOwner" class="person-cell"
+      ><i>{{ row.storeOwner.displayName.slice(0, 1) }}</i
+      >{{ row.storeOwner.displayName }}</span
     >
-    <span v-else class="muted">待分配</span>
+    <span v-else class="muted">未绑定</span>
   </template>
   <template v-else-if="field.key === 'allocatable'">
     <el-tag v-if="value" :type="value === '是' ? 'success' : 'danger'" size="small">{{

@@ -19,6 +19,11 @@ import { AppError, assert } from '../errors.js';
 import { IMPORT_MATCH_RULE, PURCHASE_MATCH_RULE } from '../lib/order-identity.js';
 import { matchImportRows, matchPurchaseRows } from '../lib/import-matching.js';
 import { fieldMap } from '../fields.js';
+import {
+  assertPurchaseImport,
+  isWfsOrder,
+  WFS_READ_ONLY_REASON,
+} from '../lib/order-write-policy.js';
 
 const importRowOrder = (a, b) =>
   a.patch.orderNumber.localeCompare(b.patch.orderNumber) ||
@@ -64,6 +69,7 @@ export async function inspectExcel(id, sheetName, headerRow) {
 }
 /** 预览保存数据快照和目标版本，尚不修改订单。 */
 export async function prepareImport(input, user, kind = 'legacy') {
+  assertPurchaseImport(kind);
   const { loadWorkbook, extractRows } = await import('../lib/excel/index.js');
   const sources = kind === 'purchase' ? input?.sources : [input];
   assert(
@@ -135,7 +141,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
           { model: Order, as: 'order', where: { orderNumber: { [Op.in]: orderNumbers } } },
           { model: Purchase, as: 'purchase', attributes: ['purchaseSku'], required: false },
         ],
-        attributes: ['id', 'walmartSku', 'shopName', 'version'],
+        attributes: ['id', 'walmartSku', 'shopName', 'version', 'fulfillmentParty'],
         order: [['id', 'ASC']],
       })
     : [];
@@ -154,6 +160,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
     walmartSku: item.walmartSku,
     shopName: item.shopName,
     purchaseSku: item.purchase?.purchaseSku,
+    fulfillmentParty: item.fulfillmentParty,
   }));
   const purchaseMatches = kind === 'purchase' ? matchPurchaseRows(sortedRows, existingRows) : [];
   const sortedTargets =
@@ -166,6 +173,10 @@ export async function prepareImport(input, user, kind = 'legacy') {
     row.expectedId = old?.id || null;
     row.expectedVersion = old?.version || null;
     if (row.action === 'missing') row.skipReason = purchaseMatches[index].reason;
+    if (old && isWfsOrder(old)) {
+      row.action = 'missing';
+      row.skipReason = WFS_READ_ONLY_REASON;
+    }
     if (
       kind === 'purchase' &&
       !Object.keys(row.patch).some((key) => fieldMap[key]?.group === 'purchase') &&
@@ -226,6 +237,7 @@ function skippedResult(rows) {
 }
 /** 幂等提交预览；版本冲突或任意错误都会中止整个事务。 */
 export async function commitImport(id, user, kind = 'legacy') {
+  assertPurchaseImport(kind);
   return db.transaction(async (t) => {
     const job = await ImportJob.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE });
     assert(job, '导入预览不存在', 404);
@@ -300,6 +312,12 @@ export async function commitImport(id, user, kind = 'legacy') {
     // 同一 Excel 多行可更新同一已有明细，先核对导入前版本，再按文件/行顺序写入。
     for (const row of sorted) {
       const item = targets.get(row);
+      // 预览后可能被官方同步改为 WFS；提交时用锁定的当前值再次检查并记录跳过。
+      if (item && isWfsOrder(item)) {
+        row.action = 'missing';
+        row.skipReason = WFS_READ_ONLY_REASON;
+        continue;
+      }
       if ((item?.id || null) !== row.expectedId || (item?.version || null) !== row.expectedVersion)
         throw new AppError(
           409,
@@ -308,6 +326,7 @@ export async function commitImport(id, user, kind = 'legacy') {
       if (kind === 'purchase') assert(item, '采购导入仅允许更新已有商品明细，请重新预览', 409);
     }
     for (const row of sorted) {
+      if (row.action === 'missing') continue;
       // 预览与提交之间字典可能发生变化；重新验证，防止写入已停用或旧名称。
       try {
         const normalized = validatePatch(row.patch, { requireKeys: true, fieldDefinitions });
@@ -323,8 +342,10 @@ export async function commitImport(id, user, kind = 'legacy') {
       const result = await upsertImported(row.patch, t, user, item);
       result.created ? added++ : updated++;
     }
+    // JSON 内部属性变更需显式标记，保证提交阶段新增的跳过原因保存到历史记录。
+    job.changed('rows', true);
     await job.update(
-      { status: 'completed', added, updated, committedAt: new Date() },
+      { status: 'completed', rows: job.rows, added, updated, committedAt: new Date() },
       { transaction: t },
     );
     await AuditLog.create(

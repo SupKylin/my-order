@@ -1,14 +1,5 @@
 import { Op, fn, col, where as sqlWhere } from 'sequelize';
-import {
-  db,
-  Order,
-  OrderItem,
-  Purchase,
-  User,
-  AuditLog,
-  itemInclude,
-  serializeItem,
-} from '../models.js';
+import { db, Order, OrderItem, Purchase, AuditLog, itemInclude, serializeItem } from '../models.js';
 import { fields } from '../fields.js';
 import { addressKey } from '../lib/address-key.js';
 import { AppError, assert } from '../errors.js';
@@ -17,6 +8,7 @@ import { getFieldDefinitions } from './dictionaries.js';
 import { channelKey, orderIdentityKey } from '../lib/order-identity.js';
 import { priceFactorPatterns } from '../lib/price-factor.js';
 import { shippingWindow } from '../lib/shipping-window.js';
+import { assertOrderEditable } from '../lib/order-write-policy.js';
 import {
   purchaseTimerPatch,
   PURCHASE_SUCCESS_PATTERN,
@@ -31,6 +23,8 @@ export async function getItem(id) {
 
 /** 人工新增不允许覆盖已有业务键；冲突时整笔事务回滚。 */
 export async function createItem(input, actor) {
+  // 保留旧实现供历史参考，业务入口永久拒绝人工新增。
+  throw new AppError(403, '手工新增订单已关闭，订单只能从 Walmart 官方接口拉取');
   const patch = validatePatch(input.fields, {
     requireKeys: true,
     fieldDefinitions: await getFieldDefinitions(),
@@ -152,11 +146,24 @@ export function buildFilters(query, now = Date.now()) {
   } else if (query.shopName) where.shopName = String(query.shopName);
   if (query.orderStatus) where.orderStatus = String(query.orderStatus);
   if (query.platformOrderStatus) where.platformOrderStatus = String(query.platformOrderStatus);
+  if (query.fulfillmentParty) {
+    const party = String(query.fulfillmentParty).trim().toUpperCase();
+    const values = party === 'WFS' || party === 'WFSFULFILLED' ? ['WFS', 'WFSFULFILLED'] : [party];
+    where[Op.and] = [
+      sqlWhere(fn('UPPER', fn('TRIM', col('OrderItem.fulfillmentParty'))), { [Op.in]: values }),
+    ];
+  }
   for (const key of ['purchaseStatus', 'settlement', 'allocatable', 'afterSales'])
     if (query[key]) purchaseWhere[key] = String(query[key]);
   // “未分配”是空值筛选入口，不向业务字段写入第三种状态。
   if (query.allocatable === 'empty') purchaseWhere.allocatable = { [Op.or]: [null, ''] };
-  if (query.purchaseChannel) {
+  if (query.purchaseChannelEmpty === 'true' || query.purchaseChannelEmpty === true) {
+    // 同时兼容未填写、历史单选空文本，以及多选序列化后的空数组。
+    purchaseWhere[Op.or] = [
+      { purchaseChannel: null },
+      sqlWhere(fn('TRIM', col('purchase.purchaseChannel')), { [Op.in]: ['', '[]', 'null', '""'] }),
+    ];
+  } else if (query.purchaseChannel) {
     const channelColumn = col('purchase.purchaseChannel');
     // 旧单选文本和新数组均支持按其中一个渠道筛选；查询值由 Sequelize 转义。
     purchaseWhere[Op.and] = sqlWhere(
@@ -182,7 +189,7 @@ export function buildFilters(query, now = Date.now()) {
         );
     }
     // 和渠道等条件取交集；必须在分页与总数统计前筛选。
-    where[Op.and] = conditions;
+    where[Op.and] = [...(where[Op.and] || []), ...conditions];
   }
   const priceFields = {
     purchaseLinkAmount: purchaseWhere,
@@ -217,6 +224,12 @@ export function buildFilters(query, now = Date.now()) {
   }
   if (query.assignedTo === 'unassigned') purchaseWhere.assignedTo = null;
   else if (query.assignedTo) purchaseWhere.assignedTo = Number(query.assignedTo);
+  if (query.storeOwnerId === 'unbound') where['$store.ownerId$'] = null;
+  else if (query.storeOwnerId) {
+    const ownerId = Number(query.storeOwnerId);
+    assert(Number.isSafeInteger(ownerId) && ownerId > 0, '店铺所属账号筛选无效');
+    where['$store.ownerId$'] = ownerId;
+  }
   if (query.startDate || query.endDate) {
     where.orderDate = {};
     if (query.startDate) where.orderDate[Op.gte] = query.startDate;
@@ -339,6 +352,7 @@ export async function editItem(id, input, user) {
   await db.transaction(async (t) => {
     const item = await OrderItem.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE });
     assert(item, '记录不存在', 404);
+    assertOrderEditable(item);
     if (item.version !== input.version)
       throw new AppError(409, '该商品已被其他人修改，请刷新后再编辑');
     const currentPurchase = await Purchase.findOne({ where: { itemId: item.id }, transaction: t });
@@ -356,6 +370,13 @@ export async function editItem(id, input, user) {
       requireKeys: true,
       fieldDefinitions: editableDefinitions,
     });
+    const currentOrder = await Order.findByPk(item.orderId, { transaction: t });
+    // 禁止通过改订单身份或履约方绕过“官方来源”和 WFS 只读规则。
+    for (const key of ['orderNumber', 'shopName', 'fulfillmentParty']) {
+      if (!Object.hasOwn(patch, key)) continue;
+      const current = key === 'orderNumber' ? currentOrder.orderNumber : item[key];
+      assert(patch[key] === (current ?? null), '订单号、店铺及履约方只能由 Walmart 同步更新', 403);
+    }
     for (const field of definitions.filter((field) => field.group === 'product')) {
       if (!Object.hasOwn(patch, field.key)) continue;
       assert(
@@ -415,25 +436,34 @@ export async function editItem(id, input, user) {
   });
   return serializeItem(await OrderItem.findByPk(id, { include: itemInclude }));
 }
-/** 一个商品只有一个当前采购人员；批量分配要么全部成功，要么回滚。 */
+/** 多选渠道覆盖原值；批量分配要么全部成功，要么整批回滚。 */
 export async function assignItems(input, user) {
-  const entries = input.items;
+  const entries = input?.items;
   assert(
     Array.isArray(entries) && entries.length > 0 && entries.length <= 500,
     '请选择 1 至 500 条商品明细',
   );
   assert(
-    entries.every((x) => Number.isInteger(x.id) && Number.isInteger(x.version)),
+    entries.every((x) => Number.isInteger(x?.id) && Number.isInteger(x?.version)),
     '分配参数错误',
   );
   assert(new Set(entries.map((x) => x.id)).size === entries.length, '商品明细不能重复');
-  const assignee = input.assignedTo == null ? null : await User.findByPk(Number(input.assignedTo));
-  if (input.assignedTo != null) assert(assignee?.active, '采购人员不存在或已停用');
+  assert(
+    Array.isArray(input.purchaseChannel) &&
+      input.purchaseChannel.length > 0 &&
+      input.purchaseChannel.every((value) => typeof value === 'string' && value.trim()),
+    '请选择采购渠道',
+  );
   await db.transaction(async (t) => {
+    const { purchaseChannel } = validatePatch(
+      { purchaseChannel: input.purchaseChannel },
+      { fieldDefinitions: await getFieldDefinitions(t) },
+    );
     const sorted = [...entries].sort((a, b) => a.id - b.id);
     for (const entry of sorted) {
       const item = await OrderItem.findByPk(entry.id, { transaction: t, lock: t.LOCK.UPDATE });
       assert(item, '部分商品已不存在，请刷新', 404);
+      assertOrderEditable(item);
       assert(item.version === entry.version, '部分商品已更新，请刷新后重新分配', 409);
       const purchase = await Purchase.findOne({
         where: { itemId: item.id },
@@ -441,22 +471,21 @@ export async function assignItems(input, user) {
         lock: t.LOCK.UPDATE,
       });
       assert(purchase, '采购记录不存在', 404);
-      if (assignee)
-        assert(
-          purchase.allocatable !== '否',
-          `商品 ${item.walmartSku || item.id} 标记为不可分配，请先修改可分配状态`,
-        );
-      await purchase.update(
-        { assignedTo: assignee?.id || null, assignedAt: assignee ? new Date() : null },
+      assert(
+        purchase.allocatable !== '否',
+        `商品 ${item.walmartSku || item.id} 标记为不可分配，请先修改可分配状态`,
+      );
+      await purchase.update({ purchaseChannel }, { transaction: t });
+      await item.update(
+        { purchaseChannelKey: channelKey(purchaseChannel), version: item.version + 1 },
         { transaction: t },
       );
-      await item.update({ version: item.version + 1 }, { transaction: t });
     }
     await AuditLog.create(
       {
         userId: user.id,
-        action: 'assign_items',
-        details: { itemIds: entries.map((x) => x.id), assignedTo: assignee?.id || null },
+        action: 'assign_purchase_channels',
+        details: { itemIds: entries.map((x) => x.id), purchaseChannel },
       },
       { transaction: t },
     );
@@ -488,6 +517,7 @@ export async function updateOrderStatus(input, user) {
         lock: transaction.LOCK.UPDATE,
       });
       assert(item, '部分商品已不存在，请刷新', 404);
+      assertOrderEditable(item);
       assert(item.version === entry.version, '部分商品已更新，请刷新后重试', 409);
       await item.update({ orderStatus, version: item.version + 1 }, { transaction });
     }

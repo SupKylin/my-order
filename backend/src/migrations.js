@@ -30,6 +30,14 @@ export async function migrateStores() {
   await Store.sync();
   const query = db.getQueryInterface();
   const columns = await query.describeTable('stores');
+  if (!columns.ownerId)
+    await query.addColumn('stores', 'ownerId', {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: true,
+      references: { model: 'users', key: 'id' },
+      onDelete: 'SET NULL',
+      onUpdate: 'CASCADE',
+    });
   if (!columns.clientId)
     await query.addColumn('stores', 'clientId', {
       type: DataTypes.STRING(255),

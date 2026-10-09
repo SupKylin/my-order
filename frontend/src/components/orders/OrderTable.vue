@@ -4,15 +4,15 @@ import { Upload } from '@element-plus/icons-vue';
 import { orderShippingWarning } from '../../utils/shippingWarning';
 import OrderCell from './OrderCell.vue';
 import ProductDetails from './ProductDetails.vue';
+import { canEditOrder } from '../../utils/orderWritePolicy';
 const props = defineProps({
   rows: { type: Array, required: true },
   columns: { type: Array, required: true },
   loading: Boolean,
-  deleting: Boolean,
   showOperations: Boolean,
   warningNow: { type: Number, required: true },
 });
-const emit = defineEmits(['selection-change', 'edit', 'assign', 'import', 'delete']);
+const emit = defineEmits(['selection-change', 'edit', 'assign', 'import']);
 const table = ref();
 const warnings = computed(() =>
   Object.fromEntries(
@@ -34,7 +34,7 @@ defineExpose({ clearSelection: () => table.value?.clearSelection() });
     @selection-change="emit('selection-change', $event)"
     height="100%"
   >
-    <el-table-column type="selection" width="46" fixed />
+    <el-table-column type="selection" width="46" fixed :selectable="canEditOrder" />
     <el-table-column type="expand" width="40" fixed
       ><template #default="{ row }"><ProductDetails :row="row" /></template
     ></el-table-column>
@@ -47,7 +47,7 @@ defineExpose({ clearSelection: () => table.value?.clearSelection() });
       :fixed="field.fixed"
       :align="field.type === 'money' ? 'right' : 'left'"
       :show-overflow-tooltip="
-        !['image', 'assignee'].includes(field.type) &&
+        !['image', 'storeOwner'].includes(field.type) &&
         !['platformShipDate', 'purchaseStatus'].includes(field.key)
       "
     >
@@ -57,11 +57,11 @@ defineExpose({ clearSelection: () => table.value?.clearSelection() });
     </el-table-column>
     <el-table-column v-if="showOperations" label="操作" fixed="right" width="180"
       ><template #default="{ row }">
-        <el-button link type="primary" @click="emit('edit', row)">编辑</el-button>
-        <el-button link type="primary" @click="emit('assign', row)">分配</el-button>
-        <el-button link type="danger" :disabled="deleting" @click="emit('delete', row)"
-          >删除</el-button
-        >
+        <template v-if="canEditOrder(row)">
+          <el-button link type="primary" @click="emit('edit', row)">编辑</el-button>
+          <el-button link type="primary" @click="emit('assign', row)">分配渠道</el-button>
+        </template>
+        <span v-else class="muted" title="由 Walmart 同步维护">WFS 只读</span>
       </template></el-table-column
     >
     <template #empty

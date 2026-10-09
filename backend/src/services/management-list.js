@@ -7,6 +7,7 @@ import {
   Upload,
   DictionaryOption,
   RiskAddress,
+  storeOwnerInclude,
 } from '../models.js';
 import { WalmartSync } from './walmart/models.js';
 import { publicUser } from '../auth.js';
@@ -131,6 +132,7 @@ export async function listManagement(resource, query = {}) {
     'risk-addresses': [['id', 'DESC']],
   }[resource];
   const result = await config.model.findAndCountAll({
+    ...(resource === 'stores' ? { include: [storeOwnerInclude] } : {}),
     where,
     attributes,
     order,
