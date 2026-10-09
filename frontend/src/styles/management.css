@@ -1,0 +1,80 @@
+.workspace-management > main {
+  padding: 12px;
+  overflow: hidden;
+  max-width: none;
+}
+.workspace-management > .topbar {
+  height: 52px;
+  min-height: 52px;
+  padding: 0 16px;
+}
+.management-panel {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.management-panel > .panel-heading {
+  padding: 8px 14px;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.management-panel .button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.management-panel .button-row .el-button {
+  margin-left: 0;
+}
+.management-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  flex-shrink: 0;
+}
+.management-filters .management-keyword {
+  width: 280px;
+  max-width: 100%;
+}
+.management-filters > .el-select {
+  width: 160px;
+}
+.management-filters > .el-date-editor {
+  width: 280px;
+  flex: 0 1 280px;
+  max-width: 100%;
+}
+.management-table-region {
+  flex: 1;
+  min-height: 0;
+  margin: 8px 0;
+}
+.management-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line, #e6edf1);
+  flex-shrink: 0;
+}
+.management-footer > .muted {
+  font-size: 11px;
+  flex: 1;
+  min-width: 160px;
+}
+@media (max-width: 760px) {
+  .management-filters .management-keyword {
+    width: 100%;
+  }
+  .management-footer .el-pagination {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+}

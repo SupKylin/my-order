@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { assert } from '../../errors.js';
+import { walmartImage } from '../../lib/product-image.js';
 
 export const lineStatuses = (line) =>
   (line.orderLineStatuses?.orderLineStatus ?? []).map((entry) => entry.status);
@@ -30,18 +31,6 @@ export function specificationText(attributes = []) {
         : String(attribute.value),
     )
     .join(', ');
-}
-
-function walmartImage(value) {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' &&
-      (url.hostname === 'walmartimages.com' || url.hostname.endsWith('.walmartimages.com'))
-      ? url.href
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 /** 美西标准时间固定 UTC-8；原始毫秒时间另存，绝不拼装平台截止时间。 */
@@ -131,9 +120,12 @@ export function mapOrderLine(store, order, line, catalog) {
     postalCode: address.postalCode,
     phone: order.shippingInfo?.phone,
     platformOrderStatus: platformStatusText(lineStatuses(line)),
+    fulfillmentParty: order.shipNode?.type,
     orderAmount: sumAmounts(
       charges
-        .filter((c) => c.chargeType === 'PRODUCT' && c.chargeAmount?.amount != null)
+        .filter(
+          (c) => ['PRODUCT', 'SHIPPING'].includes(c.chargeType) && c.chargeAmount?.amount != null,
+        )
         .map((c) => c.chargeAmount.amount),
     ),
     tax: sumAmounts(
@@ -159,8 +151,12 @@ export function mapOrderLine(store, order, line, catalog) {
         ),
       ),
       ...productSpecification,
+      productImage: walmartImage(line.item.imageUrl),
+      // 官方收件地址明确不含地址二时清除旧房号，避免风险匹配沿用过期地址。
+      ...(order.shippingInfo?.postalAddress ? { address2: address.address2 || null } : {}),
     },
     walmart: {
+      commercialMappingVersion: 1,
       storeId: store.id,
       purchaseOrderId: order.purchaseOrderId,
       lineNumber: line.lineNumber,

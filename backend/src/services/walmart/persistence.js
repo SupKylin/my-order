@@ -5,6 +5,7 @@ import { upsertImported } from '../orders.js';
 import { validatePatch } from '../../validation.js';
 import { assert } from '../../errors.js';
 import { mapOrderLine, sourceKey, orderLines, isActiveOrder } from './mapping.js';
+import { warmProductImages } from '../thumbnail-warmer.js';
 
 export async function persistOrder(store, order, catalog, actor) {
   const lines = orderLines(order);
@@ -21,7 +22,7 @@ export async function persistOrder(store, order, catalog, actor) {
   const uniqueEntries = [
     ...new Map(mapped.map((entry) => [entry.fields.walmartSku, entry])).values(),
   ];
-  return db.transaction(async (transaction) => {
+  const result = await db.transaction(async (transaction) => {
     const [parent] = await Order.findOrCreate({
       where: { orderNumber: mapped[0].fields.orderNumber },
       transaction,
@@ -53,6 +54,8 @@ export async function persistOrder(store, order, catalog, actor) {
           transaction,
         },
       );
+      // 保留历史人工图片；新记录及已有官方图片仍由 Walmart 同步维护。
+      if (target?.productImage?.startsWith('/uploads/images/')) delete entry.fields.productImage;
       const saved = await upsertImported(entry.fields, transaction, actor, target);
       const item = await OrderItem.findByPk(saved.id, { transaction });
       const snapshot = entry.walmart;
@@ -83,4 +86,6 @@ export async function persistOrder(store, order, catalog, actor) {
     );
     return { receipt, added, updated };
   });
+  warmProductImages(uniqueEntries.map((entry) => entry.fields.productImage));
+  return result;
 }

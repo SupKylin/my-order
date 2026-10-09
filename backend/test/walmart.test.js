@@ -8,6 +8,7 @@ import {
 } from '../src/services/walmart/mapping.js';
 import { acknowledgePersistedOrder } from '../src/services/walmart/acknowledgement.js';
 import { WalmartClient } from '../src/services/walmart/client.js';
+import { validatePatch } from '../src/validation.js';
 
 function order(status = 'Created') {
   return {
@@ -34,6 +35,34 @@ function order(status = 'Created') {
     },
   };
 }
+
+test('官方图片直接映射到商品图片字段，缺失图片清空旧值，不接受其他域名', () => {
+  const raw = order();
+  const line = raw.orderLines.orderLine[0];
+  const url = 'https://i5.walmartimages.com/test-product.jpeg';
+  line.item.imageUrl = url;
+  const mapped = mapOrderLine({ id: 1, systemStoreName: '系统店铺' }, raw, line);
+  assert.equal(mapped.fields.productImage, url);
+  assert.equal(mapped.walmart.imageUrl, url);
+  assert.equal(validatePatch(mapped.fields).productImage, url);
+  for (const invalid of [
+    undefined,
+    'https://other.example/image.png',
+    'https://walmartimages.com.example/image.png',
+    'https://i5.walmartimages.com:3000/image.png',
+    'https://user@i5.walmartimages.com/image.png',
+  ]) {
+    line.item.imageUrl = invalid;
+    assert.equal(
+      mapOrderLine({ id: 1, systemStoreName: '店铺' }, raw, line).fields.productImage,
+      null,
+    );
+  }
+  assert.throws(
+    () => validatePatch({ productImage: 'https://other.example/image.png' }),
+    /字段校验/,
+  );
+});
 
 test('只确认所有商品行为 Created 的卖家自配送订单，混合/缺失状态和 WFS 跳过', () => {
   assert.equal(acknowledgementDecision(order()).action, 'acknowledge');
@@ -101,6 +130,24 @@ test('字段只按接口映射，平台状态不覆盖内部状态，费用不�
     ),
     false,
   );
+});
+
+test('订单金额精确合计商品和运费，不含税费或其他费用，履约方保留接口原值', () => {
+  const raw = order();
+  const line = raw.orderLines.orderLine[0];
+  line.charges.charge.push(
+    {
+      chargeType: 'SHIPPING',
+      chargeAmount: { amount: '0.45', currency: 'USD' },
+      tax: { taxAmount: { amount: '0.03' } },
+    },
+    { chargeType: 'FEE', chargeAmount: { amount: '10', currency: 'USD' } },
+  );
+  raw.shipNode.type = 'WFSFulfilled';
+  const mapped = mapOrderLine({ id: 1, systemStoreName: '测试' }, raw, line);
+  assert.equal(mapped.fields.orderAmount, '0.75000000000000000000');
+  assert.equal(mapped.fields.tax, '0.03000000000000000000');
+  assert.equal(mapped.fields.fulfillmentParty, 'WFSFulfilled');
 });
 
 test('保存提交后才能确认；保存失败和实时取消不会发 POST', async () => {

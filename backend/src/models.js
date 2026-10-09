@@ -80,6 +80,7 @@ export const OrderItem = db.define(
     sku: { type: DataTypes.STRING(191), allowNull: true },
     walmartSourceKey: { type: DataTypes.STRING(64), allowNull: true, unique: true },
     walmart: { type: DataTypes.JSON, allowNull: true },
+    addressKey: { type: DataTypes.STRING(64), allowNull: true },
     ...attrs('item'),
     version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
   },
@@ -158,6 +159,21 @@ export const Store = db.define(
   },
   { tableName: 'stores' },
 );
+export const RiskAddress = db.define(
+  'RiskAddress',
+  {
+    id: id(),
+    address1: { type: DataTypes.STRING(255), allowNull: false },
+    address2: { type: DataTypes.STRING(255), allowNull: true },
+    city: { type: DataTypes.STRING(255), allowNull: false },
+    state: { type: DataTypes.STRING(255), allowNull: false },
+    postalCode: { type: DataTypes.STRING(255), allowNull: false },
+    note: { type: DataTypes.TEXT, allowNull: true },
+    addressKey: { type: DataTypes.STRING(64), allowNull: false, unique: true },
+    version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+  },
+  { tableName: 'risk_addresses' },
+);
 export const ImportJob = db.define(
   'ImportJob',
   {
@@ -201,6 +217,13 @@ OrderItem.belongsTo(Order, { as: 'order', foreignKey: 'orderId' });
 OrderItem.hasOne(Purchase, { as: 'purchase', foreignKey: 'itemId', onDelete: 'CASCADE' });
 Purchase.belongsTo(OrderItem, { foreignKey: 'itemId' });
 Purchase.belongsTo(User, { as: 'assignee', foreignKey: 'assignedTo', onDelete: 'SET NULL' });
+// 不建立外键约束：普通地址无需存在于风险地址表；读取时实时匹配，维护立即作用于历史订单。
+OrderItem.belongsTo(RiskAddress, {
+  as: 'riskAddress',
+  foreignKey: 'addressKey',
+  targetKey: 'addressKey',
+  constraints: false,
+});
 export const itemInclude = [
   { model: Order, as: 'order' },
   {
@@ -210,6 +233,7 @@ export const itemInclude = [
       { model: User, as: 'assignee', attributes: ['id', 'username', 'displayName', 'role'] },
     ],
   },
+  { model: RiskAddress, as: 'riskAddress', required: false },
 ];
 export function serializeItem(instance) {
   const value = instance.toJSON ? instance.toJSON() : instance;
@@ -225,6 +249,8 @@ export function serializeItem(instance) {
     priceFactorLevel: priceFactorLevel(value.purchase?.priceFactor),
     purchaseConfirmedAt: value.purchase?.purchaseConfirmedAt || null,
     walmart: value.walmart || null,
+    addressRisk: Boolean(value.riskAddress),
+    addressRiskNote: value.riskAddress?.note || null,
   };
   for (const f of fields) {
     if (f.key === 'orderNumber') continue;

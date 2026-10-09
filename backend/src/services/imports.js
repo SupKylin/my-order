@@ -311,7 +311,7 @@ export async function commitImport(id, user, kind = 'legacy') {
       // 预览与提交之间字典可能发生变化；重新验证，防止写入已停用或旧名称。
       try {
         const normalized = validatePatch(row.patch, { requireKeys: true, fieldDefinitions });
-        for (const key of ['purchaseChannel', 'orderStatus', 'purchaseStatus'])
+        for (const key of ['purchaseChannel', 'purchasePlatform', 'orderStatus', 'purchaseStatus'])
           assert(
             JSON.stringify(normalized[key]) === JSON.stringify(row.patch[key]),
             '字典名称已变化',

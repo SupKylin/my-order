@@ -9,12 +9,15 @@ const orderKeys = [
   'actualDeliveryDate',
   'orderStatus',
   'platformOrderStatus',
+  'fulfillmentParty',
   'orderAmount',
   'tax',
 ];
 const purchaseKeys = [
   'purchaseSku',
   'purchaseStatus',
+  'purchasePlatform',
+  'shippingMode',
   'merchantName',
   'purchaseLinkAmount',
   'purchaseAmount',

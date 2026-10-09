@@ -52,8 +52,10 @@ async function acquireLock(storeId) {
 
 export async function configureSync(id, enabled, actor) {
   assert(typeof enabled === 'boolean', '同步开关参数无效');
-  await getStore(id);
   return db.transaction(async (transaction) => {
+    // 与删除店铺串行：等待删除事务后重新检查，避免重新生成孤立的同步配置。
+    const store = await Store.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    assert(store, '店铺不存在', 404);
     const [state] = await WalmartSync.findOrCreate({
       where: { storeId: id },
       defaults: { enabled, startedAt: new Date(WALMART_ORDER_START_MS), actorId: actor.id },

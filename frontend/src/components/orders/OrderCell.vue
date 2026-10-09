@@ -36,6 +36,13 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
       >{{ factorLabels[row.priceFactorLevel] }}</span
     >
     <span v-if="row.afterSales === '是'" class="after-sales-badge">售后</span>
+    <el-tag
+      v-if="row.addressRisk"
+      type="danger"
+      size="small"
+      :title="row.addressRiskNote || '收件地址与风险地址库匹配'"
+      >风险地址</el-tag
+    >
   </div>
   <template v-else-if="field.type === 'image'">
     <el-image
@@ -102,7 +109,13 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
   <span
     v-else
     :class="{
-      mono: ['orderNumber', 'walmartSku', 'purchaseSku', 'trackingNumber', 'platformTrackingNumber'].includes(field.key),
+      mono: [
+        'orderNumber',
+        'walmartSku',
+        'purchaseSku',
+        'trackingNumber',
+        'platformTrackingNumber',
+      ].includes(field.key),
     }"
     >{{ value ?? '—' }}</span
   >

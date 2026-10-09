@@ -1,16 +1,16 @@
 <script setup>
-import { defineAsyncComponent, onMounted, reactive, ref } from 'vue';
-import { Plus, Refresh } from '@element-plus/icons-vue';
+import ManagementList from '../components/ManagementList.vue';
+import { defineAsyncComponent, reactive, ref } from 'vue';
+import { Plus } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { storeApi } from '../api/stores';
 import { fmtDate } from '../utils/format';
 
-const rows = ref([]);
+const list = ref(null);
 const WalmartSyncDialog = defineAsyncComponent(
   () => import('../components/stores/WalmartSyncDialog.vue'),
 );
 const syncingStore = ref(null);
-const loading = ref(false);
 const saving = ref(false);
 const dialog = ref(false);
 const editing = ref(null);
@@ -22,12 +22,7 @@ const form = reactive({
 });
 
 async function load() {
-  loading.value = true;
-  try {
-    rows.value = await storeApi.list();
-  } finally {
-    loading.value = false;
-  }
+  await list.value?.refresh();
 }
 
 function edit(row = null) {
@@ -63,46 +58,54 @@ async function save() {
     saving.value = false;
   }
 }
-
-onMounted(load);
 </script>
 
 <template>
-  <section class="panel">
-    <div class="panel-heading">
-      <div>
-        <h2>
-          店铺管理 <span class="count-label">{{ rows.length }} 个</span>
-        </h2>
-        <p>维护 Walmart 店铺名与系统店铺名的对应关系，并保存 API 认证信息。</p>
-      </div>
-      <div class="button-row">
-        <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :icon="Plus" @click="edit()">新增店铺</el-button>
-      </div>
-    </div>
-    <el-table v-loading="loading" :data="rows">
-      <el-table-column label="Walmart 店铺名" prop="walmartStoreName" min-width="220" />
-      <el-table-column label="系统店铺名" prop="systemStoreName" min-width="220" />
-      <el-table-column label="Client ID" prop="clientId" min-width="260" show-overflow-tooltip />
-      <el-table-column
-        label="Client Secret"
-        prop="clientSecret"
-        min-width="300"
-        show-overflow-tooltip
-      />
-      <el-table-column label="更新时间" min-width="180">
-        <template #default="{ row }">{{ fmtDate(row.updatedAt, true) }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" @click="edit(row)">编辑</el-button>
-          <el-button link type="primary" @click="syncingStore = row">订单同步</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-  </section>
-  <WalmartSyncDialog v-if="syncingStore" :store="syncingStore" @close="syncingStore = null" />
+  <ManagementList
+    ref="list"
+    resource="stores"
+    title="店铺管理"
+    placeholder="搜索 Walmart 店铺名、系统店铺名"
+    description="维护店铺名称对应关系与 API 认证信息。"
+  >
+    <template #actions
+      ><el-button type="primary" :icon="Plus" @click="edit()">新增店铺</el-button></template
+    >
+
+    <el-table-column label="Walmart 店铺名" prop="walmartStoreName" min-width="220" />
+    <el-table-column label="系统店铺名" prop="systemStoreName" min-width="220" />
+    <el-table-column label="Client ID" prop="clientId" min-width="260" show-overflow-tooltip />
+    <el-table-column
+      label="Client Secret"
+      prop="clientSecret"
+      min-width="300"
+      show-overflow-tooltip
+    />
+    <el-table-column label="自动同步" width="120"
+      ><template #default="{ row }"
+        ><el-tag :type="row.syncEnabled ? 'success' : 'info'">{{
+          row.syncEnabled ? '已开启' : '未开启'
+        }}</el-tag></template
+      ></el-table-column
+    >
+    <el-table-column label="更新时间" min-width="180">
+      <template #default="{ row }">{{ fmtDate(row.updatedAt, true) }}</template>
+    </el-table-column>
+    <el-table-column label="操作" width="180" fixed="right">
+      <template #default="{ row }">
+        <el-button link type="primary" @click="edit(row)">编辑</el-button>
+        <el-button link type="primary" @click="syncingStore = row">订单同步</el-button>
+      </template>
+    </el-table-column>
+  </ManagementList>
+  <WalmartSyncDialog
+    v-if="syncingStore"
+    :store="syncingStore"
+    @close="
+      syncingStore = null;
+      load();
+    "
+  />
 
   <el-dialog
     v-model="dialog"

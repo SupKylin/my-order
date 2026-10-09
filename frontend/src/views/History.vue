@@ -1,26 +1,21 @@
 <script setup>
+import ManagementList from '../components/ManagementList.vue';
 import { ref, onMounted, defineAsyncComponent } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { importApi } from '../api/imports';
 import { fmtDate } from '../utils/format';
 import { useMeta } from '../stores/meta';
 import { useAuth } from '../stores/auth';
+const list = ref(null);
 const SkippedImportRows = defineAsyncComponent(
   () => import('../components/imports/SkippedImportRows.vue'),
 );
-const rows = ref([]),
-  busy = ref(false),
-  details = ref(null),
+const details = ref(null),
   show = ref(false),
   committing = ref(false),
   auth = useAuth();
 async function load() {
-  busy.value = true;
-  try {
-    rows.value = await importApi.list();
-  } finally {
-    busy.value = false;
-  }
+  await list.value?.refresh();
 }
 async function view(row) {
   details.value = await importApi.get(row.id);
@@ -48,48 +43,42 @@ async function commit() {
 }
 onMounted(async () => {
   await useMeta().load();
-  await load();
 });
 </script>
 <template>
-  <section class="panel">
-    <div class="panel-heading">
-      <div>
-        <h2>最近导入记录</h2>
-        <p>显示最近 100 次预览与导入，预览有效期为 2 小时。</p>
-      </div>
-      <el-button @click="load">刷新</el-button>
-    </div>
-    <el-table v-loading="busy" :data="rows"
-      ><el-table-column label="文件名" prop="filename" min-width="230" /><el-table-column
-        label="状态"
-        width="110"
-        ><template #default="{ row }"
-          ><el-tag :type="row.status === 'completed' ? 'success' : 'info'">{{
-            row.status === 'completed' ? '已导入' : '仅预览'
-          }}</el-tag></template
-        ></el-table-column
-      ><el-table-column label="新增" width="85"
-        ><template #default="{ row }">{{
-          row.status === 'completed' ? row.added : '—'
-        }}</template></el-table-column
-      ><el-table-column label="更新" width="85"
-        ><template #default="{ row }">{{
-          row.status === 'completed' ? row.updated : '—'
-        }}</template></el-table-column
-      ><el-table-column label="预览时间" min-width="180"
-        ><template #default="{ row }">{{ fmtDate(row.createdAt, true) }}</template></el-table-column
-      ><el-table-column label="提交时间" min-width="180"
-        ><template #default="{ row }">{{
-          fmtDate(row.committedAt, true)
-        }}</template></el-table-column
-      ><el-table-column label="操作" width="100"
-        ><template #default="{ row }"
-          ><el-button link type="primary" @click="view(row)">查看详情</el-button></template
-        ></el-table-column
-      ><template #empty><el-empty description="暂无导入记录" :image-size="90" /></template
-    ></el-table>
-  </section>
+  <ManagementList
+    ref="list"
+    resource="imports"
+    title="导入记录"
+    placeholder="搜索导入文件名"
+    description="可分页查看全部历史；未提交的预览有效期为 2 小时。"
+  >
+    <el-table-column label="文件名" prop="filename" min-width="230" /><el-table-column
+      label="状态"
+      width="110"
+      ><template #default="{ row }"
+        ><el-tag :type="row.status === 'completed' ? 'success' : 'info'">{{
+          row.status === 'completed' ? '已导入' : '仅预览'
+        }}</el-tag></template
+      ></el-table-column
+    ><el-table-column label="新增" width="85"
+      ><template #default="{ row }">{{
+        row.status === 'completed' ? row.added : '—'
+      }}</template></el-table-column
+    ><el-table-column label="更新" width="85"
+      ><template #default="{ row }">{{
+        row.status === 'completed' ? row.updated : '—'
+      }}</template></el-table-column
+    ><el-table-column label="预览时间" min-width="180"
+      ><template #default="{ row }">{{ fmtDate(row.createdAt, true) }}</template></el-table-column
+    ><el-table-column label="提交时间" min-width="180"
+      ><template #default="{ row }">{{ fmtDate(row.committedAt, true) }}</template></el-table-column
+    ><el-table-column label="操作" width="100" fixed="right"
+      ><template #default="{ row }"
+        ><el-button link type="primary" @click="view(row)">查看详情</el-button></template
+      ></el-table-column
+    >
+  </ManagementList>
   <el-dialog v-model="show" title="导入详情" width="760px"
     ><template v-if="details"
       ><SkippedImportRows :rows="details.skippedRows" /><el-descriptions :column="3" border

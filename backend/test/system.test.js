@@ -293,7 +293,7 @@ test('未登录拦截、七天会话与 CSRF 防护', async () => {
 test('字段定义完整、下拉选项与严格格式校验', async () => {
   const meta = await request('/api/meta');
   assert.equal(meta.status, 200);
-  assert.equal(meta.data.fields.length, 46);
+  assert.equal(meta.data.fields.length, fields.length);
   assert.ok(meta.data.fields.some((field) => field.key === 'walmartSku'));
   assert.ok(meta.data.fields.some((field) => field.key === 'purchaseSku'));
   assert.deepEqual(meta.data.fields.find((f) => f.key === 'settlement').options, [
@@ -643,7 +643,9 @@ test('订单与采购导入入口隔离；采购仅按三项匹配更新，无�
     const body = new FormData();
     body.append(
       'file',
-      new Blob([await makeWorkbook(['订单号', 'WalmartSku', '店铺名', '采购Sku', '采购备注'], rows)]),
+      new Blob([
+        await makeWorkbook(['订单号', 'WalmartSku', '店铺名', '采购Sku', '采购备注'], rows),
+      ]),
       `${prefix}-${randomUUID()}.xlsx`,
     );
     const uploaded = await request('/api/uploads/excel', 'POST', body);
@@ -678,12 +680,17 @@ test('订单与采购导入入口隔离；采购仅按三项匹配更新，无�
   );
 
   const blank = await purchaseUpload([[number, 'SPLIT-1', '采购测试店', '', '空采购Sku新增']]);
-  const blankPreview = await request('/api/imports/purchases/preview', 'POST', { sources: [blank] });
+  const blankPreview = await request('/api/imports/purchases/preview', 'POST', {
+    sources: [blank],
+  });
   assert.equal(blankPreview.status, 200, JSON.stringify(blankPreview.data));
   jobIds.push(blankPreview.data.id);
   assert.equal(blankPreview.data.added, 0);
   assert.equal(blankPreview.data.updated, 1);
-  assert.equal((await request(`/api/imports/purchases/${blankPreview.data.id}/commit`, 'POST')).status, 200);
+  assert.equal(
+    (await request(`/api/imports/purchases/${blankPreview.data.id}/commit`, 'POST')).status,
+    200,
+  );
 
   const valid = await request('/api/imports/purchases/preview', 'POST', { sources: [first] });
   assert.equal(valid.status, 200, JSON.stringify(valid.data));
@@ -2052,7 +2059,7 @@ test('未出跟踪号提醒筛选在分页之前完成，包含统计并排除�
   }
 });
 
-test('订单导出忽略分页，按筛选或勾选明细生成 Excel', async () => {
+test('订单导出忽略分页与勾选，按筛选生成 Excel', async () => {
   const group = `${prefix}-EXPORT`;
   const items = [];
   for (const [index, shopName] of ['导出店铺A', '导出店铺A', '导出店铺B'].entries()) {
@@ -2104,6 +2111,15 @@ test('订单导出忽略分页，按筛选或勾选明细生成 Excel', async ()
     filters: { q: group, shopName: '导出店铺A' },
     ids: [items[1].id],
   });
-  assert.deepEqual(selected, [items[1].orderNumber]);
-  assert.equal((await request('/api/orders/export', 'POST', { ids: ['bad'] })).status, 400);
+  assert.deepEqual(
+    selected.sort(),
+    items
+      .slice(0, 2)
+      .map((item) => item.orderNumber)
+      .sort(),
+  );
+  assert.equal(
+    (await request('/api/orders/export', 'POST', { filters: { shopNames: 'bad' } })).status,
+    400,
+  );
 });

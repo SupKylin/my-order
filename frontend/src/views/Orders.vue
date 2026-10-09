@@ -72,12 +72,13 @@ const columnDialog = ref(false);
 const batchOrderDialog = ref(false);
 const batchOrderDraft = ref('');
 const exportBusy = ref(false);
+const exportMessage = ref('');
 const statusDialog = ref(false);
 const statusBusy = ref(false);
 const statusDraft = ref('');
 const statusItems = ref([]);
 const advancedFiltersOpen = ref(false);
-const operationsOpen = ref(false);
+const operationsOpen = ref(true);
 const activeAdvancedFilters = computed(
   () =>
     [
@@ -142,19 +143,38 @@ function applyColumns() {
   }
   columnDialog.value = false;
 }
-async function exportOrderRows() {
+async function exportOrderRows(purchaseTemplate = false) {
   if (exportBusy.value) return;
   exportBusy.value = true;
+  exportMessage.value = '正在查询符合筛选条件的订单…';
+  // HTTP 站点也可使用，不依赖仅安全上下文提供的 crypto.randomUUID。
+  const exportId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (n) =>
+    n.toString(16).padStart(2, '0'),
+  ).join('');
+  let polling = true;
+  let timer;
+  const poll = async () => {
+    try {
+      const state = await orderApi.exportProgress(exportId);
+      if (!polling) return;
+      if (state.stage === 'images')
+        exportMessage.value = `正在准备图片 ${state.completedImages}/${state.imageCount}，已整理 ${state.completedRows}/${state.totalRows} 条订单`;
+      if (state.stage === 'packing')
+        exportMessage.value = `正在生成 Excel，共 ${state.totalRows} 条订单…`;
+      if (state.stage === 'done') exportMessage.value = '文件已生成，正在下载…';
+    } catch {
+      /* 进度请求失败不影响正在执行的文件下载。 */
+    }
+    if (polling) timer = setTimeout(poll, 1000);
+  };
+  timer = setTimeout(poll, 700);
   try {
-    const file = await orderApi.export(
-      { ...filters },
-      selected.value.map((row) => row.id),
-    );
+    const file = await orderApi.export({ ...filters }, purchaseTemplate, exportId);
     const url = URL.createObjectURL(file);
     const link = document.createElement('a');
     const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
     link.href = url;
-    link.download = `订单明细-${date}.xlsx`;
+    link.download = `${purchaseTemplate ? '采购信息填写模板' : '订单明细'}-${date}.xlsx`;
     document.body.append(link);
     link.click();
     link.remove();
@@ -168,6 +188,9 @@ async function exportOrderRows() {
     }
     ElMessage.error(message);
   } finally {
+    polling = false;
+    clearTimeout(timer);
+    exportMessage.value = '';
     exportBusy.value = false;
   }
 }
@@ -232,7 +255,8 @@ async function submitStatus() {
 </script>
 <template>
   <div class="orders-page">
-    <Teleport to="#orders-topbar-warnings">
+    <!-- Wait for the authenticated layout to mount its warning anchor. -->
+    <Teleport to="#orders-topbar-warnings" defer>
       <div class="shipping-legend">
         <strong>发货预警：</strong>
         <span class="shipping-badge shipping-yellow"
@@ -251,6 +275,7 @@ async function submitStatus() {
         >
       </div>
     </Teleport>
+    <div v-if="exportBusy" role="status" aria-live="polite" class="muted">{{ exportMessage }}</div>
     <section class="panel orders-panel">
       <div class="panel-heading">
         <div class="orders-heading-title">
@@ -295,8 +320,11 @@ async function submitStatus() {
           <!-- 保留 Excel 订单导入代码，暂不开放入口。
           <el-button type="primary" :icon="Upload" @click="router.push('/imports/new')">导入订单</el-button>
           -->
-          <el-button :icon="Download" :loading="exportBusy" @click="exportOrderRows"
+          <el-button :icon="Download" :loading="exportBusy" @click="exportOrderRows()"
             >导出订单</el-button
+          >
+          <el-button :icon="Download" :loading="exportBusy" @click="exportOrderRows(true)"
+            >导出数据填写采购信息</el-button
           >
         </div>
       </div>
@@ -403,7 +431,9 @@ async function submitStatus() {
               :label="status"
               :value="status" /></el-select
           ><el-select v-model="filters.allocatable" placeholder="是否可分配" clearable
-            ><el-option label="是" value="是" /><el-option label="否" value="否" /></el-select
+            ><el-option label="是" value="是" /><el-option label="否" value="否" /><el-option
+              label="未分配"
+              value="empty" /></el-select
           ><el-select v-model="filters.afterSales" placeholder="是否售后" clearable
             ><el-option label="是" value="是" /><el-option label="否" value="否" /></el-select
           ><el-select v-model="filters.settlement" placeholder="结算情况" clearable

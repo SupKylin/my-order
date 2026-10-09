@@ -1,13 +1,13 @@
 <script setup>
+import ManagementList from '../components/ManagementList.vue';
 import { ref, reactive, onMounted } from 'vue';
-import { Plus, User } from '@element-plus/icons-vue';
+import { Plus } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { userApi } from '../api/users';
 import { fmtDate } from '../utils/format';
 import { useMeta } from '../stores/meta';
+const list = ref(null);
 const meta = useMeta(),
-  rows = ref([]),
-  busy = ref(false),
   saving = ref(false),
   dialog = ref(false),
   editing = ref(null),
@@ -19,12 +19,7 @@ const meta = useMeta(),
     password: '',
   });
 async function load() {
-  busy.value = true;
-  try {
-    rows.value = await userApi.list();
-  } finally {
-    busy.value = false;
-  }
+  await list.value?.refresh();
 }
 function edit(row) {
   editing.value = row;
@@ -56,55 +51,50 @@ async function save() {
 }
 onMounted(async () => {
   await meta.load();
-  await load();
 });
 </script>
 <template>
-  <section class="panel">
-    <div class="panel-heading">
-      <div>
-        <h2>
-          团队成员 <span class="count-label">{{ rows.length }} 人</span>
-        </h2>
-        <p>当前角色用于人员区分，所有启用账号均可使用全部业务功能。</p>
-      </div>
-      <el-button type="primary" :icon="Plus" @click="edit(null)">创建账号</el-button>
-    </div>
-    <el-table v-loading="busy" :data="rows"
-      ><el-table-column label="成员" min-width="180"
-        ><template #default="{ row }"
-          ><div class="member-cell">
-            <div class="avatar light">{{ row.displayName.slice(0, 1) }}</div>
-            <strong>{{ row.displayName }}</strong>
-          </div></template
-        ></el-table-column
-      ><el-table-column label="登录账号" prop="username" min-width="160" /><el-table-column
-        label="角色"
-        min-width="180"
-        ><template #default="{ row }"
-          ><el-tag
-            :type="
-              row.role === 'admin' ? 'warning' : row.role === 'purchasing' ? 'success' : 'info'
-            "
-            effect="plain"
-            >{{ meta.roles[row.role] }}</el-tag
-          ></template
-        ></el-table-column
-      ><el-table-column label="状态" min-width="110"
-        ><template #default="{ row }"
-          ><span :class="row.active ? 'success-text' : 'muted'">{{
-            row.active ? '● 已启用' : '● 已停用'
-          }}</span></template
-        ></el-table-column
-      ><el-table-column label="创建时间" min-width="185"
-        ><template #default="{ row }">{{ fmtDate(row.createdAt, true) }}</template></el-table-column
-      ><el-table-column label="操作" width="150"
-        ><template #default="{ row }"
-          ><el-button link type="primary" @click="edit(row)">编辑 / 重置密码</el-button></template
-        ></el-table-column
-      ></el-table
+  <ManagementList
+    ref="list"
+    resource="users"
+    title="账号管理"
+    placeholder="搜索登录账号、成员姓名"
+    description="当前角色用于人员区分，所有启用账号均可使用全部业务功能。"
+  >
+    <template #actions
+      ><el-button type="primary" :icon="Plus" @click="edit(null)">创建账号</el-button></template
     >
-  </section>
+    <el-table-column label="成员" min-width="180"
+      ><template #default="{ row }"
+        ><div class="member-cell">
+          <div class="avatar light">{{ row.displayName.slice(0, 1) }}</div>
+          <strong>{{ row.displayName }}</strong>
+        </div></template
+      ></el-table-column
+    ><el-table-column label="登录账号" prop="username" min-width="160" /><el-table-column
+      label="角色"
+      min-width="180"
+      ><template #default="{ row }"
+        ><el-tag
+          :type="row.role === 'admin' ? 'warning' : row.role === 'purchasing' ? 'success' : 'info'"
+          effect="plain"
+          >{{ meta.roles[row.role] }}</el-tag
+        ></template
+      ></el-table-column
+    ><el-table-column label="状态" min-width="110"
+      ><template #default="{ row }"
+        ><span :class="row.active ? 'success-text' : 'muted'">{{
+          row.active ? '● 已启用' : '● 已停用'
+        }}</span></template
+      ></el-table-column
+    ><el-table-column label="创建时间" min-width="185"
+      ><template #default="{ row }">{{ fmtDate(row.createdAt, true) }}</template></el-table-column
+    ><el-table-column label="操作" width="150" fixed="right"
+      ><template #default="{ row }"
+        ><el-button link type="primary" @click="edit(row)">编辑 / 重置密码</el-button></template
+      ></el-table-column
+    >
+  </ManagementList>
   <el-dialog
     v-model="dialog"
     :title="editing ? '编辑团队账号' : '创建团队账号'"

@@ -72,6 +72,16 @@ def save_environment(directory, env):
     return target
 
 
+DEPENDENCY_CHECK = (
+    "const {createRequire}=require('module');"
+    "const r=createRequire('/app/backend/package.json');"
+    "for(const p of Object.keys(r('./package.json').dependencies||{}))r.resolve(p);"
+    "r('sharp')({create:{width:2,height:2,channels:3,background:'#ffffff'}})"
+    ".resize(1,1).png().toBuffer().then(()=>console.log('生产依赖及图片处理正常'))"
+    ".catch(e=>{console.error(e.message);process.exit(1)});"
+)
+
+
 def build_image(directory, bundle, manifest, current):
     """只比较依赖文件；当前镜像作为本地基底，不重新拉取 Node 基础镜像。"""
     script = (
@@ -87,11 +97,20 @@ def build_image(directory, bundle, manifest, current):
         name: json.loads((bundle / name).read_text(encoding="utf-8")) for name in DEPENDENCIES
     }
     changed = dependency_changed(old_dependencies, new_dependencies)
+    if not changed:
+        try:
+            run(["docker", "run", "--rm", "--network", "none", "--entrypoint", "node",
+                 current["Image"], "-e", DEPENDENCY_CHECK], directory / "dependency-before.log")
+        except RuntimeError:
+            print("现有镜像依赖缺失或图片处理异常，将重新安装生产依赖。", flush=True)
+            changed = True
     base = "my-order-runtime:" + current["Image"].split(":")[-1][:20]
     run(["docker", "tag", current["Image"], base])
-    lines = ["FROM " + base, "WORKDIR /app", "RUN rm -rf /app/backend /app/frontend"]
+    # npm workspace 可将依赖安装在子目录，复用时必须一并保留。
+    lines = ["FROM " + base, "WORKDIR /app",
+             "RUN find /app/backend /app/frontend -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf {} +"]
     if changed:
-        lines.append("RUN rm -rf /app/node_modules")
+        lines.append("RUN rm -rf /app/node_modules /app/backend/node_modules /app/frontend/node_modules")
     lines.extend([
         "COPY package.json package-lock.json ./",
         "COPY backend/package.json backend/package.json",
@@ -112,6 +131,9 @@ def build_image(directory, bundle, manifest, current):
     run([
         "docker", "build", "--pull=false", "-f", str(dockerfile), "-t", image, str(bundle)
     ], directory / "build.log")
+    # 在停服前真实生成图片，不能只检查 package.json 或健康接口。
+    run(["docker", "run", "--rm", "--network", "none", "--entrypoint", "node",
+         image, "-e", DEPENDENCY_CHECK], directory / "dependency-after.log")
     return image
 
 

@@ -77,6 +77,54 @@ class BundleTests(unittest.TestCase):
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_workspace_dependencies_preserved_and_broken_base_repaired(self):
+        for broken in (False, True):
+            with self.subTest(broken=broken), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                package = directory / 'bundle'
+                package.mkdir()
+                dependencies = {name: {} for name in bundle.DEPENDENCIES}
+                for name in dependencies:
+                    target = package / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text('{}')
+                checks = []
+
+                def command(args, log=None, **unused):
+                    if log and log.name.startswith('dependency-'):
+                        checks.append(log.name)
+                        if broken and log.name == 'dependency-before.log':
+                            raise RuntimeError('sharp missing')
+                    return json.dumps(dependencies)
+
+                with patch.object(runtime, 'run', command):
+                    runtime.build_image(directory, package, {'id': 'test'}, {'Image': 'sha256:old'})
+                dockerfile = (directory / 'Dockerfile').read_text()
+                self.assertIn('! -name node_modules', dockerfile)
+                self.assertNotIn('RUN rm -rf /app/backend /app/frontend', dockerfile)
+                self.assertEqual('RUN npm ci --omit=dev' in dockerfile, broken)
+                self.assertEqual(checks, ['dependency-before.log', 'dependency-after.log'])
+
+    def test_built_image_dependency_failure_blocks_publish_before_stop(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            package = directory / 'bundle'
+            package.mkdir()
+            dependencies = {name: {} for name in bundle.DEPENDENCIES}
+            for name in dependencies:
+                target = package / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text('{}')
+
+            def command(args, log=None, **unused):
+                if log and log.name == 'dependency-after.log':
+                    raise RuntimeError('image conversion failed')
+                return json.dumps(dependencies)
+
+            with patch.object(runtime, 'run', command):
+                with self.assertRaisesRegex(RuntimeError, 'image conversion'):
+                    runtime.build_image(directory, package, {'id': 'test'}, {'Image': 'sha256:old'})
+
     def test_dependency_changes_ignore_scripts_but_not_packages(self):
         old = {name: {"name": "app", "dependencies": {"express": "5"}} for name in bundle.DEPENDENCIES}
         new = json.loads(json.dumps(old))

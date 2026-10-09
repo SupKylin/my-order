@@ -1,31 +1,23 @@
 <script setup>
+import ManagementList from '../components/ManagementList.vue';
 import { computed, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { Plus, Refresh } from '@element-plus/icons-vue';
+import { Plus } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { dictionaryApi } from '../api/dictionaries';
 import { useMeta } from '../stores/meta';
 
+const list = ref(null);
 const route = useRoute();
 const meta = useMeta();
 const kind = computed(() => route.meta.dictionaryKind);
-const rows = ref([]);
-const loading = ref(false);
 const saving = ref(false);
 const dialog = ref(false);
 const editing = ref(null);
 const form = reactive({ value: '', sortOrder: 0, active: true });
-let requestVersion = 0;
 
 async function load() {
-  const version = ++requestVersion;
-  loading.value = true;
-  try {
-    const result = await dictionaryApi.list(kind.value);
-    if (version === requestVersion) rows.value = result;
-  } finally {
-    if (version === requestVersion) loading.value = false;
-  }
+  await list.value?.refresh();
 }
 function edit(row) {
   editing.value = row || null;
@@ -33,7 +25,7 @@ function edit(row) {
     form,
     row
       ? { value: row.value, sortOrder: row.sortOrder, active: row.active }
-      : { value: '', sortOrder: rows.value.length, active: true },
+      : { value: '', sortOrder: list.value?.total || 0, active: true },
   );
   dialog.value = true;
 }
@@ -57,47 +49,37 @@ watch(
   kind,
   () => {
     dialog.value = false;
-    rows.value = [];
-    load();
   },
   { immediate: true },
 );
 </script>
 
 <template>
-  <section class="panel">
-    <div class="panel-heading">
-      <div>
-        <h2>
-          {{ route.meta.title }} <span class="count-label">{{ rows.length }} 项</span>
-        </h2>
-        <p>新增、修改名称、排序或停用选项。历史订单保留原名称。</p>
-      </div>
-      <div class="button-row">
-        <el-button :icon="Refresh" @click="load">刷新</el-button>
-        <el-button type="primary" :icon="Plus" @click="edit()">新增选项</el-button>
-      </div>
-    </div>
-    <el-table :data="rows" v-loading="loading">
-      <el-table-column label="选项名称" prop="value" min-width="260" />
-      <el-table-column label="排序" prop="sortOrder" width="100" />
-      <el-table-column label="使用状态" width="130"
-        ><template #default="{ row }">
-          <el-tag :type="row.active ? 'success' : 'info'">{{
-            row.active ? '启用' : '停用'
-          }}</el-tag>
-        </template></el-table-column
-      >
-      <el-table-column label="操作" width="110"
-        ><template #default="{ row }">
-          <el-button link type="primary" @click="edit(row)">编辑</el-button>
-        </template></el-table-column
-      >
-    </el-table>
-    <p class="mapping-footnote">
-      排序数值越小越靠前。停用后不再出现在可选列表中；历史记录仍可显示和保留原值。已绑定模板的渠道改名后，后续导入使用新名称。
-    </p>
-  </section>
+  <ManagementList
+    ref="list"
+    resource="dictionaries"
+    :title="route.meta.title"
+    :kind="kind"
+    placeholder="搜索选项名称"
+    description="停用后不再出现在下拉列表中；历史订单保留原名称。"
+  >
+    <template #actions
+      ><el-button type="primary" :icon="Plus" @click="edit()">新增选项</el-button></template
+    >
+
+    <el-table-column label="选项名称" prop="value" min-width="260" />
+    <el-table-column label="排序" prop="sortOrder" width="100" />
+    <el-table-column label="使用状态" width="130"
+      ><template #default="{ row }">
+        <el-tag :type="row.active ? 'success' : 'info'">{{ row.active ? '启用' : '停用' }}</el-tag>
+      </template></el-table-column
+    >
+    <el-table-column label="操作" width="110" fixed="right"
+      ><template #default="{ row }">
+        <el-button link type="primary" @click="edit(row)">编辑</el-button>
+      </template></el-table-column
+    >
+  </ManagementList>
   <el-dialog
     v-model="dialog"
     :title="editing ? '编辑选项' : '新增选项'"

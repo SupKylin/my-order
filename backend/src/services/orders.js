@@ -10,6 +10,7 @@ import {
   serializeItem,
 } from '../models.js';
 import { fields } from '../fields.js';
+import { addressKey } from '../lib/address-key.js';
 import { AppError, assert } from '../errors.js';
 import { validatePatch, normalizeValue } from '../validation.js';
 import { getFieldDefinitions } from './dictionaries.js';
@@ -75,6 +76,7 @@ export async function upsertImported(patch, transaction, actor, target = undefin
         })
       : target;
   const parts = splitPatch(patch);
+  parts.item.addressKey = addressKey({ ...existing?.toJSON(), ...parts.item });
   if (Object.hasOwn(parts.item, 'walmartSku')) parts.item.sku = parts.item.walmartSku;
   if (existing) {
     const identity = {
@@ -152,6 +154,8 @@ export function buildFilters(query, now = Date.now()) {
   if (query.platformOrderStatus) where.platformOrderStatus = String(query.platformOrderStatus);
   for (const key of ['purchaseStatus', 'settlement', 'allocatable', 'afterSales'])
     if (query[key]) purchaseWhere[key] = String(query[key]);
+  // “未分配”是空值筛选入口，不向业务字段写入第三种状态。
+  if (query.allocatable === 'empty') purchaseWhere.allocatable = { [Op.or]: [null, ''] };
   if (query.purchaseChannel) {
     const channelColumn = col('purchase.purchaseChannel');
     // 旧单选文本和新数组均支持按其中一个渠道筛选；查询值由 Sequelize 转义。
@@ -279,7 +283,11 @@ export function buildFilters(query, now = Date.now()) {
       conditions.push({ '$purchase.purchaseConfirmedAt$': ranges[query.trackingWarning] });
     where[Op.and] = [...(where[Op.and] || []), ...conditions];
   }
-  const include = [itemInclude[0], { ...itemInclude[1], where: purchaseWhere, required: true }];
+  const include = [
+    itemInclude[0],
+    { ...itemInclude[1], where: purchaseWhere, required: true },
+    ...itemInclude.slice(2),
+  ];
   return { where, include };
 }
 export async function listOrders(query) {
@@ -348,11 +356,20 @@ export async function editItem(id, input, user) {
       requireKeys: true,
       fieldDefinitions: editableDefinitions,
     });
+    for (const field of definitions.filter((field) => field.group === 'product')) {
+      if (!Object.hasOwn(patch, field.key)) continue;
+      assert(
+        patch[field.key] === (item[field.key] ?? null),
+        '商品信息只能由 Walmart 同步更新，不能人工修改',
+      );
+      delete patch[field.key];
+    }
     const [order] = await Order.findOrCreate({
       where: { orderNumber: patch.orderNumber },
       transaction: t,
     });
     const parts = splitPatch(patch);
+    parts.item.addressKey = addressKey({ ...item.toJSON(), ...parts.item });
     if (Object.hasOwn(parts.item, 'walmartSku')) parts.item.sku = parts.item.walmartSku;
     const purchaseChannelKey = channelKey(
       Object.hasOwn(patch, 'purchaseChannel')

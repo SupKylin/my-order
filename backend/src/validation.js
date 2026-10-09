@@ -2,6 +2,7 @@ import { fields, fieldMap } from './fields.js';
 import { AppError } from './errors.js';
 import { decimalText, expandNumericValue } from './lib/decimal.js';
 import { normalizeChannels } from './lib/channels.js';
+import { walmartImage } from './lib/product-image.js';
 export const isBlank = (v) => v === null || v === undefined || (typeof v === 'string' && !v.trim());
 const localDate = (v) => {
   if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.toISOString().slice(0, 10);
@@ -70,7 +71,11 @@ export function normalizeValue(f, value) {
   }
   if (f.type === 'url' && !/^https?:\/\/[^\s]+$/i.test(text))
     throw new Error('链接必须以 http:// 或 https:// 开头');
-  if (f.type === 'image' && !/^\/uploads\/images\/[0-9a-f-]{36}\.webp$/.test(text))
+  if (
+    f.type === 'image' &&
+    !/^\/uploads\/images\/[0-9a-f-]{36}\.webp$/.test(text) &&
+    !(f.key === 'productImage' && walmartImage(text))
+  )
     throw new Error('请上传图片，或使用 Excel 嵌入图片');
   const max = ['textarea', 'url', 'image'].includes(f.type)
     ? 12000

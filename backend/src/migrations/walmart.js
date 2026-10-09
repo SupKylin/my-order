@@ -2,6 +2,8 @@ import { DataTypes } from 'sequelize';
 import { db, OrderItem } from '../models.js';
 import { platformStatusText, specificationText } from '../services/walmart/mapping.js';
 import { WalmartSync, WalmartReceipt } from '../services/walmart/models.js';
+import { backfillWalmartCommercialFields } from './walmart-commercial-fields.js';
+import { backfillWalmartProductImages } from './walmart-product-images.js';
 
 /** 只新增可空字段和专用表，可重复执行；不重建订单表。 */
 export async function migrateWalmart() {
@@ -47,6 +49,8 @@ export async function migrateWalmart() {
       allowNull: true,
     });
   await WalmartReceipt.sync();
+  await backfillWalmartCommercialFields();
+  await backfillWalmartProductImages();
   // 只在首次新增列时从现有 API 快照回填，重复迁移不覆盖人工调整。
   if (addStatus || addSpecification) {
     const snapshots = await OrderItem.findAll({ attributes: ['id', 'walmart'] });

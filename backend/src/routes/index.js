@@ -11,12 +11,15 @@ import { createDashboardRouter } from './dashboard.js';
 import { createDictionariesRouter } from './dictionaries.js';
 import { createStoresRouter } from './stores.js';
 import { createWalmartRouter } from './walmart.js';
+import { createRiskAddressesRouter } from './risk-addresses.js';
+import { createManagementRouter } from './management.js';
 
 /** 统一注册 API 边界；业务路由默认受登录和 CSRF 保护。 */
 export function createApiRouter() {
   const router = Router();
   router.use('/auth', createAuthRouter());
   router.use(requireAuth, requireCsrf);
+  router.use('/management', createManagementRouter());
   router.use(createDashboardRouter());
   router.use(createOrdersRouter());
   router.use('/users', createUsersRouter());
@@ -25,6 +28,7 @@ export function createApiRouter() {
   router.use('/imports', createImportsRouter());
   router.use('/dictionaries', createDictionariesRouter());
   router.use('/stores', createStoresRouter());
+  router.use('/risk-addresses', createRiskAddressesRouter());
   router.use('/stores/:storeId/walmart', createWalmartRouter());
   return router;
 }

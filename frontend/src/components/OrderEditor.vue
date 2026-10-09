@@ -13,7 +13,7 @@ const meta = useMeta(),
 const visible = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) });
 const sections = [
   { key: 'order', label: '订单信息', note: '订单身份、平台时间与状态' },
-  { key: 'product', label: '商品与收件信息', note: '商品、数量及收件地址 · 默认折叠' },
+  { key: 'product', label: '商品与收件信息', note: '由 Walmart 同步 · 只读' },
   { key: 'purchase', label: '采购与交付', note: '采购准备、物流记录、售后及结算' },
 ];
 watch(
@@ -31,12 +31,17 @@ watch(
   },
   { immediate: true },
 );
-/** 人工编辑提交完整表单：用户主动清空的 null 必须保留，不能按导入规则过滤。 */
+/** 仅提交可编辑字段；用户主动清空的 null 必须保留，商品字段由官方同步维护。 */
 async function save() {
   busy.value = true;
   try {
-    if (props.item?.id) await orderApi.update(props.item.id, { ...form }, props.item.version);
-    else await orderApi.create({ ...form });
+    const fields = Object.fromEntries(
+      meta.fields
+        .filter((field) => field.group !== 'product')
+        .map((field) => [field.key, form[field.key]]),
+    );
+    if (props.item?.id) await orderApi.update(props.item.id, fields, props.item.version);
+    else await orderApi.create(fields);
     ElMessage.success('商品明细已保存');
     emit('saved');
     visible.value = false;
@@ -58,6 +63,14 @@ async function save() {
         item?.walmartSku || '店铺名＋订单号＋WalmartSku 识别明细，WalmartSku、店铺名可留空'
       }}</span>
     </div>
+    <el-alert
+      v-if="item?.addressRisk"
+      title="风险地址订单"
+      :description="item.addressRiskNote || '收件地址与风险地址库匹配，请核对后采购。'"
+      type="error"
+      :closable="false"
+      show-icon
+    />
     <el-form label-position="top"
       ><el-collapse v-model="openGroups"
         ><el-collapse-item v-for="section in sections" :key="section.key" :name="section.key"
@@ -74,7 +87,18 @@ async function save() {
               :label="field.label"
               :required="field.required"
               :class="{ 'full-width': ['textarea', 'url'].includes(field.type) }"
-              ><FieldInput :field="field" v-model="form[field.key]"
+              ><template v-if="section.key === 'product'">
+                <el-image
+                  v-if="field.type === 'image' && form[field.key]"
+                  :src="meta.imageUrl(form[field.key], true)"
+                  :preview-src-list="[meta.imageUrl(form[field.key])]"
+                  fit="contain"
+                  preview-teleported
+                  style="width: 100px; height: 100px"
+                />
+                <span v-else style="overflow-wrap: anywhere">{{ form[field.key] ?? '—' }}</span>
+              </template>
+              <FieldInput v-else :field="field" v-model="form[field.key]"
             /></el-form-item></div></el-collapse-item></el-collapse></el-form
     ><template #footer
       ><span class="muted drawer-tip">页面内清空字段并保存，会主动清除该字段。</span

@@ -9,11 +9,28 @@ import {
 } from '../services/orders.js';
 import { deleteItems } from '../services/order-deletion.js';
 import { exportOrders } from '../services/order-export.js';
+import { beginExport, exportProgress } from '../services/export-progress.js';
 
 export function createOrdersRouter() {
   const router = Router();
   router.get('/orders', async (req, res) => res.json(await listOrders(req.query)));
-  router.post('/orders/export', async (req, res) => exportOrders(req.body || {}, res));
+  router.get('/orders/export-progress/:id', (req, res) =>
+    res.json(exportProgress(req.params.id, req.user.id)),
+  );
+  for (const [route, purchaseTemplate] of [
+    ['/orders/export', false],
+    ['/orders/export-purchases', true],
+  ]) {
+    router.post(route, async (req, res) => {
+      const progress = beginExport(req.body?.exportId, req.user.id);
+      try {
+        await exportOrders(req.body || {}, res, purchaseTemplate, { progress });
+      } catch (error) {
+        progress({ stage: 'failed' });
+        throw error;
+      }
+    });
+  }
   router.post('/orders/batch-status', async (req, res) =>
     res.json(await updateOrderStatus(req.body, req.user)),
   );

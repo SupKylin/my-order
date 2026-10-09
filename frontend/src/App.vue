@@ -1,5 +1,5 @@
 <script setup>
-import { defineAsyncComponent, ref } from 'vue';
+import { computed, defineAsyncComponent, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   Box,
@@ -38,11 +38,18 @@ const menus = [
   { path: '/users', label: '账号管理', icon: User },
   { path: '/stores', label: '店铺管理', icon: Setting },
   { path: '/settings/channels', label: '采购渠道维护', icon: Setting },
+  { path: '/settings/purchase-platforms', label: '采购平台维护', icon: Setting },
+  { path: '/settings/risk-addresses', label: '风险地址维护', icon: Setting },
   { path: '/settings/order-statuses', label: '运营订单状态维护', icon: Setting },
   { path: '/settings/purchase-statuses', label: '采购状态维护', icon: Setting },
 ];
 const showPassword = ref(false);
-const sidebarOpen = ref(false);
+const sidebarOpen = ref(true);
+const managementPage = computed(
+  () =>
+    ['/templates', '/imports', '/users', '/stores'].includes(route.path) ||
+    route.path.startsWith('/settings/'),
+);
 async function signOut() {
   try {
     await ElMessageBox.confirm('确认退出当前账号？', '退出登录', { type: 'info' });
@@ -100,6 +107,7 @@ async function signOut() {
         class="workspace"
         :class="{
           'workspace-orders': route.path === '/orders',
+          'workspace-management': managementPage,
           'workspace-sidebar-open': sidebarOpen,
         }"
       >
@@ -127,7 +135,7 @@ async function signOut() {
           </div>
         </header>
         <main>
-          <div v-if="route.path !== '/orders'" class="page-title">
+          <div v-if="route.path !== '/orders' && !managementPage" class="page-title">
             <div>
               <div class="eyebrow">OPERATIONS / WORKSPACE</div>
               <h1>{{ route.meta.title }}</h1>
@@ -137,7 +145,7 @@ async function signOut() {
           </div>
           <router-view />
         </main>
-        <footer v-if="route.path !== '/orders'">
+        <footer v-if="route.path !== '/orders' && !managementPage">
           订单协作台 <span>按商品分配 · 非空字段更新 · 7 天登录有效期</span>
         </footer>
       </div>

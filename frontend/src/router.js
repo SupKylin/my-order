@@ -53,6 +53,7 @@ const router = createRouter({
       },
     },
     ...[
+      ['purchase-platforms', '采购平台维护', 'purchasePlatform'],
       ['channels', '采购渠道维护', 'purchaseChannel'],
       ['order-statuses', '运营订单状态维护', 'orderStatus'],
       ['purchase-statuses', '采购状态维护', 'purchaseStatus'],
@@ -61,6 +62,11 @@ const router = createRouter({
       component: () => import('./views/Dictionaries.vue'),
       meta: { title, dictionaryKind, subtitle: '集中维护下拉选项，修改后同步到订单与导入表单。' },
     })),
+    {
+      path: '/settings/risk-addresses',
+      component: () => import('./views/RiskAddresses.vue'),
+      meta: { title: '风险地址维护', subtitle: '维护风险收件地址，完整地址匹配后自动标记订单。' },
+    },
     { path: '/:pathMatch(.*)*', redirect: '/orders' },
   ],
 });

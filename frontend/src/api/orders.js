@@ -5,10 +5,11 @@ export const orderApi = {
     api.get('/orders', {
       params: { ...filters, shopNames: JSON.stringify(filters.shopNames || []) },
     }),
-  export: (filters, ids) =>
+  exportProgress: (id) => api.get(`/orders/export-progress/${id}`, { silent: true, timeout: 5000 }),
+  export: (filters, purchaseTemplate = false, exportId) =>
     api.post(
-      '/orders/export',
-      { filters, ...(ids.length ? { ids } : {}) },
+      purchaseTemplate ? '/orders/export-purchases' : '/orders/export',
+      { filters, exportId },
       {
         responseType: 'blob',
         timeout: 10 * 60 * 1000,
