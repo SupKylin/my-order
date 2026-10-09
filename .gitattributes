@@ -1,0 +1,2 @@
+deploy/*.py text eol=lf
+scripts/release/*.mjs text eol=lf

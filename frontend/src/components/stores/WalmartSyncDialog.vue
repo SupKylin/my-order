@@ -45,7 +45,7 @@ async function toggle() {
   if (enabled) {
     try {
       await ElMessageBox.confirm(
-        '启用后每店约 20 分钟同步一次，店铺错峰执行，繁忙时顺延；保存成功后自动确认 Created 订单。首次仅接收启用时刻之后的新订单；再次启用则从原进度继续。',
+        '启用后每店约 20 分钟同步一次，店铺错峰执行，繁忙时顺延；保存成功后自动确认 Created 订单。首次从 2026 年 10 月 1 日 00:00（美西标准时间）起拉取，之后按进度增量同步，此日期之前的订单不接入。',
         '启用 Walmart 同步',
         { type: 'warning', confirmButtonText: '启用', cancelButtonText: '取消' },
       );
@@ -122,7 +122,10 @@ onUnmounted(() => clearInterval(timer));
         >立即同步 / 重试</el-button
       >
     </div>
-    <p>接收起点：{{ time(status.state?.startedAt) }}（北京时间）</p>
+    <p>订单接收范围：2026-10-01 00:00（美西标准时间）起，包含 10 月 1 日</p>
+    <p v-if="status.state?.startedAt">
+      当前任务起点：{{ time(status.state.startedAt) }}（北京时间）
+    </p>
     <p>
       状态：{{ labels[status.state?.status] || '尚未开始' }} · 上次开始：{{
         time(status.state?.lastRunAt)

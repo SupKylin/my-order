@@ -12,6 +12,7 @@
     "start": "npm run start -w backend",
     "db:init": "npm run db:init -w backend",
     "db:migrate": "node backend/scripts/migrate-db.js",
+    "release:pack": "node scripts/release/package.mjs",
     "test": "npm run test -w backend",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

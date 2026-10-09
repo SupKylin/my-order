@@ -14,6 +14,7 @@ import { persistOrder } from '../src/services/walmart/persistence.js';
 import { migrateWalmart } from '../src/migrations/walmart.js';
 import { orderIdentityKey, channelKey } from '../src/lib/order-identity.js';
 import { CATALOG_TTL_MS } from '../src/services/walmart/catalog-cache.js';
+import { WALMART_ORDER_START_MS } from '../src/services/walmart/order-range.js';
 
 // 必须显式指定一次性测试数据库，绝不在用户订单库执行清理。
 const isolated = /^my_order_walmart_test_[0-9]+$/.test(config.db.database);
@@ -104,6 +105,7 @@ before(async () => {
   });
   const state = await configureSync(store.id, true, actor);
   start = new Date(state.startedAt).getTime();
+  assert.equal(start, WALMART_ORDER_START_MS);
   remote = sample();
 });
 after(async () => {
@@ -114,6 +116,62 @@ after(async () => {
       await adminConnection.query(`DROP DATABASE ${mysql.escapeId(config.db.database)}`);
     await adminConnection.end();
   }
+});
+
+test('旧店铺自动回溯 10 月 1 日，仅符合时间范围的订单可以落库', async () => {
+  const rangeStore = await Store.create({
+    walmartStoreName: '范围平台',
+    systemStoreName: '范围店铺',
+    clientId: 'test',
+    clientSecret: 'test',
+  });
+  await configureSync(rangeStore.id, true, actor);
+  await WalmartSync.update(
+    { startedAt: new Date('2026-10-07T08:00:00Z'), cursorAt: new Date() },
+    { where: { storeId: rangeStore.id } },
+  );
+  const queries = [];
+  const allowed = {
+    ...sample('Acknowledged', 'RANGE-PO', 'RANGE-ORDER'),
+    orderDate: WALMART_ORDER_START_MS,
+  };
+  const rangeClient = {
+    async *orders(from, to) {
+      queries.push([from.getTime(), to.getTime()]);
+      yield {
+        ...allowed,
+        purchaseOrderId: 'RANGE-OLD',
+        customerOrderId: 'RANGE-OLD',
+        orderDate: WALMART_ORDER_START_MS - 1,
+      };
+      yield allowed;
+    },
+    async order() {
+      return structuredClone(allowed);
+    },
+    async item() {
+      return catalog.get('SKU-A').item;
+    },
+    async acknowledge() {
+      assert.fail('不应确认已确认订单');
+    },
+  };
+  await startSync(rangeStore.id, { clientFactory: () => rangeClient });
+  await drainSyncTasks();
+  assert.equal(queries[0][0], WALMART_ORDER_START_MS);
+  assert.ok(queries.at(-1)[1] <= Date.now());
+  const state = await WalmartSync.findByPk(rangeStore.id);
+  assert.equal(state.status, 'completed');
+  assert.equal(state.startedAt.getTime(), WALMART_ORDER_START_MS);
+  assert.equal(await OrderItem.count({ where: { shopName: rangeStore.systemStoreName } }), 1);
+  assert.equal(await WalmartReceipt.count({ where: { purchaseOrderId: 'RANGE-OLD' } }), 0);
+  // 清理该隔离用例的数据，后续既有测试使用整库数量断言。
+  const items = await OrderItem.findAll({ where: { shopName: rangeStore.systemStoreName } });
+  for (const item of items) {
+    await Purchase.destroy({ where: { itemId: item.id } });
+    await item.destroy();
+  }
+  await WalmartReceipt.destroy({ where: { storeId: rangeStore.id } });
 });
 
 test('只读预览完全不落库、不确认', async () => {
@@ -128,7 +186,7 @@ test('只读预览完全不落库、不确认', async () => {
   assert.equal(postCount, 0);
 });
 
-test('正式任务只保存启用后订单、提交后确认；重跑不新增、不覆盖采购', async () => {
+test('正式任务只保存接收起点后订单、提交后确认；重跑不新增、不覆盖采购', async () => {
   await startSync(store.id, { clientFactory: () => client });
   await drainSyncTasks();
   let state = await WalmartSync.findByPk(store.id);

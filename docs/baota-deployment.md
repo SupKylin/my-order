@@ -1,5 +1,7 @@
 # 宝塔测试部署与 Git 更新
 
+正式环境当前使用 Docker，日常发布请参照 [Docker 一键发布](docker-release.md)。以下内容保留给 Node.js 测试部署，不适用于正式容器更新。
+
 项目目录：`/www/wwwroot/my-order-test`。宝塔数据库名、数据库用户名均为 `my-order-test`。数据库密码只在服务器 `backend/.env` 填写，不能写入 Git。以下为主机 Node.js 部署方式。
 
 ## 1. 安装环境并配置

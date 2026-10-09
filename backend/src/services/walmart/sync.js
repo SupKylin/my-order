@@ -8,6 +8,7 @@ import { acknowledgePersistedOrder } from './acknowledgement.js';
 import { orderLines, mapOrderLine } from './mapping.js';
 import { readCatalogCache } from './catalog-cache.js';
 import { nextScheduledStore, syncDueAt, storeSpacing } from './scheduling.js';
+import { WALMART_ORDER_START_MS, orderRangePatch, isOrderInRange } from './order-range.js';
 
 const running = new Map();
 const safeError = (error) =>
@@ -50,7 +51,7 @@ export async function configureSync(id, enabled, actor) {
   return db.transaction(async (transaction) => {
     const [state] = await WalmartSync.findOrCreate({
       where: { storeId: id },
-      defaults: { enabled, startedAt: new Date(), actorId: actor.id },
+      defaults: { enabled, startedAt: new Date(WALMART_ORDER_START_MS), actorId: actor.id },
       transaction,
     });
     await state.update({ enabled, actorId: actor.id }, { transaction });
@@ -110,7 +111,8 @@ export async function previewOrders(
   { clientFactory = (store) => new WalmartClient(store) } = {},
 ) {
   const store = await getStore(id);
-  const start = new Date(input.start);
+  const requestedStart = new Date(input.start);
+  const start = new Date(Math.max(requestedStart.getTime(), WALMART_ORDER_START_MS));
   const end = new Date(input.end);
   assert(
     Number.isFinite(start.getTime()) &&
@@ -118,7 +120,7 @@ export async function previewOrders(
       start <= end &&
       end - start <= 31 * 86400000 &&
       end.getTime() <= Date.now() + 60000,
-    '预览时间范围无效，最多查询 31 天',
+    '预览时间范围无效，只接收 2026-10-01（美西标准时间）起的订单，最多查询 31 天',
   );
   const client = clientFactory(store);
   const catalog = new Map();
@@ -168,6 +170,9 @@ async function executeSync(
     if (!state?.enabled) return;
     // 在跨进程命名锁内再次检查，避免不同服务实例重复执行同一轮自动任务。
     if (scheduled && syncDueAt(state) > Date.now()) return;
+    // 持有店铺命名锁后调整旧起点，避免与另一轮同步的游标更新冲突。
+    const rangePatch = orderRangePatch(state);
+    if (Object.keys(rangePatch).length) await state.update(rangePatch);
     const store = await getStore(id);
     const actor = await User.findByPk(state.actorId);
     assert(actor?.active, '启用同步的账号已停用，请由有效账号重新启用');
@@ -180,6 +185,8 @@ async function executeSync(
     const stillEnabled = async () => (await WalmartSync.findByPk(id))?.enabled === true;
 
     const processOrder = async (order) => {
+      // 接口异常返回范围外数据、或旧回执刷新时同样不落库、不确认。
+      if (!isOrderInRange(order, end.getTime())) return;
       if (seen.has(order.purchaseOrderId)) return;
       seen.add(order.purchaseOrderId);
       result.orders += 1;
@@ -187,7 +194,7 @@ async function executeSync(
         assert(
           Number.isFinite(Number(order.orderDate)) &&
             Number(order.orderDate) >= state.startedAt.getTime(),
-          '订单早于启用时间，已跳过',
+          '订单早于接收起点，已跳过',
         );
         await getCatalog(client, order, catalog, store);
         const saved = await persistOrder(store, order, catalog, actor);
@@ -199,6 +206,7 @@ async function executeSync(
           purchaseOrderId: order.purchaseOrderId,
           client,
           save: async (latest) => {
+            assert(isOrderInRange(latest, end.getTime()), '订单下单时间超出接收范围，已停止确认');
             assert(
               latest.customerOrderId === order.customerOrderId,
               'Walmart 客户订单号发生变化，需要核对',

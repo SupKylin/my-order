@@ -18,6 +18,8 @@ bin-release/
 # information for Eclipse / Flash Builder.
 
 # Order management project
+releases/
+__pycache__/
 node_modules/
 frontend/dist/
 backend/.env
