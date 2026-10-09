@@ -89,6 +89,8 @@ before(async () => {
   );
   databaseCreated = true;
   await db.sync();
+  // 模拟旧版本同步表，迁移应新增列且允许幂等重跑。
+  await db.getQueryInterface().removeColumn('walmart_sync_states', 'lastReconciledAt');
   await migrateWalmart();
   await migrateWalmart();
   actor = await User.create({
@@ -433,13 +435,14 @@ test('跨轮复用落库规格，过期刷新；自动任务重查间隔，手�
   await startSync(cacheStore.id, options);
   await drainSyncTasks();
   assert.equal(itemCalls, 1);
+  const firstOrderCalls = orderCalls;
   await startSync(cacheStore.id, options);
   await drainSyncTasks();
   assert.equal(itemCalls, 1);
-  assert.equal(orderCalls, 2);
+  assert.equal(orderCalls, firstOrderCalls + 1);
   await startSync(cacheStore.id, { ...options, scheduled: true });
   await drainSyncTasks();
-  assert.equal(orderCalls, 2);
+  assert.equal(orderCalls, firstOrderCalls + 1);
   const item = await OrderItem.findOne({ where: { shopName: cacheStore.systemStoreName } });
   await item.update({
     walmart: {
@@ -451,4 +454,235 @@ test('跨轮复用落库规格，过期刷新；自动任务重查间隔，手�
   await drainSyncTasks();
   assert.equal(itemCalls, 2);
   assert.equal((await WalmartSync.findByPk(cacheStore.id)).status, 'completed');
+});
+
+test('订单延迟两小时才返回仍被回查补入；重复回查不新增且保留采购信息', async () => {
+  const delayedStore = await Store.create({
+    walmartStoreName: '延迟平台',
+    systemStoreName: '延迟店铺',
+    clientId: 'test',
+    clientSecret: 'test',
+  });
+  await configureSync(delayedStore.id, true, actor);
+  await WalmartSync.update(
+    { cursorAt: new Date(), lastReconciledAt: new Date() },
+    { where: { storeId: delayedStore.id } },
+  );
+  const raw = {
+    ...sample('Acknowledged', 'DELAY-PO', 'DELAY-ORDER'),
+    orderDate: Date.now() - 2 * 3600000,
+  };
+  let visible = false;
+  const queries = [];
+  const delayedClient = {
+    async *orders(from, to) {
+      queries.push([from, to]);
+      if (visible && raw.orderDate >= from.getTime() && raw.orderDate <= to.getTime())
+        yield structuredClone(raw);
+    },
+    async order() {
+      return structuredClone(raw);
+    },
+    async item() {
+      return catalog.get('SKU-A').item;
+    },
+    async acknowledge() {
+      assert.fail('已确认不能重复确认');
+    },
+  };
+  const options = { clientFactory: () => delayedClient };
+  await startSync(delayedStore.id, options);
+  await drainSyncTasks();
+  assert.equal(await OrderItem.count({ where: { shopName: delayedStore.systemStoreName } }), 0);
+  const cursor = (await WalmartSync.findByPk(delayedStore.id)).cursorAt;
+  assert.ok(raw.orderDate < cursor.getTime() - 5 * 60000, '旧逻辑会漏掉此订单');
+  visible = true;
+  await startSync(delayedStore.id, options);
+  await drainSyncTasks();
+  assert.ok(queries.at(-1)[0].getTime() <= raw.orderDate);
+  const item = await OrderItem.findOne({ where: { shopName: delayedStore.systemStoreName } });
+  assert.ok(item);
+  const purchase = await Purchase.findOne({ where: { itemId: item.id } });
+  await purchase.update({
+    purchaseNote: '人工采购备注',
+    purchaseAmount: '12+3',
+    purchaseChannel: ['渠道A'],
+  });
+  await startSync(delayedStore.id, options);
+  await drainSyncTasks();
+  assert.equal(await OrderItem.count({ where: { shopName: delayedStore.systemStoreName } }), 1);
+  await purchase.reload();
+  assert.equal(purchase.purchaseNote, '人工采购备注');
+  assert.equal(purchase.purchaseAmount, '12+3');
+  assert.deepEqual(purchase.purchaseChannel, ['渠道A']);
+});
+
+test('每日核对补入五天前漏单；分页失败不推进游标和核对时间，重试恢复后推进', async () => {
+  const dailyStore = await Store.create({
+    walmartStoreName: '核对平台',
+    systemStoreName: '核对店铺',
+    clientId: 'test',
+    clientSecret: 'test',
+  });
+  await configureSync(dailyStore.id, true, actor);
+  const cursor = new Date(Date.now() - 1200000),
+    lastReconciledAt = new Date(Date.now() - 25 * 3600000);
+  await WalmartSync.update(
+    { cursorAt: cursor, lastReconciledAt },
+    { where: { storeId: dailyStore.id } },
+  );
+  const raw = {
+    ...sample('Acknowledged', 'DAILY-PO', 'DAILY-ORDER'),
+    orderDate: Date.now() - 5 * 86400000,
+  };
+  let fail = true;
+  const dailyClient = {
+    async *orders(from, to) {
+      if (raw.orderDate >= from.getTime() && raw.orderDate <= to.getTime())
+        yield structuredClone(raw);
+      if (fail) throw new Error('模拟下一页失败');
+    },
+    async order() {
+      return structuredClone(raw);
+    },
+    async item() {
+      return catalog.get('SKU-A').item;
+    },
+    async acknowledge() {
+      assert.fail('已确认不重复确认');
+    },
+  };
+  const options = { clientFactory: () => dailyClient };
+  await startSync(dailyStore.id, options);
+  await drainSyncTasks();
+  let state = await WalmartSync.findByPk(dailyStore.id);
+  assert.equal(state.status, 'failed');
+  assert.equal(state.result.range.mode, 'reconcile');
+  assert.equal(state.cursorAt.getTime(), cursor.getTime());
+  assert.equal(state.lastReconciledAt.getTime(), lastReconciledAt.getTime());
+  assert.equal(await OrderItem.count({ where: { shopName: dailyStore.systemStoreName } }), 1);
+  fail = false;
+  await startSync(dailyStore.id, options);
+  await drainSyncTasks();
+  state = await WalmartSync.findByPk(dailyStore.id);
+  assert.equal(state.status, 'completed');
+  assert.ok(state.lastReconciledAt > lastReconciledAt);
+  assert.equal(state.lastReconciledAt.getTime(), state.cursorAt.getTime());
+  assert.equal(await OrderItem.count({ where: { shopName: dailyStore.systemStoreName } }), 1);
+});
+
+test('三个店铺实际并发查询，第四个等待；同店手动任务拒绝重入', async () => {
+  const stores = [];
+  for (let i = 0; i < 4; i++) {
+    const value = await Store.create({
+      walmartStoreName: `并发平台${i}`,
+      systemStoreName: `并发店铺${i}`,
+      clientId: 'test',
+      clientSecret: 'test',
+    });
+    await configureSync(value.id, true, actor);
+    stores.push(value);
+  }
+  let release, ready;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const entered = new Promise((resolve) => {
+    ready = resolve;
+  });
+  let active = 0;
+  const options = {
+    clientFactory: () => ({
+      async *orders() {
+        active++;
+        if (active === 3) ready();
+        await gate;
+      },
+    }),
+  };
+  try {
+    await Promise.all(stores.slice(0, 3).map((value) => startSync(value.id, options)));
+    await Promise.race([
+      entered,
+      new Promise((_, reject) => {
+        const timer = setTimeout(() => reject(new Error('三个店铺未并发进入接口')), 5000);
+        timer.unref();
+      }),
+    ]);
+    assert.equal(active, 3);
+    await assert.rejects(startSync(stores[3].id, options), /已有 3 个店铺/);
+    await assert.rejects(startSync(stores[0].id, options), /正在同步/);
+  } finally {
+    release();
+    await drainSyncTasks();
+  }
+  await startSync(stores[3].id, { clientFactory: () => ({ async *orders() {} }) });
+  await drainSyncTasks();
+  for (const value of stores)
+    assert.equal((await WalmartSync.findByPk(value.id)).status, 'completed');
+});
+
+test('密钥初始化失败也记录开始时间，自动下一轮不会立即重试坏店铺', async () => {
+  const badStore = await Store.create({
+    walmartStoreName: '无效平台',
+    systemStoreName: '无效店铺',
+  });
+  await configureSync(badStore.id, true, actor);
+  let calls = 0;
+  const options = {
+    scheduled: true,
+    clientFactory: () => {
+      calls++;
+      throw new Error('模拟认证失败');
+    },
+  };
+  await startSync(badStore.id, options);
+  await drainSyncTasks();
+  const state = await WalmartSync.findByPk(badStore.id);
+  assert.equal(state.status, 'failed');
+  assert.ok(state.lastRunAt);
+  assert.equal(state.lastReconciledAt, null);
+  await startSync(badStore.id, options);
+  await drainSyncTasks();
+  assert.equal(calls, 1);
+});
+
+test('首次补查中暂停不记录完成进度，恢复后仍从接收起点重试', async () => {
+  const pausedStore = await Store.create({
+    walmartStoreName: '暂停补查平台',
+    systemStoreName: '暂停补查店铺',
+    clientId: 'test',
+    clientSecret: 'test',
+  });
+  await configureSync(pausedStore.id, true, actor);
+  const cursor = new Date(Date.now() - 1200000);
+  await WalmartSync.update({ cursorAt: cursor }, { where: { storeId: pausedStore.id } });
+  const pausedClient = {
+    async *orders() {
+      await configureSync(pausedStore.id, false, actor);
+      yield sample('Acknowledged', 'PAUSED-PO', 'PAUSED-ORDER');
+    },
+    async item() {
+      assert.fail('暂停后不继续查商品');
+    },
+  };
+  await startSync(pausedStore.id, { clientFactory: () => pausedClient });
+  await drainSyncTasks();
+  const state = await WalmartSync.findByPk(pausedStore.id);
+  assert.equal(state.cursorAt.getTime(), cursor.getTime());
+  assert.equal(state.lastReconciledAt, null);
+  assert.equal(await OrderItem.count({ where: { shopName: pausedStore.systemStoreName } }), 0);
+  await configureSync(pausedStore.id, true, actor);
+  let first;
+  await startSync(pausedStore.id, {
+    clientFactory: () => ({
+      async *orders(from) {
+        first ??= from;
+      },
+    }),
+  });
+  await drainSyncTasks();
+  assert.equal(first.getTime(), WALMART_ORDER_START_MS);
+  await state.reload();
+  assert.ok(state.lastReconciledAt);
 });

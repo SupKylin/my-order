@@ -9,6 +9,8 @@ export const WalmartSync = db.define(
     enabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     startedAt: { type: DataTypes.DATE(3), allowNull: false },
     cursorAt: { type: DataTypes.DATE(3), allowNull: true },
+    // 仅完整补查成功后更新；NULL 让旧店铺升级后自动执行一次全范围补查。
+    lastReconciledAt: { type: DataTypes.DATE(3), allowNull: true },
     actorId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
     status: { type: DataTypes.STRING(24), allowNull: false, defaultValue: 'idle' },
     lastRunAt: DataTypes.DATE(3),

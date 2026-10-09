@@ -45,7 +45,7 @@ async function toggle() {
   if (enabled) {
     try {
       await ElMessageBox.confirm(
-        '启用后每店约 20 分钟同步一次，店铺错峰执行，繁忙时顺延；保存成功后自动确认 Created 订单。首次从 2026 年 10 月 1 日 00:00（美西标准时间）起拉取，之后按进度增量同步，此日期之前的订单不接入。',
+        '启用后每店约 20 分钟同步一次，最多同时处理 3 家店铺，繁忙时排队；保存成功后自动确认 Created 订单。首次从 2026 年 10 月 1 日 00:00（美西标准时间）起拉取，之后每轮回查 48 小时、每 24 小时核对最近 7 天，此日期之前的订单不接入。',
         '启用 Walmart 同步',
         { type: 'warning', confirmButtonText: '启用', cancelButtonText: '取消' },
       );
@@ -58,7 +58,7 @@ async function toggle() {
     status.value = await storeApi.configureSync(props.store.id, enabled);
     if (enabled) await storeApi.sync(props.store.id);
     ElMessage.success(
-      enabled ? '已启用每 20 分钟错峰同步' : '已暂停，正在执行的接口请求结束后停止',
+      enabled ? '已启用每 20 分钟同步，支持店铺并发' : '已暂停，正在执行的接口请求结束后停止',
     );
     await load();
   } finally {
@@ -109,7 +109,7 @@ onUnmounted(() => clearInterval(timer));
     />
     <div class="sync-actions">
       <el-tag :type="status.state?.enabled ? 'success' : 'info'">{{
-        status.state?.enabled ? '每 20 分钟错峰同步' : '未启用 / 已暂停'
+        status.state?.enabled ? '每 20 分钟同步 · 店铺并发' : '未启用 / 已暂停'
       }}</el-tag>
       <el-button :loading="busy" @click="toggle">{{
         status.state?.enabled ? '暂停同步' : '启用自动同步'
@@ -125,6 +125,15 @@ onUnmounted(() => clearInterval(timer));
     <p>订单接收范围：2026-10-01 00:00（美西标准时间）起，包含 10 月 1 日</p>
     <p v-if="status.state?.startedAt">
       当前任务起点：{{ time(status.state.startedAt) }}（北京时间）
+    </p>
+    <p v-if="status.state?.result?.range">
+      本轮查询：{{
+        { backfill: '首次补查', reconcile: '每日核对', recent: '48 小时回查' }[
+          status.state.result.range.mode
+        ]
+      }}
+      · {{ time(status.state.result.range.start) }} 至
+      {{ time(status.state.result.range.end) }}（北京时间）
     </p>
     <p>
       状态：{{ labels[status.state?.status] || '尚未开始' }} · 上次开始：{{

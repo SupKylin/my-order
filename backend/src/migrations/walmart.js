@@ -40,6 +40,12 @@ export async function migrateWalmart() {
       unique: true,
     });
   await WalmartSync.sync();
+  const syncColumns = await query.describeTable('walmart_sync_states');
+  if (!syncColumns.lastReconciledAt)
+    await query.addColumn('walmart_sync_states', 'lastReconciledAt', {
+      type: DataTypes.DATE(3),
+      allowNull: true,
+    });
   await WalmartReceipt.sync();
   // 只在首次新增列时从现有 API 快照回填，重复迁移不覆盖人工调整。
   if (addStatus || addSpecification) {

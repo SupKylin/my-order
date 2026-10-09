@@ -7,8 +7,13 @@ import { persistOrder } from './persistence.js';
 import { acknowledgePersistedOrder } from './acknowledgement.js';
 import { orderLines, mapOrderLine } from './mapping.js';
 import { readCatalogCache } from './catalog-cache.js';
-import { nextScheduledStore, syncDueAt, storeSpacing } from './scheduling.js';
-import { WALMART_ORDER_START_MS, orderRangePatch, isOrderInRange } from './order-range.js';
+import { createSyncDispatcher, syncDueAt, MAX_SYNC_CONCURRENCY } from './scheduling.js';
+import {
+  WALMART_ORDER_START_MS,
+  orderRangePatch,
+  isOrderInRange,
+  syncOrderRange,
+} from './order-range.js';
 
 const running = new Map();
 const safeError = (error) =>
@@ -173,12 +178,21 @@ async function executeSync(
     // 持有店铺命名锁后调整旧起点，避免与另一轮同步的游标更新冲突。
     const rangePatch = orderRangePatch(state);
     if (Object.keys(rangePatch).length) await state.update(rangePatch);
+    const end = new Date();
+    const range = syncOrderRange(state, end.getTime());
+    result.range = range;
+    // 认证/账号失败也记录本轮时间，避免坏店铺每个调度周期抢占并发名额。
+    await state.update({
+      status: 'running',
+      lastRunAt: end,
+      finishedAt: null,
+      error: null,
+      result: structuredClone(result),
+    });
     const store = await getStore(id);
     const actor = await User.findByPk(state.actorId);
     assert(actor?.active, '启用同步的账号已停用，请由有效账号重新启用');
     const client = clientFactory(store);
-    const end = new Date();
-    await state.update({ status: 'running', lastRunAt: end, finishedAt: null, error: null });
     const catalog = new Map();
     const seen = new Set();
     let importFailed = false;
@@ -236,32 +250,8 @@ async function executeSync(
       await state.update({ result: structuredClone(result) });
     };
 
-    // createdStartDate 不会返回旧单的新状态；主动刷新已接入的非终态和失败记录。
-    const receipts = await WalmartReceipt.findAll({
-      where: {
-        storeId: id,
-        [Op.or]: [{ active: true }, { ackStatus: { [Op.in]: ['pending', 'failed', 'sending'] } }],
-      },
-    });
-    for (const receipt of receipts) {
-      if (!(await stillEnabled())) break;
-      try {
-        await processOrder(await client.order(receipt.purchaseOrderId));
-      } catch (error) {
-        result.failed += 1;
-        await receipt.update({ lastError: safeError(error) });
-        if (result.errors.length < 100)
-          result.errors.push({
-            purchaseOrderId: receipt.purchaseOrderId,
-            message: safeError(error),
-          });
-      }
-    }
-    // 重叠 5 分钟防止接口可见性延迟；稳定商品行键保证重复拉取不会新增。
-    let start = Math.max(
-      state.startedAt.getTime(),
-      (state.cursorAt?.getTime() ?? state.startedAt.getTime()) - 5 * 60000,
-    );
+    // 先拉订单列表，避免大量历史订单逐个刷新阻塞新订单入库。
+    let start = range.start.getTime();
     let complete = true;
     while (start <= end.getTime()) {
       if (!(await stillEnabled())) {
@@ -284,12 +274,44 @@ async function executeSync(
       if (!complete || segmentEnd === end.getTime()) break;
       start = segmentEnd;
     }
+    // 回查范围以外的非终态/确认失败订单仍刷新；列表中已处理的不重复 GET。
+    const receipts = await WalmartReceipt.findAll({
+      where: {
+        storeId: id,
+        [Op.or]: [{ active: true }, { ackStatus: { [Op.in]: ['pending', 'failed', 'sending'] } }],
+      },
+    });
+    for (const receipt of receipts) {
+      if (!(await stillEnabled())) {
+        complete = false;
+        break;
+      }
+      if (seen.has(receipt.purchaseOrderId)) continue;
+      try {
+        await processOrder(await client.order(receipt.purchaseOrderId));
+      } catch (error) {
+        importFailed = true;
+        result.failed += 1;
+        await receipt.update({ lastError: safeError(error) });
+        if (result.errors.length < 100)
+          result.errors.push({
+            purchaseOrderId: receipt.purchaseOrderId,
+            message: safeError(error),
+          });
+      }
+    }
+    complete = complete && (await stillEnabled());
     result.variantErrors = [...catalog.values()].filter((entry) => entry.error).length;
     await state.update({
       status: result.failed || result.review || result.variantErrors ? 'partial' : 'completed',
       result: structuredClone(result),
       finishedAt: new Date(),
-      ...(!importFailed && complete ? { cursorAt: end } : {}),
+      ...(!importFailed && complete
+        ? {
+            cursorAt: end,
+            ...(range.mode !== 'recent' ? { lastReconciledAt: end } : {}),
+          }
+        : {}),
     });
   } catch (error) {
     if (state)
@@ -308,7 +330,11 @@ export async function startSync(id, options) {
   const state = await WalmartSync.findByPk(id);
   assert(state?.enabled, '请先启用该店铺同步');
   if (running.has(Number(id))) throw new AppError(409, '该店铺正在同步，请稍后查看结果');
-  assert(running.size < 2, '已有两个店铺正在同步，请稍后重试', 409);
+  assert(
+    running.size < MAX_SYNC_CONCURRENCY,
+    `已有 ${MAX_SYNC_CONCURRENCY} 个店铺正在同步，请稍后重试`,
+    409,
+  );
   const task = executeSync(Number(id), options).catch(() =>
     console.error('Walmart 同步任务未完成，请检查同步记录'),
   );
@@ -323,33 +349,19 @@ export async function drainSyncTasks() {
 }
 
 export function startWalmartScheduler() {
-  let stopped = false;
-  let ticking = false;
-  let nextLaunchAt = 0;
-  const tick = async () => {
-    if (stopped || ticking || Date.now() < nextLaunchAt || running.size >= 2) return;
-    ticking = true;
-    try {
-      const states = await WalmartSync.findAll({ where: { enabled: true } });
-      const state = nextScheduledStore(states, Date.now(), (id) => running.has(id));
-      if (!stopped && state) {
-        // 20 店铺约每分钟启动一家；自动任务保持串行，手动同步仍可立即执行。
-        await startSync(state.storeId, { scheduled: true });
-        nextLaunchAt = Date.now() + storeSpacing(states.length);
-        await running.get(state.storeId);
-      }
-    } catch {
-      console.error('Walmart 定时同步检查失败，请检查数据库与同步迁移');
-    } finally {
-      ticking = false;
-    }
-  };
-  const timer = setInterval(() => void tick(), 30 * 1000);
+  const dispatcher = createSyncDispatcher({
+    list: () => WalmartSync.findAll({ where: { enabled: true } }),
+    launch: (id) => startSync(id, { scheduled: true }),
+    activeCount: () => running.size,
+    busy: (id) => running.has(id),
+    onError: () => console.error('Walmart 定时同步检查失败，请检查数据库与同步迁移'),
+  });
+  const timer = setInterval(() => void dispatcher.tick(), 30 * 1000);
   timer.unref();
-  void tick();
+  void dispatcher.tick();
   return async () => {
-    stopped = true;
     clearInterval(timer);
+    await dispatcher.stop();
     await drainSyncTasks();
   };
 }
