@@ -37,6 +37,7 @@ python3 deploy/release.py publish /www/backup/my-order/packages/发布包.tar.gz
 1. 校验发布包完整性，拒绝越界路径、链接和额外文件。
 2. 使用当前镜像的 Node 环境构建新镜像。依赖清单和锁文件未变化时复用依赖；变化时运行 `npm ci --omit=dev`。不主动下载新的 Node 基础镜像。
    复用同时保留根目录及 backend/frontend 的 workspace 依赖。旧镜像缺失生产依赖时自动重新安装；新镜像必须在停服前通过实际 PNG 缩略图生成检查。
+   运行镜像达到 100 层时，自动合并现有镜像文件系统为单层，再复制新版代码，避免连续发版触发 Docker 的层数上限；保留镜像运行配置，原容器及旧镜像不变。
 3. 构建成功后停止服务，最多等待 180 秒；若服务被强制终止，中止发布并尝试恢复原服务。
 4. 备份当前数据库，备份失败则不执行迁移。默认保留原上传目录，不重复压缩大量历史图片；需要文件备份时添加 `--backup-uploads`。
 5. 执行 `backend/scripts/migrate-db.js` 增量迁移，不执行 `db:init`、`--reset` 或清空脚本。

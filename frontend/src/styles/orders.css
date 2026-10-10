@@ -295,10 +295,20 @@
 .column-settings-dialog {
   max-width: calc(100vw - 32px);
 }
+body .column-settings-dialog .el-dialog__body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.column-settings-dialog .column-settings-toolbar,
+.column-settings-dialog .column-order-hint {
+  flex-shrink: 0;
+}
 .column-settings-toolbar .el-button + .el-button {
   margin-left: 0;
 }
 .column-settings-list {
+  min-height: 0;
   max-height: min(52vh, 440px);
   overflow-y: auto;
   padding-right: 4px;

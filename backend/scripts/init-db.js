@@ -1,4 +1,5 @@
 import mysql from 'mysql2/promise';
+import { migrateOrderTablePreferences } from '../src/migrations/order-table-preferences.js';
 import { migratePermissionsAudit } from '../src/migrations/permissions-audit.js';
 import { migrateWalmart } from '../src/migrations/walmart.js';
 import { config } from '../src/config.js';
@@ -54,6 +55,7 @@ try {
   await connection.end();
   connection = null;
   await db.sync();
+  await migrateOrderTablePreferences();
   await migrateDictionaries();
   await migrateStores();
   await migrateOrderFields();

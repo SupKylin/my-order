@@ -22,6 +22,7 @@ import {
 import { createApp } from '../src/app.js';
 import { hashPassword } from '../src/auth.js';
 import { migratePermissionsAudit } from '../src/migrations/permissions-audit.js';
+import { migrateOrderTablePreferences } from '../src/migrations/order-table-preferences.js';
 import { auditCutoff, auditContext } from '../src/lib/audit-context.js';
 import { cleanupAudit, drainAudit } from '../src/services/audit.js';
 import { ensureStorage, uploadPath } from '../src/services/storage.js';
@@ -97,6 +98,10 @@ before(async () => {
   );
   created = true;
   await db.sync();
+  // 模拟旧账号表，验证增量迁移和重复执行。
+  await db.getQueryInterface().removeColumn('users', 'orderTablePreferences');
+  await migrateOrderTablePreferences();
+  await migrateOrderTablePreferences();
   await migratePermissionsAudit();
   await migratePermissionsAudit();
   await ensureStorage();
@@ -280,6 +285,46 @@ test('共享模板允许维护，操作日志记录前后值、账号和删除�
     await AuditLog.findOne({ where: { action: 'delete_record', entityId: String(made.data.id) } }),
   );
 });
+test('共享模板复制生成独立副本并自动避重命名，保留未映射列并记录创建日志', async () => {
+  const source = await request('operations', '/templates', 'POST', {
+    ...template,
+    name: '复制测试',
+    headerRow: 3,
+    mappings: [...template.mappings, { column: 9, header: '保留源列', field: '' }],
+  });
+  assert.equal(source.status, 201);
+  const copies = await Promise.all(
+    ['operations', 'purchasing'].map((role) =>
+      request(role, `/templates/${source.data.id}/copy`, 'POST', {}),
+    ),
+  );
+  assert.ok(
+    copies.every((copy) => copy.status === 201),
+    JSON.stringify(copies),
+  );
+  assert.deepEqual(copies.map((copy) => copy.data.name).sort(), [
+    '复制测试 - 副本',
+    '复制测试 - 副本 (2)',
+  ]);
+  for (const copy of copies) {
+    assert.notEqual(copy.data.id, source.data.id);
+    assert.equal(copy.data.headerRow, 3);
+    assert.deepEqual(copy.data.mappings, source.data.mappings);
+    assert.equal(copy.data.sheetName, '');
+    assert.equal(copy.data.purchaseChannelId, null);
+    assert.ok(
+      await AuditLog.findOne({
+        where: { action: 'create_record', entityId: String(copy.data.id) },
+      }),
+    );
+  }
+  await request('operations', `/templates/${copies[0].data.id}`, 'PUT', {
+    ...template,
+    name: copies[0].data.name,
+  });
+  assert.equal((await ImportTemplate.findByPk(source.data.id)).headerRow, 3);
+  assert.equal((await request('operations', '/templates/999999/copy', 'POST', {})).status, 404);
+});
 test('混合采购导入仅更新本人店铺，外店非法采购字段跳过，提交前重新校验归属', async () => {
   const p = await preview([
     ['A', 'ORDER-A', 'SKU', 'own', '是'],
@@ -421,4 +466,78 @@ test('Walmart 新增及更新订单不记日志，也不泄漏或破坏账号审
   assert.equal(await AuditLog.count(), count + 1);
   const item = await OrderItem.findOne({ where: { walmartSku: 'AUDIT-SKU' } });
   assert.equal(item.productName, '官方更新');
+});
+
+test('表头设置按当前账号隔离，重新登录恢复，非法设置不会覆盖已有值', async () => {
+  const path = '/auth/order-table-preferences';
+  assert.equal((await request('anonymous', path)).status, 401);
+  assert.deepEqual((await request('operations', path)).data, { preferences: null });
+  const saved = await request('operations', path, 'PUT', {
+    order: ['tax', 'orderDate'],
+    hidden: ['orderAmount'],
+    userId: users.admin.id,
+  });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.data.preferences, {
+    order: ['shopName', 'orderNumber', 'tax', 'orderDate'],
+    hidden: ['orderAmount'],
+  });
+  assert.deepEqual((await request('admin', path)).data, { preferences: null });
+  assert.deepEqual((await request('operations', path)).data, saved.data);
+  assert.equal(
+    (await request('operations', path, 'PUT', { order: ['passwordHash'], hidden: [] })).status,
+    400,
+  );
+  assert.deepEqual((await request('operations', path)).data, saved.data);
+  await request('operations', '/auth/logout', 'POST');
+  const login = await request('operations', '/auth/login', 'POST', {
+    username: 'operations',
+    password: 'Permissions-test-123',
+  });
+  assert.equal(login.status, 200);
+  sessions.operations = {
+    Cookie: login.headers.get('set-cookie').split(';')[0],
+    'X-CSRF-Token': login.data.csrfToken,
+  };
+  assert.deepEqual((await request('operations', path)).data, saved.data);
+});
+
+test('主管确认筛选与其他条件、运营店铺权限取交集，导出范围一致', async () => {
+  for (const [name, value] of [
+    ['A', '已确认'],
+    ['B', '已确认'],
+    ['NONE', '不可分配'],
+    ['ORPHAN', '否'],
+  ])
+    await Purchase.update({ supervisorConfirmed: value }, { where: { itemId: items[name].id } });
+  const filter = '/orders?supervisorConfirmed=' + encodeURIComponent('已确认');
+  const admin = await request('admin', filter);
+  assert.equal(admin.status, 200);
+  assert.deepEqual(admin.data.rows.map((row) => row.id).sort(), [items.A.id, items.B.id].sort());
+  const own = await request('operations', filter);
+  assert.deepEqual(
+    own.data.rows.map((row) => row.id),
+    [items.A.id],
+  );
+  assert.equal((await request('operations', filter + '&shopName=B')).data.total, 0);
+  assert.equal(
+    (await request('admin', '/orders?supervisorConfirmed=' + encodeURIComponent('不可分配'))).data
+      .total,
+    1,
+  );
+  for (const route of ['/orders/export', '/orders/export-purchases']) {
+    const exported = await request(
+      'operations',
+      route,
+      'POST',
+      { filters: { supervisorConfirmed: '已确认' } },
+      true,
+    );
+    assert.equal(exported.status, 200);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(exported.data);
+    const sheet = workbook.worksheets[0];
+    assert.equal(sheet.rowCount, 2);
+    assert.equal(sheet.getCell('A2').value, 'A');
+  }
 });

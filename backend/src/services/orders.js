@@ -155,7 +155,13 @@ export function buildFilters(query, now = Date.now(), user) {
       sqlWhere(fn('UPPER', fn('TRIM', col('OrderItem.fulfillmentParty'))), { [Op.in]: values }),
     ];
   }
-  for (const key of ['purchaseStatus', 'settlement', 'allocatable', 'afterSales'])
+  for (const key of [
+    'purchaseStatus',
+    'settlement',
+    'allocatable',
+    'afterSales',
+    'supervisorConfirmed',
+  ])
     if (query[key]) purchaseWhere[key] = String(query[key]);
   // “未分配”是空值筛选入口，不向业务字段写入第三种状态。
   if (query.allocatable === 'empty') purchaseWhere.allocatable = { [Op.or]: [null, ''] };

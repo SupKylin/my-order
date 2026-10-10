@@ -50,10 +50,6 @@ body .template-editor-dialog .el-dialog__body {
   gap: 8px;
   min-width: 0;
 }
-.mapping-source-fields > .el-input-number {
-  width: 88px;
-  flex: 0 0 88px;
-}
 .mapping-source-fields > .mapping-header-input {
   flex: 1;
   min-width: 0;

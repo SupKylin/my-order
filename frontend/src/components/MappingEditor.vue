@@ -22,9 +22,21 @@ const groups = [
   { key: 'purchase', label: '采购信息' },
 ];
 const columns = computed(() => props.info?.columns || []);
+const sourceHeaders = computed(() => [
+  ...new Set(columns.value.map((column) => column.header.trim()).filter(Boolean)),
+]);
+const duplicateHeaders = computed(() =>
+  sourceHeaders.value.filter(
+    (header) => columns.value.filter((column) => column.header.trim() === header).length > 1,
+  ),
+);
 const fieldOptions = computed(() => props.allowedFields || meta.fields);
 const availableColumns = computed(() =>
-  columns.value.filter((column) => !props.modelValue.some((row) => row.column === column.column)),
+  sourceHeaders.value.filter(
+    (header) =>
+      !duplicateHeaders.value.includes(header) &&
+      !props.modelValue.some((row) => row.header.trim() === header),
+  ),
 );
 const issues = computed(() => mappingIssues(props.modelValue, fieldOptions.value));
 const ambiguous = computed(() =>
@@ -32,7 +44,7 @@ const ambiguous = computed(() =>
     .filter((item) => !props.modelValue.some((row) => row.field === item.field))
     .map(
       (item) =>
-        `${meta.fieldMap[item.field]?.label || item.field}（第 ${item.sources.map((column) => column.column).join('、')} 列）`,
+        `${meta.fieldMap[item.field]?.label || item.field}（${item.sources.map((column) => column.header || '空表头').join('、')}）`,
     ),
 );
 const canAdd = computed(
@@ -45,16 +57,9 @@ function patch(index, values) {
     props.modelValue.map((row, rowIndex) => (rowIndex === index ? { ...row, ...values } : row)),
   );
 }
-function selectColumn(index, columnNumber) {
-  const source = columns.value.find((column) => column.column === columnNumber);
-  patch(index, { column: columnNumber ?? null, header: source?.header || '' });
-}
 function addMapping() {
-  const source = availableColumns.value[0];
-  emit('update:modelValue', [
-    ...props.modelValue,
-    { column: source?.column ?? null, header: source?.header || '', field: '' },
-  ]);
+  const header = availableColumns.value[0];
+  emit('update:modelValue', [...props.modelValue, { header: header || '', field: '' }]);
 }
 /** 按关系所在行删除，重复列或重复字段也可分别移除；不修改已有订单。 */
 function removeMapping(index) {
@@ -63,10 +68,11 @@ function removeMapping(index) {
     props.modelValue.filter((_, rowIndex) => rowIndex !== index),
   );
 }
-function samples(columnNumber) {
+function samples(header) {
   return (
-    columns.value.find((column) => column.column === columnNumber)?.samples?.find(Boolean) ||
-    '— / 嵌入图片'
+    columns.value
+      .find((column) => column.header.trim() === header.trim())
+      ?.samples?.find(Boolean) || '— / 嵌入图片'
   );
 }
 </script>
@@ -84,6 +90,14 @@ function samples(columnNumber) {
     >
   </div>
   <el-alert
+    v-if="!manualSource && duplicateHeaders.length"
+    type="warning"
+    :closable="false"
+    show-icon
+    class="mapping-notice"
+    :title="`示例表存在重复表头：${duplicateHeaders.join('、')}。需要导入这些字段时，请先在 Excel 中改为唯一名称。`"
+  />
+  <el-alert
     v-if="ambiguous.length"
     type="warning"
     :closable="false"
@@ -93,20 +107,9 @@ function samples(columnNumber) {
   />
   <el-table :data="modelValue" :height="tableHeight" :max-height="maxHeight" class="mapping-table">
     <el-table-column label="关系" width="60" type="index" />
-    <el-table-column label="Excel 源列" min-width="220">
+    <el-table-column label="Excel 表头名称" min-width="220">
       <template #default="{ row, $index }">
         <div v-if="manualSource" class="mapping-source-fields">
-          <el-input-number
-            :model-value="row.column"
-            :min="1"
-            :max="500"
-            :precision="0"
-            :disabled="disabled"
-            :aria-label="`第 ${$index + 1} 条映射列号`"
-            placeholder="列号"
-            controls-position="right"
-            @update:model-value="patch($index, { column: $event ?? null })"
-          />
           <el-input
             :model-value="row.header"
             :disabled="disabled"
@@ -118,22 +121,23 @@ function samples(columnNumber) {
         </div>
         <el-select
           v-else
-          :model-value="row.column"
+          :model-value="row.header"
           filterable
           clearable
           :disabled="disabled"
-          :aria-label="`第 ${$index + 1} 条映射源列`"
-          placeholder="选择 Excel 列"
-          @update:model-value="selectColumn($index, $event)"
+          :aria-label="`第 ${$index + 1} 条映射表头`"
+          placeholder="选择 Excel 表头"
+          @update:model-value="patch($index, { header: $event || '' })"
         >
           <el-option
-            v-for="column in columns"
-            :key="column.column"
-            :value="column.column"
-            :label="`第 ${column.column} 列 · ${column.header || '（空表头）'}`"
+            v-for="header in sourceHeaders"
+            :key="header"
+            :value="header"
+            :label="header"
             :disabled="
+              duplicateHeaders.includes(header) ||
               modelValue.some(
-                (mapping, index) => index !== $index && mapping.column === column.column,
+                (mapping, index) => index !== $index && mapping.header.trim() === header,
               )
             "
           />
@@ -142,7 +146,7 @@ function samples(columnNumber) {
     </el-table-column>
     <el-table-column v-if="!manualSource" label="示例数据" min-width="150">
       <template #default="{ row }"
-        ><span class="muted ellipsis">{{ samples(row.column) }}</span></template
+        ><span class="muted ellipsis">{{ samples(row.header) }}</span></template
       >
     </el-table-column>
     <el-table-column label="系统字段" min-width="240">
@@ -203,6 +207,7 @@ function samples(columnNumber) {
   </p>
   <p class="mapping-footnote">
     未选择系统字段的 Excel
-    表头仍会保存在模板中，可稍后配置；导入时跳过这些列。采购导入需映射店铺名、订单号、WalmartSku及至少一个可更新的采购字段；采购渠道不参与导入。每个源列和系统字段只能使用一次；不需要的关系可直接删除，也可通过“新增映射”重新添加。删除映射只影响后续导入，已有订单字段保留原值。
+    表头仍会保存在模板中，可稍后配置；导入时跳过这些列。仅按表头名称匹配，列顺序可以变化，忽略表头首尾空格。采购导入需映射店铺名、订单号、WalmartSku及至少一个可更新的采购字段；采购渠道不参与导入。每个表头名称和系统字段只能使用一次；同名表头无法区分，请先修改
+    Excel。删除映射只影响后续导入，已有订单字段保留原值。
   </p>
 </template>

@@ -16,6 +16,7 @@ const orderKeys = [
 const purchaseKeys = [
   'purchaseSku',
   'purchaseStatus',
+  'purchaseConfirmedAt',
   'purchasePlatform',
   'shippingMode',
   'merchantName',
@@ -47,6 +48,13 @@ const widths = {
 };
 export function orderColumns(fields) {
   const byKey = new Map(fields.map((field) => [field.key, field]));
+  // 服务端自动维护的只读列，不加入可编辑/可导入字段元数据。
+  byKey.set('purchaseConfirmedAt', {
+    key: 'purchaseConfirmedAt',
+    label: '采购成功时间',
+    group: 'purchase',
+    type: 'datetime',
+  });
   // 组内指定字段优先，其余字段沿用元数据顺序，新增字段也能自动归组。
   const groupColumns = (group, keys) => {
     const prioritized = new Set(keys);

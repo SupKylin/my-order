@@ -1,23 +1,24 @@
-/** 优先匹配原列；列位置改变时只接受唯一同名表头，避免映射到错误列。 */
+/** 仅接受唯一同名表头，旧模板列号不参与匹配。 */
 export function alignMappings(mappings, columns) {
   const found = [],
     missing = [];
   for (const mapping of mappings) {
-    const exact = columns.find(
-      (c) => c.column === mapping.column && c.header.trim() === mapping.header.trim(),
-    );
     const candidates = columns.filter((c) => c.header.trim() === mapping.header.trim());
-    const column = exact || (candidates.length === 1 ? candidates[0] : null);
-    if (column) found.push({ ...mapping, column: column.column, header: column.header });
+    const column = candidates.length === 1 ? candidates[0] : null;
+    if (column) found.push({ header: column.header.trim(), field: mapping.field });
     else if (mapping.field?.trim()) missing.push(mapping);
   }
   // 复用模板时也展示新增源列，但不替用户决定其映射目标。
-  const matchedColumns = new Set(found.map((mapping) => mapping.column));
+  const matchedHeaders = new Set(found.map((mapping) => mapping.header));
   for (const column of columns) {
-    if (!matchedColumns.has(column.column))
-      found.push({ column: column.column, header: column.header, field: '' });
+    if (!matchedHeaders.has(column.header.trim()))
+      found.push({ header: column.header.trim(), field: '' });
   }
-  found.sort((a, b) => a.column - b.column);
+  found.sort(
+    (a, b) =>
+      columns.findIndex((c) => c.header.trim() === a.header) -
+      columns.findIndex((c) => c.header.trim() === b.header),
+  );
   return { mappings: found, missing };
 }
 
@@ -39,8 +40,7 @@ export function ambiguousSuggestions(columns = []) {
 export function suggestedMappings(columns) {
   const ambiguous = new Set(ambiguousSuggestions(columns).map((item) => item.field));
   return columns.map((column) => ({
-    column: column.column,
-    header: column.header,
+    header: column.header.trim(),
     field: !ambiguous.has(column.suggestedField) ? column.suggestedField || '' : '',
   }));
 }
@@ -54,20 +54,19 @@ export function selectedMappings(mappings = []) {
 export function mappingIssues(mappings = [], fields = []) {
   const issues = [];
   const fieldMap = new Map(fields.map((field) => [field.key, field]));
-  const columns = new Map();
+  const headers = new Map();
   const targets = new Map();
   for (const [index, mapping] of mappings.entries()) {
     if (!mapping.field?.trim()) continue;
-    const column = Number(mapping.column);
+    const header = String(mapping.header || '').trim();
     const label = `第 ${index + 1} 条映射`;
-    if (!Number.isInteger(column) || column < 1 || column > 500)
-      issues.push({ index, message: `${label}：请选择或填写 1–500 的 Excel 列号` });
-    else if (columns.has(column))
+    if (!header) issues.push({ index, message: `${label}：请选择或填写 Excel 表头名称` });
+    else if (headers.has(header))
       issues.push({
         index,
-        message: `${label}：Excel 第 ${column} 列已被第 ${columns.get(column) + 1} 条使用`,
+        message: `${label}：Excel 表头“${header}”已被第 ${headers.get(header) + 1} 条使用`,
       });
-    else columns.set(column, index);
+    else headers.set(header, index);
     if (!fieldMap.has(mapping.field))
       issues.push({ index, message: `${label}：请选择有效的系统字段` });
     else if (targets.has(mapping.field))

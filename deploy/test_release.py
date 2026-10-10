@@ -91,6 +91,8 @@ class DeploymentTests(unittest.TestCase):
                 checks = []
 
                 def command(args, log=None, **unused):
+                    if args[:3] == ['docker', 'image', 'inspect']:
+                        return json.dumps([{'RootFS': {'Layers': ['base']}}])
                     if log and log.name.startswith('dependency-'):
                         checks.append(log.name)
                         if broken and log.name == 'dependency-before.log':
@@ -117,6 +119,8 @@ class DeploymentTests(unittest.TestCase):
                 target.write_text('{}')
 
             def command(args, log=None, **unused):
+                if args[:3] == ['docker', 'image', 'inspect']:
+                    return json.dumps([{'RootFS': {'Layers': ['base']}}])
                 if log and log.name == 'dependency-after.log':
                     raise RuntimeError('image conversion failed')
                 return json.dumps(dependencies)
@@ -132,6 +136,28 @@ class DeploymentTests(unittest.TestCase):
         self.assertFalse(runtime.dependency_changed(old, new))
         new["backend/package.json"]["dependencies"]["express"] = "6"
         self.assertTrue(runtime.dependency_changed(old, new))
+
+    def test_layer_limit_flattens_only_high_depth_preserving_runtime_config(self):
+        image = {'RootFS': {'Layers': ['layer'] * 124}, 'Config': {
+            'Env': ['PATH=/usr/local/bin:/usr/bin:/bin', 'NODE_ENV=production', 'LITERAL=$VALUE'],
+            'Entrypoint': ['docker-entrypoint.sh'], 'Cmd': ['node'],
+            'User': 'root', 'StopSignal': 'SIGTERM', 'ExposedPorts': {'3000/tcp': {}},
+            'Labels': {'release': 'previous'},
+        }}
+        lines = runtime.runtime_base_lines('runtime:old', image)
+        self.assertEqual(lines[:3], ['FROM runtime:old AS previous_runtime', 'FROM scratch',
+                                    'COPY --from=previous_runtime / /'])
+        self.assertIn('ENV NODE_ENV="production"', lines)
+        self.assertIn('ENV LITERAL="\\$VALUE"', lines)
+        self.assertIn('ENTRYPOINT ["docker-entrypoint.sh"]', lines)
+        self.assertIn('EXPOSE 3000/tcp', lines)
+        self.assertIn('USER root', lines)
+        image['RootFS']['Layers'] = ['layer'] * 99
+        self.assertEqual(runtime.runtime_base_lines('runtime:old', image), ['FROM runtime:old'])
+        image['RootFS']['Layers'] *= 2
+        image['Config']['Volumes'] = {'/data': {}}
+        with self.assertRaises(ValueError):
+            runtime.runtime_base_lines('runtime:old', image)
 
     def simulate_publish(self, failure=None):
         with tempfile.TemporaryDirectory() as temporary:

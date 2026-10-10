@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { randomBytes } from 'node:crypto';
 import { config } from '../config.js';
-import { User, AuditLog } from '../models.js';
+import { User, AuditLog, db } from '../models.js';
+import { validateOrderTablePreferences } from '../lib/order-table-preferences.js';
 import { auditRequests } from '../services/audit.js';
 import { requireAuth, hashPassword, checkPassword, publicUser } from '../auth.js';
 import { AppError, assert } from '../errors.js';
@@ -72,6 +73,16 @@ export function createAuthRouter() {
 
   router.use(requireAuth, requireCsrf);
   router.use(auditRequests);
+  router.get('/order-table-preferences', (req, res) =>
+    res.json({ preferences: req.user.orderTablePreferences ?? null }),
+  );
+  router.put('/order-table-preferences', async (req, res) => {
+    const preferences = validateOrderTablePreferences(req.body);
+    await db.transaction(async (transaction) => {
+      await req.user.update({ orderTablePreferences: preferences }, { transaction });
+    });
+    res.json({ preferences });
+  });
   router.get('/me', (req, res) =>
     res.json({
       user: publicUser(req.user),

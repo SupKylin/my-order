@@ -1,10 +1,13 @@
 <script setup>
 import ManagementList from '../components/ManagementList.vue';
 import { defineAsyncComponent, ref } from 'vue';
-import { Plus, Document, Edit } from '@element-plus/icons-vue';
+import { Plus, Document, Edit, CopyDocument } from '@element-plus/icons-vue';
+import { ElMessage } from 'element-plus';
+import { templateApi } from '../api/templates';
 import { fmtDate } from '../utils/format';
 import { selectedMappings } from '../mapping';
 const list = ref(null);
+const copying = ref(null);
 const TemplateEditor = defineAsyncComponent(() => import('../components/TemplateEditor.vue'));
 const dialog = ref(false),
   editing = ref(null);
@@ -14,6 +17,17 @@ async function load() {
 function edit(row) {
   editing.value = row;
   dialog.value = true;
+}
+async function copy(row) {
+  if (copying.value !== null) return;
+  copying.value = row.id;
+  try {
+    const created = await templateApi.copy(row.id);
+    ElMessage.success(`已复制为“${created.name}”`);
+    await load();
+  } finally {
+    copying.value = null;
+  }
 }
 </script>
 <template>
@@ -47,9 +61,18 @@ function edit(row) {
       ></el-table-column
     ><el-table-column label="最后更新" min-width="185"
       ><template #default="{ row }">{{ fmtDate(row.updatedAt, true) }}</template></el-table-column
-    ><el-table-column label="操作" width="180" fixed="right"
+    ><el-table-column label="操作" width="210" fixed="right"
       ><template #default="{ row }"
-        ><el-button link type="primary" :icon="Edit" @click="edit(row)">编辑</el-button></template
+        ><el-button link type="primary" :icon="Edit" @click="edit(row)">编辑</el-button>
+        <el-button
+          link
+          type="primary"
+          :icon="CopyDocument"
+          :loading="copying === row.id"
+          :disabled="copying !== null && copying !== row.id"
+          @click="copy(row)"
+          >复制</el-button
+        ></template
       ></el-table-column
     >
   </ManagementList>

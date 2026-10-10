@@ -63,6 +63,7 @@ export const User = db.define(
     role: { type: DataTypes.ENUM('operations', 'purchasing', 'admin'), allowNull: false },
     active: { type: DataTypes.BOOLEAN, defaultValue: true },
     sessionVersion: { type: DataTypes.INTEGER, defaultValue: 1 },
+    orderTablePreferences: { type: DataTypes.JSON, allowNull: true },
   },
   { tableName: 'users' },
 );

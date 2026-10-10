@@ -80,22 +80,38 @@ test('采购状态自动启动计时，重复编辑、导入及已出/未出切�
   assert.equal(isPurchaseSuccess('采购成功（砍单）'), false);
 });
 
-test('采购中、砍单、采购失败及取消订单清除计时，再次未出跟踪号从当前服务器时间开始', () => {
+test('空值及非成功状态进入任一成功状态时记录时间，退出成功状态清空', () => {
   for (const resetStatus of ['采购中', '砍单', '采购失败', '取消订单', '采购成功（砍单）', null]) {
     const reset = purchaseTimerPatch(row, { purchaseStatus: resetStatus });
     assert.equal(reset.purchaseConfirmedAt, null);
     assert.equal(purchaseWarning(reset, +start + 50 * hour), null);
     const later = new Date(+start + 51 * hour);
-    assert.equal(
-      purchaseTimerPatch(reset, { purchaseStatus: status }, { now: later }).purchaseConfirmedAt,
-      later,
-    );
+    for (const success of [
+      status,
+      '采购成功（已出跟踪号）',
+      '采购成功未出跟踪号',
+      '采购成功已出跟踪号',
+    ])
+      assert.equal(
+        purchaseTimerPatch(reset, { purchaseStatus: success }, { now: later }).purchaseConfirmedAt,
+        later,
+      );
   }
   assert.equal(
-    purchaseTimerPatch(null, { purchaseStatus: '采购成功已出跟踪号' }).purchaseConfirmedAt,
-    null,
+    purchaseTimerPatch(null, { purchaseStatus: '采购成功已出跟踪号' }, { now: start })
+      .purchaseConfirmedAt,
+    start,
   );
   assert.equal(purchaseWarning({ purchaseStatus: '采购成功已出跟踪号' }, +start), null);
+});
+test('未导入采购状态不补写时间，历史成功状态没有时间时也不伪造成功时间', () => {
+  for (const purchaseStatus of [status, '采购成功（已出跟踪号）']) {
+    const previous = { purchaseStatus, purchaseConfirmedAt: null };
+    assert.deepEqual(purchaseTimerPatch(previous, { purchaseNote: '普通导入' }), {
+      purchaseNote: '普通导入',
+    });
+    assert.equal(purchaseTimerPatch(previous, { purchaseStatus }).purchaseConfirmedAt, null);
+  }
 });
 
 test('24/48 小时边界精确，夜间、周末与页面重载不扣除等待时间', () => {
@@ -134,13 +150,19 @@ test('服务器筛选按同一 24/48 小时边界，和价格、渠道、状态�
       },
       now,
     );
-    assert.deepEqual(filters.where[Op.and].at(-1), { '$purchase.purchaseConfirmedAt$': expected });
+    assert.deepEqual(
+      filters.where[Op.and].find((condition) =>
+        Object.hasOwn(condition, '$purchase.purchaseConfirmedAt$'),
+      ),
+      { '$purchase.purchaseConfirmedAt$': expected },
+    );
     assert.deepEqual(filters.where.orderAmount, { [Op.gte]: '10.00' });
     assert.ok(filters.include[1].where[Op.and]);
     assert.equal(filters.include[1].where.purchaseStatus, status);
   }
-  assert.equal(buildFilters({ trackingWarning: 'all' }, now).where[Op.and].length, 3);
-  assert.equal(buildFilters({ trackingWarning: '' }, now).where[Op.and], undefined);
+  // 数据权限会附加独立 AND 条件，不能再假定提醒范围是最后一项。
+  assert.equal(buildFilters({ trackingWarning: 'all' }, now).where[Op.and].length, 4);
+  assert.deepEqual(buildFilters({ trackingWarning: '' }, now).where[Op.and], [{}]);
   assert.throws(() => buildFilters({ trackingWarning: 'invalid' }), /未出跟踪号筛选无效/);
 });
 

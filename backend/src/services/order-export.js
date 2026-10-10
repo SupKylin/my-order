@@ -10,7 +10,10 @@ import { createProductThumbnails } from '../lib/excel/product-thumbnails.js';
 const batchSize = 500;
 const maxRows = 1_048_575;
 const columns = [
-  ...fields.map(({ key, label }) => ({ key, header: label })),
+  ...fields.flatMap(({ key, label }) => [
+    { key, header: label },
+    ...(key === 'purchaseStatus' ? [{ key: 'purchaseConfirmedAt', header: '采购成功时间' }] : []),
+  ]),
   { key: 'assigneeName', header: '采购人员' },
   { key: 'addressRisk', header: '风险地址标记' },
   { key: 'addressRiskNote', header: '风险地址备注' },

@@ -143,32 +143,30 @@ export function validateTemplate(input) {
   if (selected.length > fields.length)
     throw new AppError(400, `最多支持 ${fields.length} 条映射，请删除重复或多余的关系`);
   const mappings = input.mappings
-    .filter((m) => !isBlank(m.column) || !isBlank(m.header) || !isBlank(m.field))
+    .filter((m) => !isBlank(m.header) || !isBlank(m.field))
     .map((m) => ({
-      column: Number(m.column),
-      header: String(m.header || ''),
+      header: String(m.header || '').trim(),
       field: isBlank(m.field) ? '' : m.field === 'sku' ? 'walmartSku' : m.field,
     }));
-  const columns = new Map(),
+  const headers = new Map(),
     targets = new Map();
   for (const [index, m] of mappings.entries()) {
     const label = `第 ${index + 1} 条映射`;
-    if (!Number.isInteger(m.column) || m.column < 1 || m.column > 500)
-      throw new AppError(400, `${label}：Excel 列号必须是 1 至 500 的整数`);
     if (!m.field) continue;
+    if (!m.header) throw new AppError(400, `${label}：请填写 Excel 表头名称`);
     if (typeof m.field !== 'string' || !Object.hasOwn(fieldMap, m.field))
       throw new AppError(400, `${label}：请选择有效的系统字段`);
-    if (columns.has(m.column))
+    if (headers.has(m.header))
       throw new AppError(
         400,
-        `${label}：Excel 第 ${m.column} 列已被第 ${columns.get(m.column)} 条使用，请修改或删除重复关系`,
+        `${label}：Excel 表头“${m.header}”已被第 ${headers.get(m.header)} 条使用，请修改或删除重复关系`,
       );
     if (targets.has(m.field))
       throw new AppError(
         400,
         `${label}：系统字段“${fieldMap[m.field].label}”已被第 ${targets.get(m.field)} 条使用，请修改或删除重复关系`,
       );
-    columns.set(m.column, index + 1);
+    headers.set(m.header, index + 1);
     targets.set(m.field, index + 1);
   }
   if (!targets.has('orderNumber')) throw new AppError(400, '必须映射订单号');

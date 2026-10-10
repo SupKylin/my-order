@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, ImportTemplate } from '../models.js';
-import { templatePayload } from '../services/templates.js';
+import { templatePayload, copyTemplate } from '../services/templates.js';
 import { assert } from '../errors.js';
 
 export function createTemplatesRouter() {
@@ -29,6 +29,9 @@ export function createTemplatesRouter() {
         return template.update(payload, { transaction });
       }),
     );
+  });
+  router.post('/:id/copy', async (req, res) => {
+    res.status(201).json(await copyTemplate(req.params.id));
   });
   router.delete('/:id', async (req, res) => {
     await db.transaction((transaction) =>

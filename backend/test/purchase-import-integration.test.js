@@ -96,10 +96,10 @@ async function createItem(orderNumber, walmartSku = '001', shopName = '店铺A')
   });
   return item;
 }
-async function preview(rows) {
+async function preview(rows, sourceKeys = keys) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(template.sheetName);
-  sheet.addRow(keys);
+  sheet.addRow(sourceKeys);
   rows.forEach((row) => sheet.addRow(row));
   const id = randomUUID();
   const file = await Upload.create({
@@ -113,11 +113,89 @@ async function preview(rows) {
   files.push(filepath);
   await workbook.xlsx.writeFile(filepath);
   return prepareImport(
-    { sources: [{ uploadId: id, template, sheetName: '采购' }] },
+    {
+      sources: [
+        {
+          uploadId: id,
+          template: {
+            ...template,
+            mappings: sourceKeys.map((field, index) => ({
+              column: index + 1,
+              header: field,
+              field,
+            })),
+          },
+          sheetName: '采购',
+        },
+      ],
+    },
     actor,
     'purchase',
   );
 }
+
+test('采购 Excel 提交时记录成功时间，重复成功保留，重新采购更新时间且预览不改库', async () => {
+  const successStates = ['采购成功（未出跟踪号）', '采购成功（已出跟踪号）'];
+  const nonSuccessStates = [null, '采购中', '采购失败', '取消订单', '采购成功（砍单）'];
+  await DictionaryOption.bulkCreate(
+    [...successStates, ...nonSuccessStates.filter(Boolean)].map((value) => ({
+      kind: 'purchaseStatus',
+      value,
+    })),
+  );
+  const item = await createItem('SUCCESS-TIME');
+  const purchase = await Purchase.findOne({ where: { itemId: item.id } });
+  const importStatus = async (value) => {
+    const job = await preview(
+      [['店铺A', 'SUCCESS-TIME', '001', value]],
+      ['shopName', 'orderNumber', 'walmartSku', 'purchaseStatus'],
+    );
+    assert.equal(job.errorCount, 0);
+    return job;
+  };
+  for (const oldStatus of nonSuccessStates) {
+    for (const newStatus of successStates) {
+      await purchase.update({ purchaseStatus: oldStatus, purchaseConfirmedAt: null });
+      const job = await importStatus(newStatus);
+      await purchase.reload();
+      assert.equal(purchase.purchaseConfirmedAt, null);
+      const before = Date.now();
+      assert.equal((await commitImport(job.id, actor, 'purchase')).updated, 1);
+      await purchase.reload();
+      assert.ok(
+        +purchase.purchaseConfirmedAt >= before && +purchase.purchaseConfirmedAt <= Date.now(),
+      );
+      const first = +purchase.purchaseConfirmedAt;
+      for (const status of [newStatus, ...successStates]) {
+        await commitImport((await importStatus(status)).id, actor, 'purchase');
+        await purchase.reload();
+        assert.equal(+purchase.purchaseConfirmedAt, first);
+      }
+      await commitImport((await importStatus('采购失败')).id, actor, 'purchase');
+      await purchase.reload();
+      assert.equal(purchase.purchaseConfirmedAt, null);
+    }
+  }
+  await purchase.update({
+    purchaseStatus: successStates[1],
+    purchaseConfirmedAt: new Date('2026-10-10T01:02:03Z'),
+  });
+  const chunks = [];
+  const stream = new Writable({
+    write(chunk, _encoding, done) {
+      chunks.push(chunk);
+      done();
+    },
+  });
+  stream.setHeader = () => {};
+  await exportOrders({ filters: { orderNumbers: 'SUCCESS-TIME' } }, stream);
+  const exported = new ExcelJS.Workbook();
+  await exported.xlsx.load(Buffer.concat(chunks));
+  const sheet = exported.worksheets[0];
+  const column = sheet.getRow(1).values.indexOf('采购成功时间');
+  assert.ok(column > 0);
+  assert.equal(sheet.getRow(2).getCell(column).value, '2026-10-10 09:02:03');
+});
 
 test('混合有效、未匹配、歧义及空店铺行只更新唯一目标；完整反馈及重复提交不新增', async () => {
   const item = await createItem('A');

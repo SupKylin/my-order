@@ -17,25 +17,23 @@ export async function extractRows(
   if (!sheet) throw new AppError(400, `找不到工作表“${template.sheetName}”`);
   const effectiveMappings = [],
     mappingWarnings = [];
+  // 列号仅用于本次读取单元格/嵌入图片，始终从实际表头解析，不使用模板旧列号。
+  const header = sheet.getRow(template.headerRow);
+  const headerColumns = new Map();
+  for (let column = 1; column <= Math.min(header.cellCount, 500); column++) {
+    const name = excelText(header.getCell(column).text).trim();
+    if (name) headerColumns.set(name, [...(headerColumns.get(name) || []), column]);
+  }
   for (const mapping of template.mappings) {
     // 模板保存全部源表头，只有选择了目标字段的列才参与读取和校验。
     if (isBlank(mapping.field) || mapping.field === 'purchaseChannel') continue;
-    const m = { ...mapping },
-      header = sheet.getRow(template.headerRow),
-      current = excelText(header.getCell(m.column).text).trim();
-    if (current !== m.header.trim()) {
-      const matches = [];
-      for (let c = 1; c <= Math.min(header.cellCount, 500); c++)
-        if (excelText(header.getCell(c).text).trim() === m.header.trim()) matches.push(c);
-      if (matches.length > 1)
-        throw new AppError(400, `表头“${m.header}”出现多次，无法确定列，请重新配置映射`);
-      if (matches.length === 1) {
-        m.column = matches[0];
-        mappingWarnings.push({
-          row: template.headerRow,
-          message: `“${m.header}”列位置变化，已按表头匹配到第 ${m.column} 列`,
-        });
-      } else if (fieldMap[m.field].required)
+    const m = { ...mapping, header: String(mapping.header || '').trim() };
+    if (!m.header) throw new AppError(400, '已映射字段的表头名称不能为空，请更新模板');
+    const matches = headerColumns.get(m.header) || [];
+    if (matches.length > 1)
+      throw new AppError(400, `表头“${m.header}”出现多次，请在 Excel 中改为唯一名称后重新导入`);
+    if (!matches.length) {
+      if (fieldMap[m.field].required)
         throw new AppError(400, `缺少必填表头“${m.header}”，请检查文件或更新模板`);
       else {
         mappingWarnings.push({
@@ -47,7 +45,7 @@ export async function extractRows(
         continue;
       }
     }
-    effectiveMappings.push(m);
+    effectiveMappings.push({ ...m, column: matches[0] });
   }
   if (sheet.actualRowCount > 10001) throw new AppError(400, '单次最多导入 10000 行，请拆分文件');
   const { images, warnings } = await embeddedImages(loaded, sheet);

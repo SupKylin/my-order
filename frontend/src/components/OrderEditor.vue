@@ -5,6 +5,7 @@ import FieldInput from './FieldInput.vue';
 import { useMeta } from '../stores/meta';
 import { orderApi } from '../api/orders';
 import { canEditOrder } from '../utils/orderWritePolicy';
+import { fmtDate } from '../utils/format';
 const platformReadOnly = (field) =>
   field.group === 'product' || ['orderNumber', 'shopName', 'fulfillmentParty'].includes(field.key);
 const props = defineProps({ modelValue: Boolean, item: Object });
@@ -85,6 +86,9 @@ async function save() {
             </div></template
           >
           <div class="form-grid">
+            <el-form-item v-if="section.key === 'purchase'" label="采购成功时间（北京时间）">
+              <span>{{ fmtDate(item?.purchaseConfirmedAt, true) }}</span>
+            </el-form-item>
             <el-form-item
               v-for="field in meta.fields.filter((f) => f.group === section.key)"
               :key="field.key"

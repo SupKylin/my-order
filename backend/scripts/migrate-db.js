@@ -1,9 +1,11 @@
 import { db } from '../src/models.js';
+import { migrateOrderTablePreferences } from '../src/migrations/order-table-preferences.js';
 import { migratePermissionsAudit } from '../src/migrations/permissions-audit.js';
 import { migrateWalmart } from '../src/migrations/walmart.js';
 import { migrateDictionaries, migrateOrderFields, migrateStores } from '../src/migrations.js';
 
 try {
+  await migrateOrderTablePreferences();
   await migrateDictionaries();
   await migrateStores();
   await migrateOrderFields();

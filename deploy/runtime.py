@@ -82,6 +82,40 @@ DEPENDENCY_CHECK = (
 )
 
 
+def runtime_base_lines(base, image):
+    """高层数镜像只读取合并后的文件系统，避免每次发版累积到 overlay 层数上限。"""
+    if len(image.get("RootFS", {}).get("Layers", [])) < 100:
+        return ["FROM " + base]
+    config = image.get("Config") or {}
+    if config.get("Healthcheck") or config.get("OnBuild") or config.get("Volumes"):
+        raise ValueError("高层数运行镜像包含特殊构建配置，不能自动合并")
+    print("运行镜像层数较高，合并文件系统后继续复用依赖。", flush=True)
+    lines = ["FROM " + base + " AS previous_runtime", "FROM scratch",
+             "COPY --from=previous_runtime / /"]
+
+    def quoted(value):
+        # Dockerfile ENV/LABEL 会展开变量，必须转义原配置中的字面量美元符号。
+        if any(char in value for char in "\r\n\0"):
+            raise ValueError("镜像配置包含不支持的换行字符")
+        return json.dumps(value, ensure_ascii=False).replace("$", "\\$")
+
+    for entry in config.get("Env") or []:
+        key, value = entry.split("=", 1)
+        lines.append("ENV " + key + "=" + quoted(value))
+    for key, value in (config.get("Labels") or {}).items():
+        lines.append("LABEL " + quoted(key) + "=" + quoted(value))
+    for key in ("Entrypoint", "Cmd", "Shell"):
+        if config.get(key):
+            lines.append(key.upper() + " " + json.dumps(config[key]))
+    for key in ("User", "StopSignal"):
+        if config.get(key):
+            lines.append(key.upper() + " " + config[key])
+    for port in config.get("ExposedPorts") or {}:
+        lines.append("EXPOSE " + port)
+    # 应用运行路径在 build_image 中统一设为 /app。
+    return lines
+
+
 def build_image(directory, bundle, manifest, current):
     """只比较依赖文件；当前镜像作为本地基底，不重新拉取 Node 基础镜像。"""
     script = (
@@ -106,8 +140,9 @@ def build_image(directory, bundle, manifest, current):
             changed = True
     base = "my-order-runtime:" + current["Image"].split(":")[-1][:20]
     run(["docker", "tag", current["Image"], base])
+    image_info = json.loads(run(["docker", "image", "inspect", current["Image"]]))[0]
     # npm workspace 可将依赖安装在子目录，复用时必须一并保留。
-    lines = ["FROM " + base, "WORKDIR /app",
+    lines = runtime_base_lines(base, image_info) + ["WORKDIR /app",
              "RUN find /app/backend /app/frontend -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf {} +"]
     if changed:
         lines.append("RUN rm -rf /app/node_modules /app/backend/node_modules /app/frontend/node_modules")

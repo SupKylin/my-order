@@ -118,7 +118,7 @@ async function save() {
         >
       </div>
       <p class="dialog-description">
-        模板仅保存字段映射和表头行。导入时选择工作表，采购渠道不参与导入。
+        按 Excel 表头名称映射，不限制列顺序。导入时选择工作表，采购渠道不参与导入。
       </p>
       <div v-if="info" class="template-controls">
         <el-form-item v-if="uploadId" label="示例工作表（仅用于读取表头）"

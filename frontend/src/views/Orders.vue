@@ -7,8 +7,6 @@ import {
   Refresh,
   User,
   Setting,
-  Check,
-  CircleClose,
   Download,
   CopyDocument,
   EditPen,
@@ -20,8 +18,12 @@ import { useOrders } from '../composables/useOrders';
 import { orderApi } from '../api/orders';
 import OrderTable from '../components/orders/OrderTable.vue';
 import { canEditOrder } from '../utils/orderWritePolicy';
+import { useOrderTablePreferences } from '../composables/useOrderTablePreferences';
 import { orderColumns } from '../components/orders/orderColumns';
 // 弹窗只在打开时挂载，因此不会提前下载编辑表单和图片上传逻辑。
+const OrderColumnSettings = defineAsyncComponent(
+  () => import('../components/orders/OrderColumnSettings.vue'),
+);
 const OrderEditor = defineAsyncComponent(() => import('../components/OrderEditor.vue'));
 const AssignmentDialog = defineAsyncComponent(
   () => import('../components/orders/AssignmentDialog.vue'),
@@ -56,16 +58,6 @@ const {
   openAssign,
   assign,
 } = useOrders();
-const storageKey = `my-order-order-columns-${auth.user?.id || 'default'}`;
-function savedHiddenColumns() {
-  try {
-    const value = JSON.parse(localStorage.getItem(storageKey));
-    return Array.isArray(value) ? value.filter((key) => typeof key === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-const hiddenColumns = ref(savedHiddenColumns());
 const columnDialog = ref(false);
 const batchOrderDialog = ref(false);
 const batchOrderDraft = ref('');
@@ -88,6 +80,7 @@ const activeAdvancedFilters = computed(
       'platformOrderStatus',
       'fulfillmentParty',
       'allocatable',
+      'supervisorConfirmed',
       'afterSales',
       'settlement',
       'startDate',
@@ -98,19 +91,15 @@ const activeAdvancedFilters = computed(
       'maxPrice',
     ].filter((key) => filters[key] !== '').length,
 );
-const draftColumns = ref([]);
 const allColumns = computed(() => orderColumns(meta.fields));
-const visibleColumns = computed(() =>
-  allColumns.value.filter((field) => !hiddenColumns.value.includes(field.key)),
-);
-const columnGroups = computed(() => [
-  { label: '订单信息', fields: allColumns.value.filter((field) => field.group === 'order') },
-  { label: '采购信息', fields: allColumns.value.filter((field) => field.group === 'purchase') },
-  {
-    label: '其他',
-    fields: allColumns.value.filter((field) => !['order', 'purchase'].includes(field.group)),
-  },
-]);
+const {
+  ordered: orderedColumns,
+  visible: visibleColumns,
+  ready: columnsReady,
+  saving: columnsSaving,
+  save: saveColumns,
+  load: loadColumns,
+} = useOrderTablePreferences(auth, allColumns);
 const batchOrderCount = computed(
   () => new Set(filters.orderNumbers.trim().split(/\s+/).filter(Boolean)).size,
 );
@@ -127,20 +116,16 @@ async function applyBatchOrderSearch() {
   batchOrderDialog.value = false;
   await search();
 }
-function openColumnDialog() {
-  draftColumns.value = visibleColumns.value.map((field) => field.key);
-  columnDialog.value = true;
+async function openColumnDialog() {
+  await meta.load();
+  if (!columnsReady.value) await loadColumns();
+  if (columnsReady.value) columnDialog.value = true;
 }
-function applyColumns() {
-  hiddenColumns.value = allColumns.value
-    .filter((field) => !draftColumns.value.includes(field.key))
-    .map((field) => field.key);
-  try {
-    localStorage.setItem(storageKey, JSON.stringify(hiddenColumns.value));
-  } catch {
-    // 浏览器禁用本地存储时仍允许本次页面调整表头。
+async function applyColumns(value) {
+  if (await saveColumns(value)) {
+    columnDialog.value = false;
+    ElMessage.success('表头设置已保存到当前账号');
   }
-  columnDialog.value = false;
 }
 async function exportOrderRows(purchaseTemplate = false) {
   if (exportBusy.value) return;
@@ -302,7 +287,7 @@ async function submitStatus() {
             @click="operationsOpen = !operationsOpen"
             >{{ operationsOpen ? '收起操作' : '展开操作' }}</el-button
           >
-          <el-button :icon="Setting" @click="openColumnDialog">表头选择</el-button
+          <el-button :icon="Setting" @click="openColumnDialog">表头设置</el-button
           ><el-button :icon="Refresh" @click="refresh">刷新</el-button>
           <!-- 订单统一由 Walmart API 接入，保留人工新增入口代码。
           <el-button :icon="Plus" @click="edit(null)">新增明细</el-button>
@@ -427,6 +412,19 @@ async function submitStatus() {
               :key="status"
               :label="status"
               :value="status"
+            />
+          </el-select>
+          <el-select
+            v-model="filters.supervisorConfirmed"
+            placeholder="主管确认"
+            aria-label="主管确认筛选"
+            clearable
+          >
+            <el-option
+              v-for="option in meta.fieldMap.supervisorConfirmed?.options"
+              :key="option"
+              :label="option"
+              :value="option"
             />
           </el-select>
           <el-select v-model="filters.orderStatus" placeholder="运营订单状态" clearable
@@ -596,29 +594,12 @@ async function submitStatus() {
       <el-button type="primary" @click="applyBatchOrderSearch">查询</el-button>
     </template>
   </el-dialog>
-  <el-dialog v-model="columnDialog" title="表头选择" width="520px" class="column-settings-dialog">
-    <div class="column-settings-toolbar">
-      <span class="muted">已勾选 {{ draftColumns.length }} / {{ allColumns.length }} 列</span>
-      <div>
-        <el-button text :icon="Check" @click="draftColumns = allColumns.map((field) => field.key)"
-          >全选</el-button
-        >
-        <el-button text :icon="CircleClose" @click="draftColumns = []">清除勾选</el-button>
-      </div>
-    </div>
-    <el-checkbox-group v-model="draftColumns" class="column-settings-list">
-      <div v-for="group in columnGroups" :key="group.label" class="column-settings-group">
-        <strong>{{ group.label }}</strong>
-        <div class="column-settings-options">
-          <el-checkbox v-for="field in group.fields" :key="field.key" :value="field.key">
-            {{ field.label }}
-          </el-checkbox>
-        </div>
-      </div>
-    </el-checkbox-group>
-    <template #footer>
-      <el-button @click="columnDialog = false">取消</el-button>
-      <el-button type="primary" @click="applyColumns">应用</el-button>
-    </template>
-  </el-dialog>
+  <OrderColumnSettings
+    v-if="columnDialog"
+    :columns="orderedColumns"
+    :visible="visibleColumns"
+    :saving="columnsSaving"
+    @close="columnDialog = false"
+    @save="applyColumns"
+  />
 </template>
