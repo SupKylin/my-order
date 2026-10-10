@@ -1,0 +1,238 @@
+/* 统一展示层：主题、文字层级和间距，不改变各页面的交互及数据处理。 */
+body {
+  font-family: var(--el-font-family);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.sidebar {
+  background: var(--ui-sidebar-bg);
+  color: var(--ui-sidebar-text);
+}
+.sidebar nav {
+  scrollbar-color: #60718c var(--ui-sidebar-bg);
+}
+.sidebar nav::-webkit-scrollbar-track {
+  background: var(--ui-sidebar-bg);
+}
+.sidebar nav a:hover {
+  background: #2b3b52;
+}
+.sidebar nav a.active {
+  background: #28496e;
+  color: #c6e2ff;
+}
+.brand-mark,
+.login-submit {
+  background: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+}
+.nav-dot {
+  background: #79bbff;
+}
+.sidebar-user {
+  border-color: #37465c;
+}
+.avatar {
+  background: #354b68;
+  color: #d9ecff;
+}
+.avatar.light,
+.template-icon,
+.pill,
+.selection-bar {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary-dark-2);
+}
+.topbar {
+  background: #fff;
+  border-color: var(--el-border-color-lighter);
+}
+.workspace > main {
+  padding: var(--ui-space);
+}
+.panel {
+  border: 0;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px #1f2d3d0a;
+}
+.panel-heading,
+.workspace-orders .orders-panel > .panel-heading,
+.management-panel > .panel-heading {
+  padding: 16px var(--ui-space) 12px;
+  border-bottom: 0;
+  gap: 12px;
+}
+.panel-heading h2,
+.purchase-upload-heading h2,
+.purchase-zone-heading h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.orders-filters,
+.management-filters {
+  padding: 4px var(--ui-space) 12px;
+  gap: 10px;
+}
+.management-query-actions {
+  margin-left: auto;
+}
+.workspace-orders .order-table-region,
+.management-table-region {
+  margin: 0 var(--ui-space);
+}
+.management-footer,
+.workspace-orders .table-footer {
+  padding: 14px var(--ui-space);
+  border-top: 0;
+  gap: 12px;
+}
+.el-table,
+.orders-table {
+  font-size: 13px;
+  --el-table-text-color: var(--el-text-color-regular);
+  --el-table-header-text-color: var(--el-text-color-regular);
+  --el-table-header-bg-color: #f5f7fa;
+  --el-table-border-color: #ebeef5;
+  --el-table-row-hover-bg-color: #f5f7fa;
+}
+.el-table th.el-table__cell,
+.orders-table th.el-table__cell {
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--el-table-header-bg-color);
+}
+.el-table td.el-table__cell {
+  padding: 12px 0;
+  font-weight: 400;
+}
+/* 只保留行分隔线，去掉表格底部与容器重复的装饰线。 */
+.el-table__inner-wrapper::before {
+  display: none;
+}
+.el-table .cell {
+  padding-left: 12px;
+  padding-right: 12px;
+  line-height: 22px;
+}
+.el-button,
+.el-table .el-button.is-link,
+.el-table .el-tag,
+.breadcrumb,
+.person-cell,
+.el-pagination {
+  font-size: 13px;
+}
+.el-button--primary {
+  box-shadow: none;
+}
+.el-button--primary.is-link,
+.el-button--primary.is-text {
+  background: transparent;
+}
+.el-table .mono {
+  font-family: var(--el-font-family);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+.muted,
+.orders-table .muted,
+.mapping-footnote,
+.dialog-description {
+  color: var(--el-text-color-secondary);
+}
+.count-label,
+.cell-secondary,
+.management-footer > .muted,
+.table-footer,
+.section-heading span,
+.drawer-tip,
+.product-grid label,
+.product-grid span {
+  font-size: 12px;
+}
+.el-form-item__label {
+  font-size: 13px !important;
+  color: var(--el-text-color-regular) !important;
+}
+.el-dialog__title,
+.el-drawer__header {
+  color: var(--el-text-color-primary);
+}
+body .el-dialog__body,
+.el-drawer__body,
+.column-settings-list {
+  scrollbar-width: thin;
+  scrollbar-color: #c0c4cc transparent;
+}
+body .el-dialog {
+  padding: 24px;
+  border-radius: 8px;
+}
+.mapping-caption {
+  border: 0;
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-regular);
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.purchase-upload-summary,
+.purchase-upload-zone {
+  border: 0;
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: 0 1px 4px #1f2d3d0a;
+}
+.purchase-template-detail strong,
+.purchase-zone-label {
+  color: var(--el-text-color-regular);
+  font-size: 14px;
+  font-weight: 500;
+}
+.purchase-zone-upload .el-upload-dragger,
+.el-upload-dragger {
+  background: #fafcff;
+  border-color: var(--el-color-primary-light-5);
+  border-radius: 6px;
+}
+.el-upload-dragger:hover {
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary);
+}
+.purchase-zone-upload .upload-icon,
+.upload-icon {
+  color: var(--el-color-primary);
+}
+.preview-stats > div {
+  border: 0;
+  background: var(--el-fill-color-light);
+}
+.preview-stats strong {
+  color: var(--el-color-primary);
+}
+.login-story {
+  background: var(--ui-sidebar-bg);
+}
+.login-panel {
+  background: #fff;
+}
+.login-form h2 {
+  color: var(--el-text-color-primary);
+}
+@media (max-width: 760px) {
+  html:root {
+    --ui-space: 12px;
+  }
+  .management-query-actions {
+    margin-left: 0;
+  }
+  .purchase-upload-summary,
+  .purchase-upload-zone {
+    padding: 16px;
+  }
+  .template-controls > .el-form-item {
+    min-width: 0;
+    width: 100%;
+  }
+}

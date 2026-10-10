@@ -16,7 +16,13 @@ const SkippedImportRows = defineAsyncComponent(
 const router = useRouter();
 const meta = useMeta();
 let nextZoneId = 0;
-const newZone = () => ({ id: ++nextZoneId, templateId: null, file: null, uploading: false });
+const newZone = () => ({
+  id: ++nextZoneId,
+  templateId: null,
+  file: null,
+  sheetName: '',
+  uploading: false,
+});
 const zones = ref([newZone()]);
 const templates = ref([]);
 const stage = ref('upload');
@@ -29,12 +35,12 @@ function canImportPurchase(template) {
     .map((mapping) => mapping.field);
   return (
     ['orderNumber', 'shopName', 'walmartSku'].every((key) => fields.includes(key)) &&
-    fields.some((key) => meta.fieldMap[key]?.group === 'purchase')
+    fields.some((key) => key !== 'purchaseChannel' && meta.fieldMap[key]?.group === 'purchase')
   );
 }
 const purchaseTemplates = computed(() => templates.value.filter(canImportPurchase));
 const readyCount = computed(
-  () => zones.value.filter((zone) => zone.file && selectedTemplate(zone)).length,
+  () => zones.value.filter((zone) => zone.file && zone.sheetName && selectedTemplate(zone)).length,
 );
 
 onMounted(async () => {
@@ -47,29 +53,23 @@ function selectedTemplate(zone) {
 function purchaseTemplate(zone) {
   const template = selectedTemplate(zone);
   return {
-    ...template,
+    name: template.name,
+    headerRow: template.headerRow,
     mappings: template.mappings.filter(
       (mapping) =>
         !mapping.field ||
         ['orderNumber', 'walmartSku', 'shopName'].includes(mapping.field) ||
-        meta.fieldMap[mapping.field]?.group === 'purchase',
+        (mapping.field !== 'purchaseChannel' && meta.fieldMap[mapping.field]?.group === 'purchase'),
     ),
   };
-}
-function channelName(zone) {
-  const id = selectedTemplate(zone)?.purchaseChannelId;
-  return meta.purchaseChannels.find((channel) => channel.id === id)?.value || '按 Excel 内容导入';
 }
 async function uploadFile(zone, file) {
   if (!/\.xlsx$/i.test(file.name)) return ElMessage.warning('仅支持 .xlsx 文件');
   zone.uploading = true;
   try {
     zone.file = await uploadApi.excel(file);
-    if (
-      selectedTemplate(zone) &&
-      !zone.file.sheets.some((sheet) => sheet.name === selectedTemplate(zone).sheetName)
-    )
-      ElMessage.warning(`${zone.file.name} 中没有模板指定的工作表`);
+    // 每次上传重新选择；单工作表可直接选中，多工作表由用户明确选择。
+    zone.sheetName = zone.file.sheets.length === 1 ? zone.file.sheets[0].name : '';
     return zone.file;
   } finally {
     zone.uploading = false;
@@ -90,14 +90,22 @@ async function pasteZone(event, zone) {
   await uploadFile(zone, file);
 }
 async function previewSources(selectedZones) {
-  if (selectedZones.some((zone) => !zone.file || !selectedTemplate(zone) || zone.uploading))
-    return ElMessage.warning('请先选择模板并上传文件');
+  if (
+    selectedZones.some(
+      (zone) => !zone.file || !zone.sheetName || !selectedTemplate(zone) || zone.uploading,
+    )
+  )
+    return ElMessage.warning('请先选择模板、上传文件并选择工作表');
   if (new Set(selectedZones.map((zone) => zone.file.id)).size !== selectedZones.length)
     return ElMessage.warning('同一文件不能在多个上传区重复导入');
   busy.value = true;
   try {
     preview.value = await importApi.previewPurchases(
-      selectedZones.map((zone) => ({ uploadId: zone.file.id, template: purchaseTemplate(zone) })),
+      selectedZones.map((zone) => ({
+        uploadId: zone.file.id,
+        sheetName: zone.sheetName,
+        template: purchaseTemplate(zone),
+      })),
     );
     stage.value = 'preview';
   } finally {
@@ -106,7 +114,7 @@ async function previewSources(selectedZones) {
 }
 function previewAll() {
   if (readyCount.value !== zones.value.length)
-    return ElMessage.warning('请为每个上传区选择模板和文件');
+    return ElMessage.warning('请为每个上传区选择模板、文件和工作表');
   return previewSources(zones.value);
 }
 async function commit() {
@@ -196,10 +204,7 @@ function reset() {
       </el-select>
       <div v-if="selectedTemplate(zone)" class="purchase-template-detail">
         <strong>{{ selectedTemplate(zone).name }}</strong>
-        <span
-          >采购渠道：{{ channelName(zone) }} · {{ selectedTemplate(zone).sheetName }} · 表头第
-          {{ selectedTemplate(zone).headerRow }} 行</span
-        >
+        <span>表头第 {{ selectedTemplate(zone).headerRow }} 行 · 采购渠道保留原值</span>
       </div>
       <el-upload
         drag
@@ -221,11 +226,27 @@ function reset() {
           >在此粘贴</el-button
         >
       </div>
+      <div v-if="zone.file" class="purchase-sheet-selector">
+        <label class="purchase-zone-label">本次导入工作表</label>
+        <el-select
+          v-model="zone.sheetName"
+          placeholder="请选择本次导入的工作表"
+          :disabled="busy || zone.uploading"
+          :aria-label="`上传区 ${index + 1} 工作表`"
+        >
+          <el-option
+            v-for="sheet in zone.file.sheets"
+            :key="sheet.name"
+            :label="sheet.name"
+            :value="sheet.name"
+          />
+        </el-select>
+      </div>
       <div class="purchase-zone-actions">
         <el-button
           type="primary"
           :loading="busy"
-          :disabled="!zone.file || !zone.templateId || zone.uploading"
+          :disabled="!zone.file || !zone.sheetName || !zone.templateId || zone.uploading"
           @click="previewSources([zone])"
           >上传并预览</el-button
         >

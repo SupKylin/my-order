@@ -149,7 +149,7 @@ test('账号删除保护当前账号、最后一个总账号，批量请求失�
   assert.ok(await User.findByPk(actor.id));
 });
 
-test('模板绑定保护、字典隔离和版本保护，历史订单采购数据保留', async () => {
+test('旧模板绑定不再限制渠道删除，字典隔离和版本保护及历史数据保留', async () => {
   const channel = await DictionaryOption.create({ kind: 'purchaseChannel', value: '保护渠道' });
   const template = await ImportTemplate.create({
     name: '测试模板',
@@ -165,9 +165,7 @@ test('模板绑定保护、字典隔离和版本保护，历史订单采购数�
     shopName: '历史店铺',
   });
   await Purchase.create({ itemId: item.id, purchaseChannel: ['保护渠道'] });
-  await assert.rejects(remove('dictionaries', [channel], { kind: 'purchaseChannel' }), /模板/);
   await assert.rejects(remove('dictionaries', [channel], { kind: 'purchasePlatform' }), /已删除/);
-  await remove('templates', [template]);
   const stale = selection(channel);
   await channel.update({ version: channel.version + 1, value: '改名渠道' });
   await assert.rejects(
@@ -179,16 +177,17 @@ test('模板绑定保护、字典隔离和版本保护，历史订单采购数�
   assert.equal(await Order.count(), 1);
   assert.equal(await OrderItem.count(), 1);
   assert.deepEqual((await Purchase.findOne()).purchaseChannel, ['保护渠道']);
-  await assert.rejects(
-    templatePayload({
-      name: '绑定已删',
-      sheetName: 'Sheet1',
-      headerRow: 1,
-      mappings: [{ column: 1, header: '订单号', field: 'orderNumber' }],
-      purchaseChannelId: channel.id,
-    }),
-    /已停用或不存在/,
-  );
+  const saved = await templatePayload({
+    name: '绑定已删',
+    sheetName: 'Sheet1',
+    headerRow: 1,
+    mappings: [{ column: 1, header: '订单号', field: 'orderNumber' }],
+    purchaseChannelId: channel.id,
+  });
+  assert.equal(saved.purchaseChannelId, null);
+  assert.equal(saved.sheetName, '');
+  assert.ok(await ImportTemplate.findByPk(template.id));
+  await remove('templates', [template]);
 });
 
 test('店铺删除与同步命名锁互斥，成功删除关闭调度且保留订单和回执', async () => {

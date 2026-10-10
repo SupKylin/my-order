@@ -10,7 +10,8 @@ const props = defineProps({
   manualSource: Boolean,
   disabled: Boolean,
   allowedFields: { type: Array, default: null },
-  // 独立导入页面限制表格高度；弹框内交由弹框正文统一滚动。
+  // 模板弹框使用剩余高度，只滚动表格数据行；其他入口保留原高度限制。
+  tableHeight: { type: [Number, String], default: null },
   maxHeight: { type: [Number, String], default: 460 },
 });
 const emit = defineEmits(['update:modelValue']);
@@ -90,11 +91,11 @@ function samples(columnNumber) {
     class="mapping-notice"
     :title="`以下自动识别存在多个来源，请新增映射后手动选择：${ambiguous.join('；')}`"
   />
-  <el-table :data="modelValue" :max-height="maxHeight" class="mapping-table">
+  <el-table :data="modelValue" :height="tableHeight" :max-height="maxHeight" class="mapping-table">
     <el-table-column label="关系" width="60" type="index" />
     <el-table-column label="Excel 源列" min-width="220">
       <template #default="{ row, $index }">
-        <template v-if="manualSource">
+        <div v-if="manualSource" class="mapping-source-fields">
           <el-input-number
             :model-value="row.column"
             :min="1"
@@ -114,7 +115,7 @@ function samples(columnNumber) {
             class="mapping-header-input"
             @update:model-value="patch($index, { header: $event })"
           />
-        </template>
+        </div>
         <el-select
           v-else
           :model-value="row.column"
@@ -202,6 +203,6 @@ function samples(columnNumber) {
   </p>
   <p class="mapping-footnote">
     未选择系统字段的 Excel
-    表头仍会保存在模板中，可稍后配置；导入时跳过这些列。必须保留订单号的映射，WalmartSku、店铺名可不映射，不映射时按空值匹配，只匹配对应空值的组合。每个源列和系统字段只能使用一次；不需要的关系可直接删除，也可通过“新增映射”重新添加。删除映射只影响后续导入，已有订单字段保留原值。
+    表头仍会保存在模板中，可稍后配置；导入时跳过这些列。采购导入需映射店铺名、订单号、WalmartSku及至少一个可更新的采购字段；采购渠道不参与导入。每个源列和系统字段只能使用一次；不需要的关系可直接删除，也可通过“新增映射”重新添加。删除映射只影响后续导入，已有订单字段保留原值。
   </p>
 </template>

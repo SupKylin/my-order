@@ -12,12 +12,6 @@ const meta = useMeta();
 </script>
 <template>
   <div class="preview-stage">
-    <el-alert
-      v-if="preview.purchaseChannel"
-      :closable="false"
-      type="info"
-      :title="`模板绑定渠道：${preview.purchaseChannel}。Excel 非空渠道优先，空白或未映射时使用模板渠道。`"
-    />
     <div class="preview-stats">
       <div>
         <span>{{ kind === 'purchase' ? '跳过明细' : '新增商品明细' }}</span
@@ -43,7 +37,7 @@ const meta = useMeta();
       v-else
       :title="
         kind === 'purchase'
-          ? '仅按系统店铺名＋客户订单号＋Walmart SKU 唯一匹配已有明细；未匹配或存在多条匹配的行跳过，不新增订单。重复导入行按文件及行顺序更新，后面的非空采购字段生效。'
+          ? '仅按系统店铺名＋客户订单号＋Walmart SKU 唯一匹配已有明细；未匹配或存在多条匹配的行跳过，不新增订单。重复导入行按文件及行顺序更新，后面的非空采购字段生效；采购渠道始终保留原值。'
           : '预览通过。按店铺名＋订单号＋WalmartSku 匹配；不同组合新增。仅更新非空的已映射字段。'
       "
       type="success"
@@ -111,13 +105,7 @@ const meta = useMeta();
         label="商品名称"
         prop="patch.productName"
         min-width="200"
-      /><el-table-column label="采购渠道" min-width="180"
-        ><template #default="{ row }">{{
-          Array.isArray(row.patch.purchaseChannel)
-            ? row.patch.purchaseChannel.join(' / ')
-            : row.patch.purchaseChannel || '—'
-        }}</template></el-table-column
-      ><el-table-column label="图片" width="80"
+      /><el-table-column label="图片" width="80"
         ><template #default="{ row }"
           ><el-image
             v-if="row.patch.productImage"

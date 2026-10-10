@@ -1,4 +1,4 @@
-import { db, ImportTemplate, AuditLog } from '../models.js';
+import { db, AuditLog } from '../models.js';
 import { WalmartSync } from './walmart/models.js';
 import { resourceConfig } from './management-list.js';
 import { assert } from '../errors.js';
@@ -79,14 +79,6 @@ export async function deleteManagement(resource, input, actor) {
           all.some((row) => !selected.has(row.id) && row.active && row.role === 'admin'),
           '必须保留至少一个启用的总账号',
         );
-      if (resource === 'dictionaries') {
-        const bound = await ImportTemplate.findOne({
-          where: { purchaseChannelId: ids },
-          transaction,
-          lock: transaction.LOCK.UPDATE,
-        });
-        assert(!bound, `选项已被模板“${bound?.name}”绑定，请先解除绑定`, 409);
-      }
       if (resource === 'stores') {
         // 持有店铺锁期间先关闭调度再移除配置；订单、采购和同步回执全部保留。
         await WalmartSync.update({ enabled: false }, { where: { storeId: ids }, transaction });

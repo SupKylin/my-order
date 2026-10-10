@@ -5,7 +5,6 @@ import { Upload } from '@element-plus/icons-vue';
 import { templateApi } from '../api/templates';
 import { uploadApi } from '../api/uploads';
 import MappingEditor from './MappingEditor.vue';
-import ChannelBinding from './ChannelBinding.vue';
 import { useMeta } from '../stores/meta';
 import { alignMappings, suggestedMappings, mappingIssues } from '../mapping';
 const props = defineProps({ modelValue: Boolean, template: Object });
@@ -20,7 +19,6 @@ const form = reactive({
   sheetName: '',
   headerRow: 1,
   mappings: [],
-  purchaseChannelId: null,
 });
 watch(
   () => props.modelValue,
@@ -33,16 +31,26 @@ watch(
       form,
       props.template
         ? JSON.parse(JSON.stringify(props.template))
-        : { name: '', sheetName: '', headerRow: 1, mappings: [], purchaseChannelId: null },
+        : { name: '', sheetName: '', headerRow: 1, mappings: [] },
     );
+    form.sheetName = '';
+    form.mappings = withoutChannel(form.mappings);
     if (props.template)
       info.value = {
         columns: form.mappings.map((m) => ({ ...m, samples: [] })),
-        sheets: [{ name: form.sheetName }],
+        sheets: [],
       };
   },
   { immediate: true },
 );
+const mappingFields = computed(() =>
+  meta.fields.filter((field) => field.key !== 'purchaseChannel'),
+);
+function withoutChannel(mappings) {
+  return mappings.map((mapping) =>
+    mapping.field === 'purchaseChannel' ? { ...mapping, field: '' } : mapping,
+  );
+}
 async function upload(options) {
   busy.value = true;
   try {
@@ -51,7 +59,7 @@ async function upload(options) {
     info.value = result;
     form.sheetName = result.sheetName;
     form.headerRow = 1;
-    if (!props.template) form.mappings = suggestedMappings(result.columns);
+    if (!props.template) form.mappings = withoutChannel(suggestedMappings(result.columns));
     else form.mappings = alignMappings(form.mappings, result.columns).mappings;
     options.onSuccess(result);
   } catch (e) {
@@ -65,7 +73,7 @@ async function inspect() {
   busy.value = true;
   try {
     info.value = await uploadApi.inspect(uploadId.value, form.sheetName, form.headerRow);
-    form.mappings = suggestedMappings(info.value.columns);
+    form.mappings = withoutChannel(suggestedMappings(info.value.columns));
   } finally {
     busy.value = false;
   }
@@ -77,10 +85,8 @@ async function save() {
   try {
     const payload = {
       name: form.name,
-      sheetName: form.sheetName,
       headerRow: form.headerRow,
       mappings: form.mappings,
-      purchaseChannelId: form.purchaseChannelId,
     };
     if (props.template?.id) await templateApi.update(props.template.id, payload);
     else await templateApi.create(payload);
@@ -95,24 +101,27 @@ async function save() {
 <template>
   <el-dialog
     v-model="visible"
+    class="template-editor-dialog"
     :title="template ? '编辑导入模板' : '创建导入模板'"
     width="900px"
     :close-on-click-modal="false"
     destroy-on-close
     ><el-form label-position="top"
-      ><div class="template-controls">
+      ><div class="template-controls template-name-controls">
         <el-form-item label="模板名称" class="flex-one"
           ><el-input
             v-model="form.name"
-            placeholder="例如：店铺 A 每日订单"
+            placeholder="例如：采购信息更新模板"
             maxlength="100" /></el-form-item
         ><el-upload :show-file-list="false" accept=".xlsx" :http-request="upload" :disabled="busy"
           ><el-button :icon="Upload" :loading="busy">上传示例 Excel</el-button></el-upload
         >
       </div>
-      <ChannelBinding v-model="form.purchaseChannelId" :disabled="busy" />
+      <p class="dialog-description">
+        模板仅保存字段映射和表头行。导入时选择工作表，采购渠道不参与导入。
+      </p>
       <div v-if="info" class="template-controls">
-        <el-form-item label="工作表"
+        <el-form-item v-if="uploadId" label="示例工作表（仅用于读取表头）"
           ><el-select v-model="form.sheetName" :disabled="!uploadId" @change="inspect"
             ><el-option
               v-for="sheet in info.sheets"
@@ -120,21 +129,21 @@ async function save() {
               :value="sheet.name"
               :label="sheet.name" /></el-select></el-form-item
         ><el-form-item label="表头所在行"
-          ><el-input-number
-            v-model="form.headerRow"
-            :min="1"
-            :max="100"
-            :disabled="!uploadId"
-            @change="inspect"
-        /></el-form-item></div></el-form
-    ><MappingEditor
-      v-if="info"
-      :info="info"
-      v-model="form.mappings"
-      :manual-source="!uploadId"
-      :max-height="null"
-      :disabled="busy"
-    /><el-empty
+          ><el-input-number v-model="form.headerRow" :min="1" :max="100" @change="inspect"
+        /></el-form-item></div
+    ></el-form>
+    <div v-if="info" class="template-mapping-region">
+      <MappingEditor
+        :info="info"
+        :allowed-fields="mappingFields"
+        v-model="form.mappings"
+        :manual-source="!uploadId"
+        table-height="100%"
+        :max-height="null"
+        :disabled="busy"
+      />
+    </div>
+    <el-empty
       v-else
       description="上传示例文件后，选择每一列对应的系统字段"
       :image-size="90"

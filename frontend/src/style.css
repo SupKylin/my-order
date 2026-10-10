@@ -9,3 +9,6 @@
 @import './styles/orders-layout.css';
 @import './styles/purchase-warning.css';
 @import './styles/management.css';
+
+@import './styles/ui-theme.css';
+@import './styles/templates.css';

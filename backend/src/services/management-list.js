@@ -26,7 +26,7 @@ export const resources = {
     search: ['systemStoreName', 'walmartStoreName'],
     filters: { enabled: ['true', 'false'] },
   },
-  templates: { model: ImportTemplate, search: ['name', 'sheetName'], filters: {} },
+  templates: { model: ImportTemplate, search: ['name'], filters: {} },
   imports: { model: ImportJob, search: [], filters: { status: ['preview', 'completed'] } },
   dictionaries: {
     model: DictionaryOption,

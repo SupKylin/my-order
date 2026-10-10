@@ -43,7 +43,10 @@ export function validateImportMappings(template, kind) {
   );
   if (kind === 'purchase') {
     assert(
-      selected.some((mapping) => fieldMap[mapping.field].group === 'purchase'),
+      selected.some(
+        (mapping) =>
+          mapping.field !== 'purchaseChannel' && fieldMap[mapping.field].group === 'purchase',
+      ),
       '采购导入至少需要映射一个采购字段',
     );
     for (const key of ['shopName', 'orderNumber', 'walmartSku'])
@@ -95,6 +98,9 @@ export async function prepareImport(input, user, kind = 'legacy') {
       : entry.template;
     assert(source, '请选择导入模板');
     const template = await templatePayload(source.toJSON ? source.toJSON() : source);
+    // 工作表属于本次文件选择，绝不复用旧模板中保存的工作表。
+    assert(typeof entry.sheetName === 'string' && entry.sheetName.trim(), '请选择本次导入的工作表');
+    template.sheetName = entry.sheetName;
     validateImportMappings(template, kind);
     firstTemplate ||= template;
     const extracted = await extractRows(
@@ -121,6 +127,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
       uploadId: upload.id,
       name: upload.originalName,
       templateId: source.id || null,
+      sheetName: template.sheetName,
     });
   }
   const template = {
@@ -128,7 +135,6 @@ export async function prepareImport(input, user, kind = 'legacy') {
     matchRule: kind === 'purchase' ? PURCHASE_MATCH_RULE : IMPORT_MATCH_RULE,
     importKind: kind,
     sources: snapshots,
-    purchaseChannel: snapshots.length === 1 ? firstTemplate.purchaseChannel : null,
   };
   assert(
     Buffer.byteLength(JSON.stringify(data.rows), 'utf8') < 8 * 1024 * 1024,
@@ -327,6 +333,8 @@ export async function commitImport(id, user, kind = 'legacy') {
     }
     for (const row of sorted) {
       if (row.action === 'missing') continue;
+      // 兼容升级前生成但尚未提交的预览：采购导入永远不修改渠道。
+      if (kind === 'purchase') delete row.patch.purchaseChannel;
       // 预览与提交之间字典可能发生变化；重新验证，防止写入已停用或旧名称。
       try {
         const normalized = validatePatch(row.patch, { requireKeys: true, fieldDefinitions });

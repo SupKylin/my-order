@@ -1,28 +1,34 @@
 /* 提高主题变量优先级，防止异步加载的组件默认变量覆盖项目配色。 */
 html:root {
   font-family: Inter, 'Segoe UI', 'Microsoft YaHei', sans-serif;
-  color: #203039;
-  background: #f3f6f7;
+  color: #303133;
+  background: #f5f7fa;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --el-color-primary: #087f79;
-  --el-color-primary-light-3: #4ca49f;
-  --el-color-primary-light-5: #83bfbb;
-  --el-color-primary-light-7: #b5d8d5;
-  --el-color-primary-light-8: #cce5e3;
-  --el-color-primary-light-9: #edf7f5;
-  --el-color-primary-dark-2: #076660;
-  --el-color-success: #168570;
-  --el-color-warning: #b78027;
-  --el-color-danger: #c55353;
+  --el-color-primary: #409eff;
+  --el-color-primary-light-3: #79bbff;
+  --el-color-primary-light-5: #a0cfff;
+  --el-color-primary-light-7: #c6e2ff;
+  --el-color-primary-light-8: #d9ecff;
+  --el-color-primary-light-9: #ecf5ff;
+  --el-color-primary-dark-2: #337ecc;
+  --el-color-success: #67c23a;
+  --el-color-warning: #e6a23c;
+  --el-color-danger: #f56c6c;
   --el-font-family: Inter, 'Segoe UI', 'Microsoft YaHei', sans-serif;
-  --el-border-radius-base: 7px;
-  --el-border-color: #dce4e7;
-  --el-text-color-primary: #203039;
-  --el-text-color-regular: #50616b;
-  --el-fill-color-light: #f5f8f9;
-  --el-font-size-base: 13px;
+  --el-border-radius-base: 6px;
+  --el-border-color: #dcdfe6;
+  --el-text-color-primary: #303133;
+  --el-text-color-regular: #606266;
+  --el-fill-color-light: #f5f7fa;
+  --el-font-size-base: 14px;
+  --el-text-color-secondary: #909399;
+  --el-border-color-light: #e4e7ed;
+  --el-border-color-lighter: #ebeef5;
+  --ui-space: 16px;
+  --ui-sidebar-bg: #202b3d;
+  --ui-sidebar-text: #c4cede;
 }
 * {
   box-sizing: border-box;
@@ -56,10 +62,10 @@ p {
   font-size: 12px;
 }
 .success-text {
-  color: #168570 !important;
+  color: #67c23a !important;
 }
 .danger-text {
-  color: #c55353 !important;
+  color: #f56c6c !important;
 }
 .ellipsis {
   overflow: hidden;

@@ -169,15 +169,15 @@
 }
 .el-input__wrapper,
 .el-select__wrapper {
-  box-shadow: 0 0 0 1px #e2e8ea inset !important;
+  box-shadow: 0 0 0 1px var(--el-border-color) inset;
 }
 .el-input__wrapper:hover,
 .el-select__wrapper:hover {
-  box-shadow: 0 0 0 1px #a7c1c4 inset !important;
+  box-shadow: 0 0 0 1px var(--el-border-color-hover) inset;
 }
 .el-input__wrapper.is-focus,
 .el-select__wrapper.is-focused {
-  box-shadow: 0 0 0 1px #087f79 inset !important;
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
 }
 .el-table {
   font-size: 12px;

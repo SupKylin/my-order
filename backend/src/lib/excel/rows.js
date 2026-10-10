@@ -13,7 +13,7 @@ export async function extractRows(loaded, template, savePicture, fieldDefinition
     mappingWarnings = [];
   for (const mapping of template.mappings) {
     // 模板保存全部源表头，只有选择了目标字段的列才参与读取和校验。
-    if (isBlank(mapping.field)) continue;
+    if (isBlank(mapping.field) || mapping.field === 'purchaseChannel') continue;
     const m = { ...mapping },
       header = sheet.getRow(template.headerRow),
       current = excelText(header.getCell(m.column).text).trim();
@@ -92,9 +92,6 @@ export async function extractRows(loaded, template, savePicture, fieldDefinition
       }
     }
     try {
-      // Excel 已映射且非空的渠道优先；空白、缺列或未映射时使用模板绑定值。
-      if (template.purchaseChannel && isBlank(raw.purchaseChannel))
-        raw.purchaseChannel = template.purchaseChannel;
       const patch = validatePatch(raw, { skipBlank: true, requireKeys: true, fieldDefinitions });
       rows.push({ rowNumber, patch });
     } catch (e) {

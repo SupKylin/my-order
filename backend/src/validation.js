@@ -123,13 +123,12 @@ export function validateTemplate(input) {
   if (
     !name ||
     name.length > 100 ||
-    !sheetName ||
     sheetName.length > 100 ||
     !Number.isInteger(headerRow) ||
     headerRow < 1 ||
     headerRow > 100
   )
-    throw new AppError(400, '请填写模板名称、工作表和有效表头行');
+    throw new AppError(400, '请填写模板名称和有效表头行');
   if (!Array.isArray(input.mappings) || input.mappings.length < 1)
     throw new AppError(400, '请至少映射订单号');
   if (

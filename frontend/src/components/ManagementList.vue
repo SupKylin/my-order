@@ -139,7 +139,7 @@ const deleteNote = computed(
       imports: '仅删除导入记录，已导入的订单和采购数据保留；未提交的预览将无法继续提交。',
       users:
         '当前登录账号和最后一个启用的总账号不能删除。该账号绑定的店铺将变为未绑定，订单及采购渠道保留。',
-      dictionaries: '已被模板绑定的选项不能删除。历史订单保留原名称。',
+      dictionaries: '删除后不再提供此选项，历史订单保留原名称。',
       'risk-addresses': '删除后匹配订单的地址风险标记将解除。',
     })[props.resource],
 );

@@ -66,6 +66,11 @@
   display: grid;
   gap: 7px;
   overflow-y: auto;
+  overflow-x: hidden;
+  /* 固定滚动条占位，避免溢出切换时挤压菜单文字。 */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #526f78 #10272f;
   flex-shrink: 1;
   min-height: 0;
 }
@@ -76,7 +81,38 @@
   align-items: center;
   gap: 13px;
   font-size: 13px;
-  transition: 0.18s;
+  min-width: 0;
+  white-space: nowrap;
+  position: relative;
+  padding-right: 24px;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}
+.sidebar nav a > .el-icon {
+  flex-shrink: 0;
+}
+.sidebar nav a > span:not(.nav-dot) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 兼容不支持标准 scrollbar 属性的 Chromium 版本。 */
+.sidebar nav::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar nav::-webkit-scrollbar-track {
+  background: #10272f;
+}
+.sidebar nav::-webkit-scrollbar-thumb {
+  background: #526f78;
+  border-radius: 6px;
+}
+.sidebar nav::-webkit-scrollbar-thumb:hover {
+  background: #77949f;
+}
+.sidebar nav::-webkit-scrollbar-button {
+  display: none;
 }
 .sidebar nav a:hover {
   background: #1b363e;
@@ -87,6 +123,10 @@
   color: #b9efdd;
 }
 .nav-dot {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
   width: 5px;
   height: 5px;
   border-radius: 50%;

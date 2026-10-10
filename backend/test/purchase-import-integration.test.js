@@ -13,6 +13,7 @@ import {
   Purchase,
   Upload,
   ImportJob,
+  ImportTemplate,
   DictionaryOption,
   Store,
 } from '../src/models.js';
@@ -31,6 +32,7 @@ import { createOrdersRouter } from '../src/routes/orders.js';
 import { createImportsRouter } from '../src/routes/imports.js';
 import { errorHandler } from '../src/middleware/error-handler.js';
 import { prepareImport, commitImport, getImportPreview } from '../src/services/imports.js';
+import { templatePayload } from '../src/services/templates.js';
 import { ensureStorage, uploadPath } from '../src/services/storage.js';
 import { orderIdentityKey, channelKey, IMPORT_MATCH_RULE } from '../src/lib/order-identity.js';
 
@@ -110,7 +112,11 @@ async function preview(rows) {
   const filepath = uploadPath(file);
   files.push(filepath);
   await workbook.xlsx.writeFile(filepath);
-  return prepareImport({ sources: [{ uploadId: id, template }] }, actor, 'purchase');
+  return prepareImport(
+    { sources: [{ uploadId: id, template, sheetName: '采购' }] },
+    actor,
+    'purchase',
+  );
 }
 
 test('混合有效、未匹配、歧义及空店铺行只更新唯一目标；完整反馈及重复提交不新增', async () => {
@@ -348,4 +354,67 @@ test('官方同步仍可创建和更新 WFS 订单', async () => {
   const item = await OrderItem.findOne({ where: { shopName: 'WFS-Test' } });
   assert.equal(item.productName, '官方更新');
   assert.equal((await getItem(item.id)).manualEditable, false);
+});
+
+test('旧模板解绑渠道与工作表，用户所选工作表生效，旧预览也不能覆盖渠道', async () => {
+  const item = await createItem('SHEET-SELECT');
+  await Purchase.update({ purchaseChannel: ['原有渠道'] }, { where: { itemId: item.id } });
+  const workbook = new ExcelJS.Workbook();
+  for (const [name, note] of [
+    ['旧工作表', '不得导入'],
+    ['本次工作表', '选定工作表的采购备注'],
+  ]) {
+    const sheet = workbook.addWorksheet(name);
+    sheet.addRow([...keys, '渠道']);
+    sheet.addRow(['店铺A', 'SHEET-SELECT', '001', '', note, '不存在的渠道']);
+  }
+  const id = randomUUID();
+  const upload = await Upload.create({
+    id,
+    filename: `${id}.xlsx`,
+    originalName: '多工作表.xlsx',
+    kind: 'excel',
+    uploadedBy: actor.id,
+  });
+  const filepath = uploadPath(upload);
+  files.push(filepath);
+  await workbook.xlsx.writeFile(filepath);
+  const oldTemplate = await ImportTemplate.create({
+    ...template,
+    sheetName: '旧工作表',
+    purchaseChannelId: 999999,
+    mappings: [...template.mappings, { column: 6, header: '渠道', field: 'purchaseChannel' }],
+  });
+  const entry = { uploadId: id, templateId: oldTemplate.id };
+  await assert.rejects(
+    prepareImport({ sources: [entry] }, actor, 'purchase'),
+    /请选择本次导入的工作表/,
+  );
+  await assert.rejects(
+    prepareImport({ sources: [{ ...entry, sheetName: '不存在' }] }, actor, 'purchase'),
+    /找不到工作表/,
+  );
+  const p = await prepareImport(
+    { sources: [{ ...entry, sheetName: '本次工作表' }] },
+    actor,
+    'purchase',
+  );
+  assert.equal(p.errorCount, 0);
+  assert.equal(p.rows[0].patch.purchaseNote, '选定工作表的采购备注');
+  assert.equal(p.rows[0].patch.purchaseChannel, undefined);
+  assert.equal(p.sources[0].sheetName, '本次工作表');
+  // 模拟升级前的预览快照含渠道：提交边界必须再次阻止写入。
+  const job = await ImportJob.findByPk(p.id);
+  const rows = structuredClone(job.rows);
+  rows[0].patch.purchaseChannel = ['旧预览渠道'];
+  await job.update({ rows });
+  await commitImport(p.id, actor, 'purchase');
+  const purchase = await Purchase.findOne({ where: { itemId: item.id } });
+  assert.deepEqual(purchase.purchaseChannel, ['原有渠道']);
+  assert.equal(purchase.purchaseNote, '选定工作表的采购备注');
+  const saved = await templatePayload(oldTemplate.toJSON());
+  assert.equal(saved.sheetName, '');
+  assert.equal(saved.purchaseChannelId, null);
+  assert.equal(saved.mappings.at(-1).field, '');
+  assert.equal(saved.mappings.at(-1).header, '渠道');
 });
