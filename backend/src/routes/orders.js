@@ -13,7 +13,7 @@ import { beginExport, exportProgress } from '../services/export-progress.js';
 
 export function createOrdersRouter() {
   const router = Router();
-  router.get('/orders', async (req, res) => res.json(await listOrders(req.query)));
+  router.get('/orders', async (req, res) => res.json(await listOrders(req.query, req.user)));
   router.get('/orders/export-progress/:id', (req, res) =>
     res.json(exportProgress(req.params.id, req.user.id)),
   );
@@ -24,7 +24,7 @@ export function createOrdersRouter() {
     router.post(route, async (req, res) => {
       const progress = beginExport(req.body?.exportId, req.user.id);
       try {
-        await exportOrders(req.body || {}, res, purchaseTemplate, { progress });
+        await exportOrders(req.body || {}, res, purchaseTemplate, { progress, user: req.user });
       } catch (error) {
         progress({ stage: 'failed' });
         throw error;
@@ -34,7 +34,7 @@ export function createOrdersRouter() {
   router.post('/orders/batch-status', async (req, res) =>
     res.json(await updateOrderStatus(req.body, req.user)),
   );
-  router.get('/orders/:id', async (req, res) => res.json(await getItem(req.params.id)));
+  router.get('/orders/:id', async (req, res) => res.json(await getItem(req.params.id, req.user)));
   router.post('/orders', async (req, res) =>
     res.status(201).json(await createItem(req.body, req.user)),
   );

@@ -9,15 +9,17 @@ import { channelKey, orderIdentityKey } from '../lib/order-identity.js';
 import { priceFactorPatterns } from '../lib/price-factor.js';
 import { shippingWindow } from '../lib/shipping-window.js';
 import { assertOrderEditable } from '../lib/order-write-policy.js';
+import { orderScope, assertItemAccess } from '../permissions.js';
 import {
   purchaseTimerPatch,
   PURCHASE_SUCCESS_PATTERN,
   PURCHASE_UNTRACKED_PATTERN,
 } from '../lib/purchase-timer.js';
 /** 返回前端使用的商品明细快照，不向前端泄露模型关联结构。 */
-export async function getItem(id) {
+export async function getItem(id, user) {
   const item = await OrderItem.findByPk(id, { include: itemInclude });
   assert(item, '商品明细不存在', 404);
+  await assertItemAccess(item, user);
   return serializeItem(item);
 }
 
@@ -107,7 +109,7 @@ export async function upsertImported(patch, transaction, actor, target = undefin
   );
   return { created: true, id: item.id };
 }
-export function buildFilters(query, now = Date.now()) {
+export function buildFilters(query, now = Date.now(), user) {
   const where = {},
     purchaseWhere = {};
   if (query.orderNumbers) {
@@ -301,14 +303,15 @@ export function buildFilters(query, now = Date.now()) {
     { ...itemInclude[1], where: purchaseWhere, required: true },
     ...itemInclude.slice(2),
   ];
+  where[Op.and] = [...(where[Op.and] || []), orderScope(user)];
   return { where, include };
 }
-export async function listOrders(query) {
+export async function listOrders(query, user) {
   const page = Math.max(1, Number(query.page) || 1),
     pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 20));
   // 单次查询使用同一时间点，避免跨截止时间时分页与统计条件不同。
   const now = Date.now();
-  const filters = buildFilters(query, now);
+  const filters = buildFilters(query, now, user);
   const result = await OrderItem.findAndCountAll({
     ...filters,
     limit: pageSize,
@@ -352,6 +355,7 @@ export async function editItem(id, input, user) {
   await db.transaction(async (t) => {
     const item = await OrderItem.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE });
     assert(item, '记录不存在', 404);
+    await assertItemAccess(item, user, t);
     assertOrderEditable(item);
     if (item.version !== input.version)
       throw new AppError(409, '该商品已被其他人修改，请刷新后再编辑');
@@ -463,6 +467,7 @@ export async function assignItems(input, user) {
     for (const entry of sorted) {
       const item = await OrderItem.findByPk(entry.id, { transaction: t, lock: t.LOCK.UPDATE });
       assert(item, '部分商品已不存在，请刷新', 404);
+      await assertItemAccess(item, user, t);
       assertOrderEditable(item);
       assert(item.version === entry.version, '部分商品已更新，请刷新后重新分配', 409);
       const purchase = await Purchase.findOne({
@@ -517,6 +522,7 @@ export async function updateOrderStatus(input, user) {
         lock: transaction.LOCK.UPDATE,
       });
       assert(item, '部分商品已不存在，请刷新', 404);
+      await assertItemAccess(item, user, transaction);
       assertOrderEditable(item);
       assert(item.version === entry.version, '部分商品已更新，请刷新后重试', 409);
       await item.update({ orderStatus, version: item.version + 1 }, { transaction });

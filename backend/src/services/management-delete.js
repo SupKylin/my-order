@@ -29,6 +29,7 @@ async function lockStores(ids) {
 }
 
 export async function deleteManagement(resource, input, actor) {
+  assert(!['imports', 'audit-logs'].includes(resource), '操作日志和导入记录不能删除', 403);
   assert(input && typeof input === 'object' && !Array.isArray(input), '删除参数无效');
   const { model } = resourceConfig(resource, input.kind);
   assert(

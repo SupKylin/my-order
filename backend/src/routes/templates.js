@@ -31,7 +31,9 @@ export function createTemplatesRouter() {
     );
   });
   router.delete('/:id', async (req, res) => {
-    await ImportTemplate.destroy({ where: { id: req.params.id } });
+    await db.transaction((transaction) =>
+      ImportTemplate.destroy({ where: { id: req.params.id }, transaction }),
+    );
     res.json({ ok: true });
   });
   return router;

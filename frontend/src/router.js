@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useAuth } from './stores/auth';
 import { useMeta } from './stores/meta';
+import { canVisit } from './utils/permissions';
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -36,13 +37,13 @@ const router = createRouter({
     },
     {
       path: '/imports',
-      component: () => import('./views/History.vue'),
-      meta: { title: '导入记录', subtitle: '查看导入结果、更新时间和待确认的预览。' },
+      component: () => import('./views/AuditLogs.vue'),
+      meta: { title: '操作日志', subtitle: '自动记录操作与字段变化，仅保留最近两个月。' },
     },
     {
       path: '/users',
       component: () => import('./views/Users.vue'),
-      meta: { title: '账号管理', subtitle: '维护团队账号与角色，当前三个角色均开放全部业务功能。' },
+      meta: { title: '账号管理', subtitle: '维护团队账号及角色权限。' },
     },
     {
       path: '/stores',
@@ -76,6 +77,7 @@ router.beforeEach(async (to) => {
   if (!to.meta.public && !auth.user) return { path: '/login', query: { redirect: to.fullPath } };
   if (to.path === '/login' && auth.user) return '/orders';
   if (!to.meta.public && auth.user) await useMeta().load(true);
+  if (!to.meta.public && auth.user && !canVisit(auth.user.role, to.path)) return '/orders';
 });
 window.addEventListener('auth-expired', () => {
   const auth = useAuth();

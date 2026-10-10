@@ -1,4 +1,5 @@
 import mysql from 'mysql2/promise';
+import { migratePermissionsAudit } from '../src/migrations/permissions-audit.js';
 import { migrateWalmart } from '../src/migrations/walmart.js';
 import { config } from '../src/config.js';
 import { db, User } from '../src/models.js';
@@ -57,6 +58,7 @@ try {
   await migrateStores();
   await migrateOrderFields();
   await migrateWalmart();
+  await migratePermissionsAudit();
   const username = process.env.ADMIN_USERNAME || 'admin';
   if (!(await User.findOne({ where: { username } })))
     await User.create({

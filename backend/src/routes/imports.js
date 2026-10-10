@@ -23,7 +23,7 @@ export function createImportsRouter() {
   router.post('/:id/commit', async (req, res) =>
     res.json(await runImport(() => commitImport(req.params.id, req.user))),
   );
-  router.get('/', async (req, res) => res.json(await listImports()));
-  router.get('/:id', async (req, res) => res.json(await getImportPreview(req.params.id)));
+  router.get('/', async (req, res) => res.json(await listImports(req.user)));
+  router.get('/:id', async (req, res) => res.json(await getImportPreview(req.params.id, req.user)));
   return router;
 }

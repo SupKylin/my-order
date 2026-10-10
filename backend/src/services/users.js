@@ -43,9 +43,15 @@ export async function listUsers() {
 
 export async function createUser(input, actor) {
   const patch = validateUserInput(input, true);
-  const user = await User.create({ ...patch, passwordHash: await hashPassword(input.password) });
-  await AuditLog.create({ userId: actor.id, action: 'create_user', entityId: String(user.id) });
-  return publicUser(user);
+  const passwordHash = await hashPassword(input.password);
+  return db.transaction(async (transaction) => {
+    const user = await User.create({ ...patch, passwordHash }, { transaction });
+    await AuditLog.create(
+      { userId: actor.id, action: 'create_user', entityId: String(user.id) },
+      { transaction },
+    );
+    return publicUser(user);
+  });
 }
 
 /** 修改角色或启用状态必须在同一个事务中检查最后一个总账号。 */

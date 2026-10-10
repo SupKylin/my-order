@@ -57,13 +57,14 @@ function dateBoundary(value, nextDay = false) {
   return new Date(date.getTime() + (nextDay ? 86400000 : 0));
 }
 
-export async function listManagement(resource, query = {}) {
+export async function listManagement(resource, query = {}, user) {
   const config = resourceConfig(resource, query.kind);
   const page = Number(query.page ?? 1),
     pageSize = Number(query.pageSize ?? 20);
   assert(Number.isSafeInteger(page) && page > 0 && page <= 1000000, '页码无效');
   assert([20, 50, 100].includes(pageSize), '每页条数无效');
   const where = resource === 'dictionaries' ? { kind: query.kind } : {};
+  if (resource === 'imports' && user && user.role !== 'admin') where.createdBy = user.id;
   const q = typeof query.q === 'string' ? query.q.trim() : '';
   assert(q.length <= 255, '关键词最多 255 字');
   // 转义 LIKE 通配符，关键词中的 % 和 _ 按原文搜索。

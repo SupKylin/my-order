@@ -2,7 +2,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { orderApi } from '../api/orders';
-import { userApi } from '../api/users';
+import { api } from '../api/http';
 import { useMeta } from '../stores/meta';
 import { useAuth } from '../stores/auth';
 import { countShippingWarnings } from '../utils/shippingWarning';
@@ -41,7 +41,7 @@ export function useOrders() {
   let warningTimer;
   const syncAfterResume = () => {
     if (!document.hidden && !loading.value && !editor.value && !selected.value.length)
-      load().catch(() => {});
+      load(true).catch(() => {});
   };
   const filters = reactive({
     q: '',
@@ -73,10 +73,10 @@ export function useOrders() {
     shipDates = ref([]),
     table = ref();
   /** 只读取当前筛选页；重新查询后清理旧的多选状态。 */
-  async function load() {
+  async function load(background = false) {
     loading.value = true;
     try {
-      const result = await orderApi.list({ ...filters });
+      const result = await orderApi.list({ ...filters, background: background === true });
       if (result.serverNow) {
         serverClock = { time: Date.parse(result.serverNow), received: performance.now() };
         tickClock();
@@ -135,9 +135,9 @@ export function useOrders() {
     if (kind === 'afterSales') filters.afterSales = '是';
     await load();
   }
-  function edit(row) {
+  async function edit(row) {
     if (row && !canEditOrder(row)) return ElMessage.warning('WFS 订单只读，不能修改');
-    editing.value = row ? { ...row } : null;
+    editing.value = row ? await api.get(`/orders/${row.id}`) : null;
     editor.value = true;
   }
   async function openAssign(row) {
@@ -225,11 +225,21 @@ export function useOrders() {
     warningTimer = setInterval(tickClock, 1000);
     document.addEventListener('visibilitychange', syncAfterResume);
     await meta.load();
-    users.value = await userApi.list();
+    users.value = await api.get('/order-owners');
     // 兼容旧采购分配页面书签，重定向后仍可查看待分配记录。
     if (route.query.assignedTo === 'unassigned') filters.purchaseChannel = true;
     await refresh();
   });
+  watch(
+    () => auth.user?.role,
+    async (role, previous) => {
+      if (!role || role === previous) return;
+      rows.value = [];
+      selected.value = [];
+      users.value = await api.get('/order-owners');
+      await refresh();
+    },
+  );
   onUnmounted(() => {
     clearInterval(warningTimer);
     document.removeEventListener('visibilitychange', syncAfterResume);

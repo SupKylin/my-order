@@ -19,6 +19,7 @@ import { AppError, assert } from '../errors.js';
 import { IMPORT_MATCH_RULE, PURCHASE_MATCH_RULE } from '../lib/order-identity.js';
 import { matchImportRows, matchPurchaseRows } from '../lib/import-matching.js';
 import { fieldMap } from '../fields.js';
+import { allowedStoreNames, NO_STORE_PERMISSION } from '../permissions.js';
 import {
   assertPurchaseImport,
   isWfsOrder,
@@ -86,6 +87,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
     '同一文件不能重复预览',
   );
   const data = { rows: [], errors: [], warnings: [] };
+  const allowed = await allowedStoreNames(user);
   const snapshots = [];
   let firstTemplate;
   const fieldDefinitions = await getFieldDefinitions();
@@ -108,6 +110,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
       template,
       (buffer) => saveImage(buffer, user.id, upload.originalName),
       fieldDefinitions,
+      { allowedStoreNames: allowed },
     );
     for (const key of ['rows', 'errors', 'warnings'])
       data[key].push(
@@ -148,6 +151,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
           { model: Purchase, as: 'purchase', attributes: ['purchaseSku'], required: false },
         ],
         attributes: ['id', 'walmartSku', 'shopName', 'version', 'fulfillmentParty'],
+        ...(allowed ? { where: { shopName: [...allowed] } } : {}),
         order: [['id', 'ASC']],
       })
     : [];
@@ -174,6 +178,13 @@ export async function prepareImport(input, user, kind = 'legacy') {
       ? purchaseMatches.map((match) => match.target)
       : matchImportRows(sortedRows, existingRows, kind);
   for (const [index, row] of sortedRows.entries()) {
+    if (allowed && !allowed.has(row.patch.shopName)) {
+      row.action = 'missing';
+      row.skipReason = NO_STORE_PERMISSION;
+      row.expectedId = null;
+      row.expectedVersion = null;
+      continue;
+    }
     const old = sortedTargets[index];
     row.action = old ? 'update' : kind === 'purchase' ? 'missing' : 'create';
     row.expectedId = old?.id || null;
@@ -270,6 +281,15 @@ export async function commitImport(id, user, kind = 'legacy') {
     );
     let added = 0,
       updated = 0;
+    const allowed = await allowedStoreNames(user, t);
+    // 店铺归属在预览后可能变化，提交前重新授权，越权行单独跳过。
+    if (allowed)
+      for (const row of job.rows) {
+        if (!allowed.has(row.patch.shopName)) {
+          row.action = 'missing';
+          row.skipReason = NO_STORE_PERMISSION;
+        }
+      }
     // 统一锁顺序，降低多人导入相同订单时死锁的概率。
     // 未匹配行只生成报告，不查找/创建订单，提交时也不会转为新增。
     const sorted = job.rows
@@ -375,8 +395,9 @@ export async function commitImport(id, user, kind = 'legacy') {
   });
 }
 
-export async function listImports() {
+export async function listImports(user) {
   const jobs = await ImportJob.findAll({
+    ...(user && user.role !== 'admin' ? { where: { createdBy: user.id } } : {}),
     attributes: [
       'id',
       'uploadId',
@@ -398,8 +419,9 @@ export async function listImports() {
   return jobs.map((job) => ({ ...job.toJSON(), filename: names.get(job.uploadId) || '' }));
 }
 
-export async function getImportPreview(id) {
+export async function getImportPreview(id, user) {
   const job = await ImportJob.findByPk(id);
   assert(job, '导入记录不存在', 404);
+  assert(!user || user.role === 'admin' || job.createdBy === user.id, '无权查看该导入结果', 403);
   return previewResult(job);
 }

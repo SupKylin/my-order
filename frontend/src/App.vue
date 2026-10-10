@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, ref } from 'vue';
+import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   Box,
@@ -20,6 +20,7 @@ import { ElMessageBox } from 'element-plus';
 import zhCn from 'element-plus/es/locale/lang/zh-cn';
 import { useMetadataSync } from './composables/useMetadataSync';
 import BusinessClocks from './components/BusinessClocks.vue';
+import { canVisit } from './utils/permissions';
 useMetadataSync();
 const ChangePasswordDialog = defineAsyncComponent(
   () => import('./components/account/ChangePasswordDialog.vue'),
@@ -34,7 +35,7 @@ const menus = [
   // { path: '/imports/new', label: '导入订单', icon: Upload },
   { path: '/imports/purchases/new', label: '导入采购', icon: Upload },
   { path: '/templates', label: '导入模板', icon: Document },
-  { path: '/imports', label: '导入记录', icon: Clock },
+  { path: '/imports', label: '操作日志', icon: Clock },
   { path: '/users', label: '账号管理', icon: User },
   { path: '/stores', label: '店铺管理', icon: Setting },
   { path: '/settings/channels', label: '采购渠道维护', icon: Setting },
@@ -43,6 +44,15 @@ const menus = [
   { path: '/settings/order-statuses', label: '运营订单状态维护', icon: Setting },
   { path: '/settings/purchase-statuses', label: '采购状态维护', icon: Setting },
 ];
+const visibleMenus = computed(() => menus.filter((item) => canVisit(auth.user?.role, item.path)));
+watch(
+  () => auth.user?.role,
+  (role, previous) => {
+    // 首次恢复登录交给路由守卫，避免抢占用户直接打开的合法页面。
+    if (previous && role && !route.meta.public && !canVisit(role, route.path))
+      router.replace('/orders');
+  },
+);
 const showPassword = ref(false);
 const sidebarOpen = ref(true);
 const managementPage = computed(
@@ -78,7 +88,7 @@ async function signOut() {
           <div class="nav-caption">业务工作台</div>
           <nav>
             <router-link
-              v-for="item in menus"
+              v-for="item in visibleMenus"
               :key="item.path"
               :to="item.path"
               :class="{ active: route.path === item.path }"

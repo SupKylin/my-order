@@ -13,12 +13,18 @@ import { createStoresRouter } from './stores.js';
 import { createWalmartRouter } from './walmart.js';
 import { createRiskAddressesRouter } from './risk-addresses.js';
 import { createManagementRouter } from './management.js';
+import { authorizeApi } from '../permissions.js';
+import { auditRequests, installAuditHooks } from '../services/audit.js';
+import { createAuditRouter } from './audit.js';
 
 /** 统一注册 API 边界；业务路由默认受登录和 CSRF 保护。 */
 export function createApiRouter() {
+  installAuditHooks();
   const router = Router();
   router.use('/auth', createAuthRouter());
   router.use(requireAuth, requireCsrf);
+  router.use(auditRequests, authorizeApi);
+  router.use('/audit-logs', createAuditRouter());
   router.use('/management', createManagementRouter());
   router.use(createDashboardRouter());
   router.use(createOrdersRouter());

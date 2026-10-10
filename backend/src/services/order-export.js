@@ -98,10 +98,10 @@ export async function exportOrders(
   input,
   res,
   purchaseTemplate = false,
-  { progress = () => {}, cache } = {},
+  { progress = () => {}, cache, user } = {},
 ) {
   // 两类导出均复用列表筛选条件；勾选状态、分页参数不能缩小或绕过筛选范围。
-  const filters = buildFilters(input.filters || {}, Date.now());
+  const filters = buildFilters(input.filters || {}, Date.now(), user);
   const selectedColumns = purchaseTemplate ? purchaseTemplateColumns : columns;
   let lastId = null;
   const fetchBatch = () =>
@@ -118,6 +118,7 @@ export async function exportOrders(
     col: 'id',
   });
   assert(count <= maxRows, '导出超过 Excel 单表行数上限，请缩小筛选范围');
+  if (res.locals) res.locals.auditTotal = count;
   let batch = await fetchBatch();
   assert(batch.length, '没有可导出的订单');
   const definitions = purchaseTemplate ? await getFieldDefinitions() : [];

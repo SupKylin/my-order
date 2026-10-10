@@ -6,7 +6,13 @@ import { cellValue, excelText } from './workbook.js';
 import { embeddedImages } from './images.js';
 
 /** 只产出非空字段补丁；未映射字段、缺列和空单元格都不生成覆盖值。 */
-export async function extractRows(loaded, template, savePicture, fieldDefinitions = fields) {
+export async function extractRows(
+  loaded,
+  template,
+  savePicture,
+  fieldDefinitions = fields,
+  { allowedStoreNames = null } = {},
+) {
   const sheet = loaded.workbook.getWorksheet(template.sheetName);
   if (!sheet) throw new AppError(400, `找不到工作表“${template.sheetName}”`);
   const effectiveMappings = [],
@@ -53,6 +59,19 @@ export async function extractRows(loaded, template, savePicture, fieldDefinition
   for (let rowNumber = template.headerRow + 1; rowNumber <= sheet.rowCount; rowNumber++) {
     const row = sheet.getRow(rowNumber),
       raw = {};
+    // 越权行只读取上传者已提供的身份信息，不保存图片、不校验采购字段阻塞合法行。
+    if (allowedStoreNames) {
+      const identity = {};
+      for (const mapping of effectiveMappings.filter((m) =>
+        ['shopName', 'orderNumber', 'walmartSku'].includes(m.field),
+      )) {
+        identity[mapping.field] = excelText(row.getCell(mapping.column).text).trim();
+      }
+      if (!allowedStoreNames.has(identity.shopName) && Object.values(identity).some(Boolean)) {
+        rows.push({ rowNumber, patch: { orderNumber: '', ...identity } });
+        continue;
+      }
+    }
     let present = false;
     for (const mapping of effectiveMappings) {
       const field = fieldMap[mapping.field],

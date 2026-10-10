@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'node:fs/promises';
 import { imageUpload, excelUpload } from '../middleware/upload.js';
 import { saveImage, saveExcel } from '../services/storage.js';
-import { inspectExcel } from '../services/imports.js';
+import { inspectExcel, getExcelUpload } from '../services/imports.js';
 import { assert } from '../errors.js';
 
 export function createUploadsRouter() {
@@ -22,6 +22,12 @@ export function createUploadsRouter() {
     }
   });
   router.get('/excel/:id/inspect', async (req, res) => {
+    const upload = await getExcelUpload(req.params.id);
+    assert(
+      req.user.role === 'admin' || upload.uploadedBy === req.user.id,
+      '无权查看该上传文件',
+      403,
+    );
     res.json(await inspectExcel(req.params.id, req.query.sheetName, req.query.headerRow));
   });
   return router;

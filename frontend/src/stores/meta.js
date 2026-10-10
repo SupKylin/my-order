@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia';
 import { getMetadata } from '../api/meta';
+import { useAuth } from './auth';
 let pending;
 export const useMeta = defineStore('meta', {
-  state: () => ({ fields: [], roles: {}, publicBase: '', purchaseChannels: [] }),
+  state: () => ({ fields: [], roles: {}, publicBase: '', purchaseChannels: [], currentRole: '' }),
   getters: { fieldMap: (state) => Object.fromEntries(state.fields.map((f) => [f.key, f])) },
   actions: {
     async load(force = false) {
@@ -12,6 +13,8 @@ export const useMeta = defineStore('meta', {
           pending = null;
         });
       Object.assign(this, await pending);
+      const auth = useAuth();
+      if (auth.user && this.currentRole) auth.user.role = this.currentRole;
     },
     async publishChange() {
       // 等待可能正在进行的旧请求结束，再强制读取保存后的选项。

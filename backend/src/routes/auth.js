@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { randomBytes } from 'node:crypto';
 import { config } from '../config.js';
-import { User } from '../models.js';
+import { User, AuditLog } from '../models.js';
+import { auditRequests } from '../services/audit.js';
 import { requireAuth, hashPassword, checkPassword, publicUser } from '../auth.js';
 import { AppError, assert } from '../errors.js';
 import { requireCsrf } from '../middleware/security.js';
@@ -33,6 +34,15 @@ export function createAuthRouter() {
     );
     const user = await User.findOne({ where: { username: username.trim() } });
     if (!user?.active || !(await checkPassword(password, user.passwordHash))) {
+      if (user)
+        await AuditLog.create({
+          userId: user.id,
+          action: 'login_failed',
+          details: {
+            actor: { id: user.id, username: user.username, displayName: user.displayName },
+            status: 401,
+          },
+        });
       throw new AppError(401, '账号或密码错误，或账号已停用');
     }
 
@@ -45,6 +55,14 @@ export function createAuthRouter() {
       csrfToken: randomBytes(32).toString('hex'),
     });
     await saveSession(req.session);
+    await AuditLog.create({
+      userId: user.id,
+      action: 'login',
+      details: {
+        actor: { id: user.id, username: user.username, displayName: user.displayName },
+        status: 200,
+      },
+    });
     res.json({
       user: publicUser(user),
       csrfToken: req.session.csrfToken,
@@ -53,6 +71,7 @@ export function createAuthRouter() {
   });
 
   router.use(requireAuth, requireCsrf);
+  router.use(auditRequests);
   router.get('/me', (req, res) =>
     res.json({
       user: publicUser(req.user),

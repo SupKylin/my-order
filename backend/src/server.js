@@ -5,6 +5,7 @@ import { ensureStorage } from './services/storage.js';
 import { createApp } from './app.js';
 import { startWalmartScheduler } from './services/walmart/sync.js';
 import { startThumbnailWarmer } from './services/thumbnail-warmer.js';
+import { startAuditCleanup } from './services/audit.js';
 try {
   if (config.secret.length < 32) throw new Error('请先配置 .env 中的 SESSION_SECRET');
   await db.authenticate();
@@ -25,11 +26,13 @@ try {
   cleanup.unref();
   const stopWalmart = startWalmartScheduler();
   const stopThumbnails = startThumbnailWarmer();
+  const stopAudit = startAuditCleanup();
   const stop = () =>
     server.close(async () => {
       clearInterval(cleanup);
       await stopWalmart();
       await stopThumbnails();
+      await stopAudit();
       await db.close();
       process.exit(0);
     });

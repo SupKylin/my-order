@@ -12,6 +12,8 @@ const props = defineProps({
   kind: { type: String, default: '' },
   description: { type: String, default: '' },
   placeholder: { type: String, default: '输入关键词' },
+  deletable: { type: Boolean, default: true },
+  extraFilters: { type: Array, default: () => [] },
 });
 const auth = useAuth();
 const meta = useMeta();
@@ -26,59 +28,60 @@ const loading = ref(false),
 const draft = reactive({ q: '', dates: [], active: '', role: '', status: '', enabled: '' });
 let applied = {},
   requestVersion = 0;
-const filters = computed(
-  () =>
-    ({
-      users: [
-        {
-          key: 'role',
-          label: '全部角色',
-          options: [
-            ['operations', '运营'],
-            ['purchasing', '采购'],
-            ['admin', '最高权限总账号'],
-          ],
-        },
-        {
-          key: 'active',
-          label: '全部启用状态',
-          options: [
-            ['true', '启用'],
-            ['false', '停用'],
-          ],
-        },
-      ],
-      stores: [
-        {
-          key: 'enabled',
-          label: '全部同步状态',
-          options: [
-            ['true', '同步已开启'],
-            ['false', '同步未开启'],
-          ],
-        },
-      ],
-      imports: [
-        {
-          key: 'status',
-          label: '全部导入状态',
-          options: [
-            ['preview', '仅预览'],
-            ['completed', '已导入'],
-          ],
-        },
-      ],
-      dictionaries: [
-        {
-          key: 'active',
-          label: '全部使用状态',
-          options: [
-            ['true', '启用'],
-            ['false', '停用'],
-          ],
-        },
-      ],
-    })[props.resource] || [],
+const filters = computed(() =>
+  props.extraFilters.length
+    ? props.extraFilters
+    : {
+        users: [
+          {
+            key: 'role',
+            label: '全部角色',
+            options: [
+              ['operations', '运营'],
+              ['purchasing', '采购'],
+              ['admin', '最高权限总账号'],
+            ],
+          },
+          {
+            key: 'active',
+            label: '全部启用状态',
+            options: [
+              ['true', '启用'],
+              ['false', '停用'],
+            ],
+          },
+        ],
+        stores: [
+          {
+            key: 'enabled',
+            label: '全部同步状态',
+            options: [
+              ['true', '同步已开启'],
+              ['false', '同步未开启'],
+            ],
+          },
+        ],
+        imports: [
+          {
+            key: 'status',
+            label: '全部导入状态',
+            options: [
+              ['preview', '仅预览'],
+              ['completed', '已导入'],
+            ],
+          },
+        ],
+        dictionaries: [
+          {
+            key: 'active',
+            label: '全部使用状态',
+            options: [
+              ['true', '启用'],
+              ['false', '停用'],
+            ],
+          },
+        ],
+      }[props.resource] || [],
 );
 
 async function refresh() {
@@ -87,14 +90,17 @@ async function refresh() {
   selected.value = [];
   table.value?.clearSelection();
   try {
-    const result = await api.get(`/management/${props.resource}`, {
-      params: {
-        ...applied,
-        kind: props.kind || undefined,
-        page: page.value,
-        pageSize: pageSize.value,
+    const result = await api.get(
+      props.resource === 'audit-logs' ? '/audit-logs' : `/management/${props.resource}`,
+      {
+        params: {
+          ...applied,
+          kind: props.kind || undefined,
+          page: page.value,
+          pageSize: pageSize.value,
+        },
       },
-    });
+    );
     if (version !== requestVersion) return;
     total.value = result.total;
     const lastPage = Math.max(1, Math.ceil(result.total / pageSize.value));
@@ -121,6 +127,7 @@ function query() {
 }
 function reset() {
   Object.assign(draft, { q: '', dates: [], active: '', role: '', status: '', enabled: '' });
+  for (const filter of props.extraFilters) draft[filter.key] = '';
   return query();
 }
 function resizePage() {
@@ -204,6 +211,7 @@ defineExpose({ refresh, total });
           >刷新</el-button
         >
         <el-button
+          v-if="deletable"
           type="danger"
           plain
           :icon="Delete"
@@ -243,8 +251,8 @@ defineExpose({ refresh, total });
         v-model="draft.dates"
         type="daterange"
         value-format="YYYY-MM-DD"
-        start-placeholder="创建开始日期"
-        end-placeholder="创建结束日期"
+        :start-placeholder="resource === 'audit-logs' ? '操作开始日期' : '创建开始日期'"
+        :end-placeholder="resource === 'audit-logs' ? '操作结束日期' : '创建结束日期'"
         range-separator="至"
         :unlink-panels="true"
       />
@@ -270,7 +278,13 @@ defineExpose({ refresh, total });
         row-key="id"
         @selection-change="selected = $event"
       >
-        <el-table-column type="selection" width="44" fixed="left" :selectable="selectable" />
+        <el-table-column
+          v-if="deletable"
+          type="selection"
+          width="44"
+          fixed="left"
+          :selectable="selectable"
+        />
         <slot />
         <template #empty><el-empty description="暂无符合条件的数据" :image-size="70" /></template>
       </el-table>

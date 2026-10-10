@@ -24,7 +24,7 @@ api.interceptors.response.use(
         details ||
           body?.message ||
           (error.code === 'ECONNABORTED'
-            ? '处理超时，请稍后检查导入记录，避免重复操作'
+            ? '处理超时，请稍后在操作日志中检查导入结果，避免重复操作'
             : '请求失败，请检查后端是否启动'),
       );
     if (error.response?.status === 401 && !error.config?.url?.includes('/auth/login'))

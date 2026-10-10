@@ -1,45 +1,19 @@
 <script setup>
 import ManagementList from '../components/ManagementList.vue';
 import { ref, onMounted, defineAsyncComponent } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
 import { importApi } from '../api/imports';
 import { fmtDate } from '../utils/format';
 import { useMeta } from '../stores/meta';
-import { useAuth } from '../stores/auth';
 const list = ref(null);
 const SkippedImportRows = defineAsyncComponent(
   () => import('../components/imports/SkippedImportRows.vue'),
 );
 const details = ref(null),
-  show = ref(false),
-  committing = ref(false),
-  auth = useAuth();
-async function load() {
-  await list.value?.refresh();
-}
+  show = ref(false);
 async function view(row) {
   details.value = await importApi.get(row.id);
   details.value.createdBy = row.createdBy;
   show.value = true;
-}
-async function commit() {
-  try {
-    await ElMessageBox.confirm(
-      '确认提交该预览？如果预览后商品发生变化，系统会要求重新预览。',
-      '确认导入',
-    );
-    committing.value = true;
-    // 历史订单导入仅供查看；采购预览使用采购入口提交。
-    if (details.value.importKind !== 'purchase') return;
-    const result = await importApi.commitPurchases(details.value.id);
-    ElMessage.success(`已更新 ${result.updated} 行，跳过 ${result.skipped} 行`);
-    const createdBy = details.value.createdBy;
-    details.value = { ...(await importApi.get(result.id)), createdBy };
-    await load();
-  } catch {
-  } finally {
-    committing.value = false;
-  }
 }
 onMounted(async () => {
   await useMeta().load();
@@ -49,9 +23,10 @@ onMounted(async () => {
   <ManagementList
     ref="list"
     resource="imports"
-    title="导入记录"
+    title="导入结果"
+    :deletable="false"
     placeholder="搜索导入文件名"
-    description="可分页查看全部历史；未提交的预览有效期为 2 小时。"
+    description="只读查看导入结果；普通账号仅查看自己的记录。提交请在导入采购页面完成。"
   >
     <el-table-column label="文件名" prop="filename" min-width="230" /><el-table-column
       label="状态"
@@ -102,20 +77,6 @@ onMounted(async () => {
         预览最多显示 100 条明细、200
         个错误；跳过清单可翻页查看全部。采购导入仅更新唯一匹配的已有明细。
       </p></template
-    ><template #footer
-      ><el-button @click="show = false">关闭</el-button
-      ><el-button
-        v-if="
-          details?.status === 'preview' &&
-          details?.importKind === 'purchase' &&
-          !details?.errorCount &&
-          details?.createdBy === auth.user?.id
-        "
-        type="primary"
-        :loading="committing"
-        @click="commit"
-        >确认提交</el-button
-      ></template
-    ></el-dialog
+    ><template #footer><el-button @click="show = false">关闭</el-button></template></el-dialog
   >
 </template>

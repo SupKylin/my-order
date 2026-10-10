@@ -5,7 +5,7 @@ import { deleteManagement } from '../services/management-delete.js';
 export function createManagementRouter() {
   const router = Router();
   router.get('/:resource', async (req, res) =>
-    res.json(await listManagement(req.params.resource, req.query)),
+    res.json(await listManagement(req.params.resource, req.query, req.user)),
   );
   router.post('/:resource/batch-delete', async (req, res) =>
     res.json(await deleteManagement(req.params.resource, req.body, req.user)),

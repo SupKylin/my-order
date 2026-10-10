@@ -128,8 +128,8 @@ test('导入历史超过100条可分页，按文件名和状态筛选', async ()
   assert.ok(page.rows.every((row) => row.filename === '采购结果.xlsx' && !('rows' in row)));
   assert.equal((await listManagement('imports', { status: 'completed' })).total, 1);
   const job = await ImportJob.findOne();
-  await remove('imports', [job]);
-  assert.equal(await ImportJob.count(), 104);
+  await assert.rejects(remove('imports', [job]), /不能删除/);
+  assert.equal(await ImportJob.count(), 105);
   assert.equal(await Upload.count(), 1);
 });
 
