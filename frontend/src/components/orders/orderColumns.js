@@ -25,15 +25,17 @@ const purchaseKeys = [
   'purchaseLimit',
   'priceFactor',
   'allocatable',
+  'reviewStatus',
   'unallocatableReason',
-  'supervisorConfirmed',
   'purchaseChannel',
+  'purchaseAssignedAt',
+  'supplierAssignmentStatus',
   'purchaseScreenshot',
   'trackingNumber',
   'trackingScreenshot1',
   'trackingScreenshot2',
 ];
-const labels = { purchaseStatus: '采购状态（刘贞填）', merchantName: '商家名' };
+const labels = { purchaseStatus: '采购状态', merchantName: '商家名' };
 const widths = {
   shopName: 125,
   orderNumber: 220,
@@ -55,6 +57,17 @@ export function orderColumns(fields) {
     group: 'purchase',
     type: 'datetime',
   });
+  byKey.set('purchaseAssignedAt', {
+    key: 'purchaseAssignedAt',
+    label: '采购分配时间',
+    group: 'purchase',
+    type: 'datetime',
+  });
+  for (const [key, label] of [
+    ['reviewStatus', '审核状态'],
+    ['supplierAssignmentStatus', '分配供应商状态'],
+  ])
+    byKey.set(key, { key, label, group: 'purchase', type: 'text' });
   // 组内指定字段优先，其余字段沿用元数据顺序，新增字段也能自动归组。
   const groupColumns = (group, keys) => {
     const prioritized = new Set(keys);

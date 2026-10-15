@@ -21,7 +21,19 @@ const warnings = computed(() =>
 );
 const shippingRowClass = ({ row }) =>
   warnings.value[row.id] ? `shipping-row-${warnings.value[row.id]}` : '';
-defineExpose({ clearSelection: () => table.value?.clearSelection() });
+defineExpose({
+  clearSelection: () => table.value?.clearSelection(),
+  syncSelection: () => {
+    // 回到已选页时采用最新行快照；变为 WFS 的记录不再参与批量操作。
+    const current = new Map(props.rows.map((row) => [row.id, row]));
+    const selected = (table.value?.getSelectionRows() || [])
+      .map((row) => current.get(row.id) || row)
+      .filter(canEditOrder);
+    table.value?.clearSelection();
+    for (const row of selected) table.value.toggleRowSelection(row, true);
+    emit('selection-change', table.value?.getSelectionRows() || []);
+  },
+});
 </script>
 <template>
   <el-table
@@ -34,7 +46,13 @@ defineExpose({ clearSelection: () => table.value?.clearSelection() });
     @selection-change="emit('selection-change', $event)"
     height="100%"
   >
-    <el-table-column type="selection" width="46" fixed :selectable="canEditOrder" />
+    <el-table-column
+      type="selection"
+      width="46"
+      fixed
+      :selectable="canEditOrder"
+      reserve-selection
+    />
     <el-table-column type="expand" width="40" fixed
       ><template #default="{ row }"><ProductDetails :row="row" /></template
     ></el-table-column>

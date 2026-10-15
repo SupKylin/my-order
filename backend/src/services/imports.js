@@ -19,6 +19,7 @@ import { AppError, assert } from '../errors.js';
 import { IMPORT_MATCH_RULE, PURCHASE_MATCH_RULE } from '../lib/order-identity.js';
 import { matchImportRows, matchPurchaseRows } from '../lib/import-matching.js';
 import { fieldMap } from '../fields.js';
+import { purchaseFingerprint } from '../lib/order-concurrency.js';
 import { allowedStoreNames, NO_STORE_PERMISSION } from '../permissions.js';
 import {
   assertPurchaseImport,
@@ -148,7 +149,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
     ? await OrderItem.findAll({
         include: [
           { model: Order, as: 'order', where: { orderNumber: { [Op.in]: orderNumbers } } },
-          { model: Purchase, as: 'purchase', attributes: ['purchaseSku'], required: false },
+          { model: Purchase, as: 'purchase', required: false },
         ],
         attributes: ['id', 'walmartSku', 'shopName', 'version', 'fulfillmentParty'],
         ...(allowed ? { where: { shopName: [...allowed] } } : {}),
@@ -166,6 +167,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
   const existingRows = existing.map((item) => ({
     id: item.id,
     version: item.version,
+    purchaseFingerprint: purchaseFingerprint(item.purchase),
     orderNumber: item.order.orderNumber,
     walmartSku: item.walmartSku,
     shopName: item.shopName,
@@ -189,6 +191,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
     row.action = old ? 'update' : kind === 'purchase' ? 'missing' : 'create';
     row.expectedId = old?.id || null;
     row.expectedVersion = old?.version || null;
+    if (kind === 'purchase' && old) row.expectedPurchaseFingerprint = old.purchaseFingerprint;
     if (row.action === 'missing') row.skipReason = purchaseMatches[index].reason;
     if (old && isWfsOrder(old)) {
       row.action = 'missing';
@@ -275,6 +278,12 @@ export async function commitImport(id, user, kind = 'legacy') {
       409,
     );
     assert(!job.errors.length, '存在错误行，请修正 Excel 后重新预览');
+    // 不能按已停用字段的旧预览提交，重新预览会保留源列并解除该映射。
+    assert(
+      !job.rows.some((row) => Object.hasOwn(row.patch || {}, 'supervisorConfirmed')),
+      '主管确认字段已停用，请重新预览后导入',
+      409,
+    );
     assert(
       Date.now() - new Date(job.createdAt).getTime() < 2 * 60 * 60 * 1000,
       '预览已超过 2 小时，请重新生成',
@@ -312,9 +321,7 @@ export async function commitImport(id, user, kind = 'legacy') {
       // 同订单只读取一次锁定快照，本批新增不能改变后续行的目标。
       const items = await OrderItem.findAll({
         where: { orderId: order.id },
-        include: [
-          { model: Purchase, as: 'purchase', attributes: ['purchaseSku'], required: false },
-        ],
+        include: [{ model: Purchase, as: 'purchase', required: false }],
         order: [['id', 'ASC']],
         transaction: t,
         lock: t.LOCK.UPDATE,
@@ -344,7 +351,12 @@ export async function commitImport(id, user, kind = 'legacy') {
         row.skipReason = WFS_READ_ONLY_REASON;
         continue;
       }
-      if ((item?.id || null) !== row.expectedId || (item?.version || null) !== row.expectedVersion)
+      // 新预览核对采购快照，平台同步不构成采购冲突；旧预览继续严格校验版本。
+      const changed =
+        kind === 'purchase' && row.expectedPurchaseFingerprint
+          ? purchaseFingerprint(item?.purchase) !== row.expectedPurchaseFingerprint
+          : (item?.version || null) !== row.expectedVersion;
+      if ((item?.id || null) !== row.expectedId || changed)
         throw new AppError(
           409,
           `第 ${row.rowNumber} 行对应商品在预览后发生变化，请重新预览，避免覆盖他人修改`,

@@ -17,6 +17,7 @@ import { ElMessage } from 'element-plus';
 import { useOrders } from '../composables/useOrders';
 import { orderApi } from '../api/orders';
 import OrderTable from '../components/orders/OrderTable.vue';
+import PurchaseAssignmentSummary from '../components/orders/PurchaseAssignmentSummary.vue';
 import { canEditOrder } from '../utils/orderWritePolicy';
 import { useOrderTablePreferences } from '../composables/useOrderTablePreferences';
 import { orderColumns } from '../components/orders/orderColumns';
@@ -45,14 +46,19 @@ const {
   assignBusy,
   stats,
   shippingCounts,
+  assignmentSummary,
   warningNow,
   filters,
+  appliedFilters,
   dates,
   shipDates,
+  purchaseAssignedDates,
   table,
   load,
   refresh,
   search,
+  changePageSize,
+  changePage,
   reset,
   edit,
   openAssign,
@@ -79,17 +85,23 @@ const activeAdvancedFilters = computed(
       'orderStatus',
       'platformOrderStatus',
       'fulfillmentParty',
+      'shippingMode',
+      'purchasePlatforms',
       'allocatable',
-      'supervisorConfirmed',
+      'reviewStatus',
+      'supplierAssignmentStatus',
       'afterSales',
       'settlement',
       'startDate',
       'endDate',
       'shipStartDate',
       'shipEndDate',
+      'purchaseAssignedStartTime',
+      'purchaseAssignedEndTime',
       'minPrice',
       'maxPrice',
-    ].filter((key) => filters[key] !== '').length,
+    ].filter((key) => (Array.isArray(filters[key]) ? filters[key].length > 0 : filters[key] !== ''))
+      .length,
 );
 const allColumns = computed(() => orderColumns(meta.fields));
 const {
@@ -153,7 +165,7 @@ async function exportOrderRows(purchaseTemplate = false) {
   };
   timer = setTimeout(poll, 700);
   try {
-    const file = await orderApi.export({ ...filters }, purchaseTemplate, exportId);
+    const file = await orderApi.export({ ...appliedFilters.value }, purchaseTemplate, exportId);
     const url = URL.createObjectURL(file);
     const link = document.createElement('a');
     const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
@@ -314,7 +326,6 @@ async function submitStatus() {
             clearable
             placeholder="搜索订单号、WalmartSku、采购Sku、商品或物流单号"
             class="search-input"
-            @keyup.enter="search"
           /><el-button :icon="Search" @click="openBatchOrderDialog"
             >批量订单号{{ batchOrderCount ? ` (${batchOrderCount})` : '' }}</el-button
           ><el-select
@@ -347,22 +358,70 @@ async function submitStatus() {
         </div>
         <div v-show="advancedFiltersOpen" class="filter-bar filter-secondary">
           <el-select
+            v-model="filters.purchasePlatforms"
+            placeholder="采购平台"
+            aria-label="采购平台筛选"
+            multiple
+            clearable
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+          >
+            <el-option
+              v-for="option in meta.fieldMap.purchasePlatform?.options"
+              :key="option"
+              :label="option"
+              :value="option"
+            />
+          </el-select>
+          <el-select
+            v-model="filters.reviewStatus"
+            placeholder="审核状态"
+            aria-label="审核状态筛选"
+            clearable
+          >
+            <el-option label="已审核" value="已审核" />
+            <el-option label="未审核" value="empty" />
+            <el-option label="不可分配" value="不可分配" />
+          </el-select>
+          <el-select
+            v-model="filters.supplierAssignmentStatus"
+            placeholder="分配供应商状态"
+            aria-label="分配供应商状态筛选"
+            clearable
+          >
+            <el-option label="已分配" value="已分配" />
+            <el-option label="未分配" value="empty" />
+            <el-option label="不可分配" value="不可分配" />
+          </el-select>
+          <el-select
             v-model="filters.fulfillmentParty"
             placeholder="履约方"
             aria-label="履约方筛选"
             clearable
-            @change="search"
           >
             <el-option label="WFS" value="WFS" />
             <el-option label="卖家履约（SellerFulfilled）" value="SellerFulfilled" />
             <el-option label="第三方履约（3PLFulfilled）" value="3PLFulfilled" />
           </el-select>
           <el-select
+            v-model="filters.shippingMode"
+            placeholder="发货模式"
+            aria-label="发货模式筛选"
+            clearable
+          >
+            <el-option
+              v-for="option in meta.fieldMap.shippingMode?.options"
+              :key="option"
+              :label="option"
+              :value="option"
+            />
+          </el-select>
+          <el-select
             v-model="filters.trackingWarning"
             placeholder="未出跟踪号"
             aria-label="未出跟踪号筛选"
             clearable
-            @change="search"
           >
             <el-option label="未出跟踪号（全部）" value="all" />
             <el-option label="待填单号（不足24小时）" value="waiting" />
@@ -375,7 +434,6 @@ async function submitStatus() {
             aria-label="发货预警筛选"
             class="shipping-warning-filter"
             clearable
-            @change="search"
           >
             <el-option label="24小时内发货（橙色）" value="orange" />
             <el-option label="已逾期（红色）" value="red" />
@@ -385,7 +443,6 @@ async function submitStatus() {
             placeholder="价格系数等级"
             aria-label="价格系数等级"
             clearable
-            @change="search"
           >
             <el-option label="低（< 0.8）" value="low" />
             <el-option label="平（0.8 ≤ 系数 < 0.85）" value="medium" />
@@ -405,26 +462,12 @@ async function submitStatus() {
             placeholder="平台订单状态"
             aria-label="平台订单状态筛选"
             clearable
-            @change="search"
           >
             <el-option
               v-for="status in ['待确认', '已确认', '已发货', '已取消', '已送达']"
               :key="status"
               :label="status"
               :value="status"
-            />
-          </el-select>
-          <el-select
-            v-model="filters.supervisorConfirmed"
-            placeholder="主管确认"
-            aria-label="主管确认筛选"
-            clearable
-          >
-            <el-option
-              v-for="option in meta.fieldMap.supervisorConfirmed?.options"
-              :key="option"
-              :label="option"
-              :value="option"
             />
           </el-select>
           <el-select v-model="filters.orderStatus" placeholder="运营订单状态" clearable
@@ -458,6 +501,16 @@ async function submitStatus() {
             end-placeholder="平台发货结束日期"
             range-separator="至"
           />
+          <el-date-picker
+            v-model="purchaseAssignedDates"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            start-placeholder="采购分配开始日期"
+            end-placeholder="采购分配结束日期"
+            range-separator="至"
+            aria-label="采购分配日期区间（北京时间）"
+            clearable
+          />
         </div>
         <div v-show="advancedFiltersOpen" class="filter-bar filter-price">
           <el-select v-model="filters.priceType" aria-label="价格类型">
@@ -472,7 +525,6 @@ async function submitStatus() {
               inputmode="decimal"
               clearable
               placeholder="最低价格"
-              @keyup.enter="search"
             />
             <span class="price-range-separator">至</span>
             <el-input
@@ -481,27 +533,20 @@ async function submitStatus() {
               inputmode="decimal"
               clearable
               placeholder="最高价格"
-              @keyup.enter="search"
             />
           </div>
         </div>
         <div class="filter-actions">
           <el-button type="primary" plain :icon="Search" @click="search">查询</el-button>
           <el-button text @click="reset">重置</el-button>
-          <el-button
-            text
-            type="primary"
-            @click="
-              filters.storeOwnerId = auth.user.id;
-              search();
-            "
+          <el-button text type="primary" @click="filters.storeOwnerId = auth.user.id"
             >只看我的店铺</el-button
           >
         </div>
       </div>
       <div v-if="selected.length" class="selection-bar">
         <span
-          >已选中 <strong>{{ selected.length }}</strong> 条商品明细</span
+          >已跨页选中 <strong>{{ selected.length }}</strong> 条商品明细</span
         ><el-button type="primary" size="small" :icon="User" @click="openAssign()"
           >批量分配采购渠道</el-button
         ><el-button size="small" :icon="EditPen" @click="openStatusDialog"
@@ -524,15 +569,15 @@ async function submitStatus() {
         />
       </div>
       <div class="table-footer">
-        <span class="muted">订单来源：Walmart 官方接口 · 采购导入仅更新已有明细</span
-        ><el-pagination
+        <PurchaseAssignmentSummary :summary="assignmentSummary" :now="warningNow" />
+        <el-pagination
           v-model:current-page="filters.page"
           v-model:page-size="filters.pageSize"
           :total="total"
           :page-sizes="[20, 50, 100]"
           layout="total, sizes, prev, pager, next"
-          @current-change="load"
-          @size-change="search"
+          @current-change="changePage"
+          @size-change="changePageSize"
         />
       </div>
     </section>

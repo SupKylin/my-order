@@ -4,6 +4,16 @@ export const fmtDate = (value, time = false) => {
   if (!time) return String(value).slice(0, 10);
   return new Date(value).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' });
 };
+/** 自动时间戳先转北京时间再取日期，避免 UTC 跨日显示成前一天。 */
+export const fmtBeijingDate = (value) =>
+  value
+    ? new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date(value))
+    : '—';
 /** 保留实际小数精度，金额展示不经过浮点数或四舍五入。 */
 export const money = (value) => {
   if (value === null || value === undefined || value === '') return '—';

@@ -34,7 +34,10 @@ export async function templatePayload(input) {
       sheetName: '',
       mappings: Array.isArray(input.mappings)
         ? input.mappings.map((mapping) =>
-            mapping?.field === 'purchaseChannel' ? { ...mapping, field: '' } : mapping,
+            // 兼容旧模板：停用目标保留源表头，避免阻断其他采购字段导入。
+            ['purchaseChannel', 'supervisorConfirmed'].includes(mapping?.field)
+              ? { ...mapping, field: '' }
+              : mapping,
           )
         : input.mappings,
     }),

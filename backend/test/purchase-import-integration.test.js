@@ -194,7 +194,7 @@ test('采购 Excel 提交时记录成功时间，重复成功保留，重新采�
   const sheet = exported.worksheets[0];
   const column = sheet.getRow(1).values.indexOf('采购成功时间');
   assert.ok(column > 0);
-  assert.equal(sheet.getRow(2).getCell(column).value, '2026-10-10 09:02:03');
+  assert.equal(sheet.getRow(2).getCell(column).value, '2026-10-10');
 });
 
 test('混合有效、未匹配、歧义及空店铺行只更新唯一目标；完整反馈及重复提交不新增', async () => {
@@ -297,6 +297,8 @@ test('WFS 编辑和批量写入均拒绝，混合批次回滚；普通订单不�
     { kind: 'orderStatus', value: '测试状态' },
   ]);
   const normal = await createItem('WRITABLE');
+  // 普通订单须先审核可分配，才能验证后续 WFS 行导致整批回滚。
+  await Purchase.update({ allocatable: '是' }, { where: { itemId: normal.id } });
   const wfs = await createItem('READONLY');
   await wfs.update({ fulfillmentParty: 'WFSFulfilled' });
   const entries = [normal, wfs].map(({ id, version }) => ({ id, version }));

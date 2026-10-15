@@ -5,13 +5,15 @@ import FieldInput from './FieldInput.vue';
 import { useMeta } from '../stores/meta';
 import { orderApi } from '../api/orders';
 import { canEditOrder } from '../utils/orderWritePolicy';
-import { fmtDate } from '../utils/format';
+import { fmtBeijingDate } from '../utils/format';
 const platformReadOnly = (field) =>
   field.group === 'product' || ['orderNumber', 'shopName', 'fulfillmentParty'].includes(field.key);
 const props = defineProps({ modelValue: Boolean, item: Object });
 const emit = defineEmits(['update:modelValue', 'saved']);
 const meta = useMeta(),
   form = reactive({}),
+  original = ref({}),
+  conflictMessage = ref(''),
   busy = ref(false),
   openGroups = ref(['order', 'purchase']);
 const visible = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) });
@@ -26,30 +28,50 @@ watch(
     if (!show) return;
     await meta.load();
     openGroups.value = ['order', 'purchase'];
+    conflictMessage.value = '';
     for (const f of meta.fields) {
       let value = props.item?.[f.key] ?? null;
       if (f.type === 'datetime' && value)
         value = new Date(value).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });
       form[f.key] = value;
     }
+    original.value = JSON.parse(JSON.stringify(form));
   },
   { immediate: true },
 );
-/** 仅提交可编辑字段；用户主动清空的 null 必须保留，商品字段由官方同步维护。 */
+/** 只提交用户实际修改的字段及其原值，避免旧表单覆盖后台同步或他人的无关修改。 */
 async function save() {
   if (!canEditOrder(props.item)) return ElMessage.warning('WFS 订单只读，不能修改');
   busy.value = true;
   try {
     const fields = Object.fromEntries(
       meta.fields
-        .filter((field) => field.group !== 'product')
+        .filter((field) => !platformReadOnly(field))
+        .filter(
+          (field) => JSON.stringify(form[field.key]) !== JSON.stringify(original.value[field.key]),
+        )
         .map((field) => [field.key, form[field.key]]),
     );
-    if (props.item?.id) await orderApi.update(props.item.id, fields, props.item.version);
+    if (!Object.keys(fields).length) {
+      ElMessage.info('没有需要保存的修改');
+      return;
+    }
+    const baseFields = Object.fromEntries(
+      Object.keys(fields).map((key) => [key, original.value[key]]),
+    );
+    if (props.item?.id)
+      await orderApi.update(props.item.id, fields, props.item.version, baseFields);
     else await orderApi.create(fields);
     ElMessage.success('商品明细已保存');
     emit('saved');
     visible.value = false;
+  } catch (error) {
+    if (error.response?.status === 409) {
+      const details = error.response.data.details;
+      conflictMessage.value = details?.length
+        ? `以下字段已发生变化：${details.map((entry) => entry.label || entry.field).join('、')}。本次填写内容已保留，请核对最新数据后再修改。`
+        : `${error.response.data.message}。本次填写内容已保留。`;
+    }
   } finally {
     busy.value = false;
   }
@@ -69,6 +91,13 @@ async function save() {
       }}</span>
     </div>
     <el-alert
+      v-if="conflictMessage"
+      :title="conflictMessage"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
+    <el-alert
       v-if="item?.addressRisk"
       title="风险地址订单"
       :description="item.addressRiskNote || '收件地址与风险地址库匹配，请核对后采购。'"
@@ -87,7 +116,7 @@ async function save() {
           >
           <div class="form-grid">
             <el-form-item v-if="section.key === 'purchase'" label="采购成功时间（北京时间）">
-              <span>{{ fmtDate(item?.purchaseConfirmedAt, true) }}</span>
+              <span>{{ fmtBeijingDate(item?.purchaseConfirmedAt) }}</span>
             </el-form-item>
             <el-form-item
               v-for="field in meta.fields.filter((f) => f.group === section.key)"
@@ -106,8 +135,18 @@ async function save() {
                 />
                 <span v-else style="overflow-wrap: anywhere">{{ form[field.key] ?? '—' }}</span>
               </template>
-              <FieldInput v-else :field="field" v-model="form[field.key]"
-            /></el-form-item></div></el-collapse-item></el-collapse></el-form
+              <template v-else-if="field.key === 'purchaseChannel' && form.allocatable !== '是'">
+                <span>{{ form.purchaseChannel?.join(' / ') || '未分配' }}</span>
+                <el-button
+                  v-if="form.purchaseChannel?.length"
+                  text
+                  @click="form.purchaseChannel = null"
+                  >清空渠道</el-button
+                >
+                <span class="muted">请先将是否可分配设置为“是”后选择渠道</span>
+              </template>
+              <FieldInput v-else :field="field" v-model="form[field.key]" />
+            </el-form-item></div></el-collapse-item></el-collapse></el-form
     ><template #footer
       ><span class="muted drawer-tip">页面内清空字段并保存，会主动清除该字段。</span
       ><el-button @click="visible = false">取消</el-button

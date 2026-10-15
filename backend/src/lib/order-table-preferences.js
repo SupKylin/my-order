@@ -6,6 +6,9 @@ const columnKeys = new Set([
     .filter((field) => ['order', 'purchase'].includes(field.group))
     .map((field) => field.key),
   'purchaseConfirmedAt',
+  'purchaseAssignedAt',
+  'reviewStatus',
+  'supplierAssignmentStatus',
   'storeOwner',
 ]);
 const fixedKeys = ['shopName', 'orderNumber'];

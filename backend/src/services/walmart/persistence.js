@@ -59,7 +59,9 @@ export async function persistOrder(store, order, catalog, actor) {
         );
         // 保留历史人工图片；新记录及已有官方图片仍由 Walmart 同步维护。
         if (target?.productImage?.startsWith('/uploads/images/')) delete entry.fields.productImage;
-        const saved = await upsertImported(entry.fields, transaction, actor, target);
+        const saved = await upsertImported(entry.fields, transaction, actor, target, {
+          walmartSync: true,
+        });
         const item = await OrderItem.findByPk(saved.id, { transaction });
         const snapshot = entry.walmart;
         // 商品接口临时失败不清空已验证的变体属性，保留抓取时间和失败提示。

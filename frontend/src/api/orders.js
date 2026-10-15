@@ -10,7 +10,11 @@ const queryFilters = (filters) => ({
 export const orderApi = {
   list: (filters) =>
     api.get('/orders', {
-      params: { ...queryFilters(filters), shopNames: JSON.stringify(filters.shopNames || []) },
+      params: {
+        ...queryFilters(filters),
+        shopNames: JSON.stringify(filters.shopNames || []),
+        purchasePlatforms: JSON.stringify(filters.purchasePlatforms || []),
+      },
     }),
   exportProgress: (id) => api.get(`/orders/export-progress/${id}`, { silent: true, timeout: 5000 }),
   export: (filters, purchaseTemplate = false, exportId) =>
@@ -25,7 +29,8 @@ export const orderApi = {
     ),
   dashboard: () => api.get('/dashboard'),
   create: (fields) => api.post('/orders', { fields }),
-  update: (id, fields, version) => api.put(`/orders/${id}`, { fields, version }),
+  update: (id, fields, version, baseFields) =>
+    api.put(`/orders/${id}`, { fields, version, ...(baseFields ? { baseFields } : {}) }),
   remove: (id, version) => api.delete(`/orders/${id}`, { data: { version } }),
   removeMany: (items) => api.post('/orders/batch-delete', { items }),
   updateStatus: (items, orderStatus) => api.post('/orders/batch-status', { items, orderStatus }),

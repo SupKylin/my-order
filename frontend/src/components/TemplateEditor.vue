@@ -34,7 +34,7 @@ watch(
         : { name: '', sheetName: '', headerRow: 1, mappings: [] },
     );
     form.sheetName = '';
-    form.mappings = withoutChannel(form.mappings);
+    form.mappings = withoutDisabledTargets(form.mappings);
     if (props.template)
       info.value = {
         columns: form.mappings.map((m) => ({ ...m, samples: [] })),
@@ -46,9 +46,12 @@ watch(
 const mappingFields = computed(() =>
   meta.fields.filter((field) => field.key !== 'purchaseChannel'),
 );
-function withoutChannel(mappings) {
+// 保留旧模板源表头，但不再提供已停用字段的映射目标。
+function withoutDisabledTargets(mappings) {
   return mappings.map((mapping) =>
-    mapping.field === 'purchaseChannel' ? { ...mapping, field: '' } : mapping,
+    ['purchaseChannel', 'supervisorConfirmed'].includes(mapping.field)
+      ? { ...mapping, field: '' }
+      : mapping,
   );
 }
 async function upload(options) {
@@ -59,7 +62,7 @@ async function upload(options) {
     info.value = result;
     form.sheetName = result.sheetName;
     form.headerRow = 1;
-    if (!props.template) form.mappings = withoutChannel(suggestedMappings(result.columns));
+    if (!props.template) form.mappings = withoutDisabledTargets(suggestedMappings(result.columns));
     else form.mappings = alignMappings(form.mappings, result.columns).mappings;
     options.onSuccess(result);
   } catch (e) {
@@ -73,7 +76,7 @@ async function inspect() {
   busy.value = true;
   try {
     info.value = await uploadApi.inspect(uploadId.value, form.sheetName, form.headerRow);
-    form.mappings = withoutChannel(suggestedMappings(info.value.columns));
+    form.mappings = withoutDisabledTargets(suggestedMappings(info.value.columns));
   } finally {
     busy.value = false;
   }

@@ -1056,7 +1056,7 @@ test('20 位小数在手工保存、Excel 导入和显示中保持精度，超�
   for (const field of decimalFields) assert.equal(imported[field.key], exact);
 });
 
-test('采购渠道多选与斜杠导入、历史单选兼容及主管确认新增选项', async () => {
+test('采购渠道多选与斜杠导入、历史单选兼容', async () => {
   const number = `${prefix}-MULTICHANNEL`;
   orderNumbers.push(number);
   const legacyCombined = 'Ebay-2（0902）/恩恩采购表（eBay）';
@@ -1077,9 +1077,9 @@ test('采购渠道多选与斜杠导入、历史单选兼容及主管确认新�
   assert.deepEqual(validatePatch({ purchaseChannel: [] }).purchaseChannel, null);
   assert.throws(() => validatePatch({ purchaseChannel: '新店铺/不存在的渠道' }));
   const p = await previewRows(
-    ['订单号', 'SKU', '采购渠道', '主管确认'],
-    [[number, 'MULTI', ` ${selected.join(' / ')} / ${selected[0]} `, '已确认']],
-    ['orderNumber', 'sku', 'purchaseChannel', 'supervisorConfirmed'],
+    ['订单号', 'SKU', '采购渠道'],
+    [[number, 'MULTI', ` ${selected.join(' / ')} / ${selected[0]} `]],
+    ['orderNumber', 'sku', 'purchaseChannel'],
   );
   assert.equal(p.status, 200, JSON.stringify(p.data));
   assert.equal(p.data.errorCount, 0, JSON.stringify(p.data.errors));
@@ -1087,7 +1087,6 @@ test('采购渠道多选与斜杠导入、历史单选兼容及主管确认新�
   assert.equal((await request(`/api/imports/${p.data.id}/commit`, 'POST')).status, 200);
   const row = (await request('/api/orders?q=' + number)).data.rows[0];
   assert.deepEqual(row.purchaseChannel, selected);
-  assert.equal(row.supervisorConfirmed, '已确认');
   const filtered = await request(
     '/api/orders?q=' + number + '&purchaseChannel=' + encodeURIComponent(combined),
   );
@@ -1099,12 +1098,10 @@ test('采购渠道多选与斜杠导入、历史单选兼容及主管确认新�
       orderNumber: number,
       sku: 'MULTI',
       purchaseChannel: [combined, selected[0]],
-      supervisorConfirmed: '不可分配',
     },
   });
   assert.equal(edited.status, 200, JSON.stringify(edited.data));
   assert.deepEqual(edited.data.purchaseChannel, [combined, selected[0]]);
-  assert.equal(edited.data.supervisorConfirmed, '不可分配');
   // 模拟升级前的原始字符串存储，确认读取和筛选不破坏历史值。
   await db.query('UPDATE purchases SET purchaseChannel = :channel WHERE itemId = :itemId', {
     replacements: { channel: combined, itemId: row.id },

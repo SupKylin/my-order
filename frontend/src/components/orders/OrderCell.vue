@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { useMeta } from '../../stores/meta';
-import { fmtDate, money } from '../../utils/format';
+import { fmtDate, fmtBeijingDate, money } from '../../utils/format';
 import { CHINA_UTC_OFFSET } from '../../utils/businessTime';
 import { shippingRemainingHours, shippingWarningLabels } from '../../utils/shippingWarning';
 import { purchaseWarning, confirmationTime } from '../../utils/purchaseWarning';
@@ -88,12 +88,20 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
     >
     <span v-else class="muted">未绑定</span>
   </template>
+  <template v-else-if="['reviewStatus', 'supplierAssignmentStatus'].includes(field.key)">
+    <el-tag :type="value === '不可分配' ? 'danger' : value ? 'success' : 'info'" size="small">
+      {{ value || (field.key === 'reviewStatus' ? '未审核' : '未分配') }}
+    </el-tag>
+  </template>
   <template v-else-if="field.key === 'allocatable'">
     <el-tag v-if="value" :type="value === '是' ? 'success' : 'danger'" size="small">{{
       value
     }}</el-tag>
     <span v-else class="muted">—</span>
   </template>
+  <span v-else-if="['purchaseConfirmedAt', 'purchaseAssignedAt'].includes(field.key)">{{
+    fmtBeijingDate(value)
+  }}</span>
   <span v-else-if="field.type === 'date' || field.type === 'datetime'">{{
     fmtDate(value, field.type === 'datetime')
   }}</span>

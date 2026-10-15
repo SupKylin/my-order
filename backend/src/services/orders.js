@@ -10,6 +10,9 @@ import { priceFactorPatterns } from '../lib/price-factor.js';
 import { shippingWindow } from '../lib/shipping-window.js';
 import { assertOrderEditable } from '../lib/order-write-policy.js';
 import { orderScope, assertItemAccess } from '../permissions.js';
+import { procurementStatePatch } from '../lib/procurement-state.js';
+import { sameFieldValue } from '../lib/order-concurrency.js';
+import { purchaseAssignmentSummary } from './purchase-assignment-summary.js';
 import {
   purchaseTimerPatch,
   PURCHASE_SUCCESS_PATTERN,
@@ -53,7 +56,7 @@ export function splitPatch(patch) {
   return { item, purchase };
 }
 /** target 为预览锁定的明细，null 表示新增；未传时保留人工新增的重复检查。 */
-export async function upsertImported(patch, transaction, actor, target = undefined) {
+export async function upsertImported(patch, transaction, actor, target = undefined, options = {}) {
   const [order] = await Order.findOrCreate({
     where: { orderNumber: patch.orderNumber },
     transaction,
@@ -79,16 +82,22 @@ export async function upsertImported(patch, transaction, actor, target = undefin
       orderIdentityKey: orderIdentityKey({ ...existing.toJSON(), ...parts.item }),
       ...(Object.hasOwn(patch, 'purchaseChannel') ? { purchaseChannelKey } : {}),
     };
-    await existing.update(
-      { ...parts.item, ...identity, version: existing.version + 1 },
-      { transaction },
+    const itemPatch = { ...parts.item, ...identity };
+    const changed = Object.entries(itemPatch).some(
+      ([key, value]) => !sameFieldValue(key, existing[key], value),
     );
+    // 官方重复拉取相同业务值时不增加版本；有实际变化仍保护旧客户端。
+    if (!options.walmartSync || changed)
+      await existing.update({ ...itemPatch, version: existing.version + 1 }, { transaction });
     const procurement = await Purchase.findOne({
       where: { itemId: existing.id },
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
-    const purchasePatch = purchaseTimerPatch(procurement, parts.purchase);
+    const purchasePatch = procurementStatePatch(
+      procurement,
+      purchaseTimerPatch(procurement, parts.purchase),
+    );
     if (procurement) await procurement.update(purchasePatch, { transaction });
     else await Purchase.create({ itemId: existing.id, ...purchasePatch }, { transaction });
     return { created: false, id: existing.id };
@@ -101,7 +110,7 @@ export async function upsertImported(patch, transaction, actor, target = undefin
   await Purchase.create(
     {
       itemId: item.id,
-      ...purchaseTimerPatch(null, parts.purchase),
+      ...procurementStatePatch(null, purchaseTimerPatch(null, parts.purchase)),
       assignedTo: actor.id,
       assignedAt: new Date(),
     },
@@ -155,16 +164,38 @@ export function buildFilters(query, now = Date.now(), user) {
       sqlWhere(fn('UPPER', fn('TRIM', col('OrderItem.fulfillmentParty'))), { [Op.in]: values }),
     ];
   }
-  for (const key of [
-    'purchaseStatus',
-    'settlement',
-    'allocatable',
-    'afterSales',
-    'supervisorConfirmed',
-  ])
+  for (const key of ['purchaseStatus', 'settlement', 'allocatable', 'afterSales', 'shippingMode'])
     if (query[key]) purchaseWhere[key] = String(query[key]);
+  // GET 使用 JSON 数组，导出 POST 使用原数组；多个平台按“任一匹配”查询。
+  if (query.purchasePlatforms) {
+    let platforms = query.purchasePlatforms;
+    if (typeof platforms === 'string') {
+      try {
+        platforms = JSON.parse(platforms);
+      } catch {
+        throw new AppError(400, '采购平台筛选格式无效');
+      }
+    }
+    assert(
+      Array.isArray(platforms) &&
+        platforms.length <= 200 &&
+        platforms.every(
+          (value) => typeof value === 'string' && value.trim() && value.length <= 255,
+        ),
+      '采购平台筛选格式无效',
+    );
+    if (platforms.length) purchaseWhere.purchasePlatform = { [Op.in]: [...new Set(platforms)] };
+  }
   // “未分配”是空值筛选入口，不向业务字段写入第三种状态。
   if (query.allocatable === 'empty') purchaseWhere.allocatable = { [Op.or]: [null, ''] };
+  for (const [key, options] of Object.entries({
+    reviewStatus: ['已审核', '不可分配'],
+    supplierAssignmentStatus: ['已分配', '不可分配'],
+  })) {
+    if (!query[key]) continue;
+    assert(query[key] === 'empty' || options.includes(query[key]), '审核或供应商分配状态筛选无效');
+    purchaseWhere[key] = query[key] === 'empty' ? { [Op.or]: [null, ''] } : query[key];
+  }
   if (query.purchaseChannelEmpty === 'true' || query.purchaseChannelEmpty === true) {
     // 同时兼容未填写、历史单选空文本，以及多选序列化后的空数组。
     purchaseWhere[Op.or] = [
@@ -242,6 +273,34 @@ export function buildFilters(query, now = Date.now(), user) {
     where.orderDate = {};
     if (query.startDate) where.orderDate[Op.gte] = query.startDate;
     if (query.endDate) where.orderDate[Op.lte] = query.endDate;
+  }
+  if (query.purchaseAssignedStartTime || query.purchaseAssignedEndTime) {
+    const range = {};
+    for (const [key, operator] of [
+      ['purchaseAssignedStartTime', Op.gte],
+      ['purchaseAssignedEndTime', Op.lte],
+    ]) {
+      if (!query[key]) continue;
+      try {
+        const value = query[key];
+        assert(
+          typeof value === 'string' &&
+            /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) &&
+            normalizeValue({ type: 'datetime' }, value) === value,
+          '时间格式无效',
+        );
+        // 输入与列表均为北京时间，结束秒包含该秒全部毫秒。
+        range[operator] = new Date(value.replace(' ', 'T') + '+08:00');
+        if (operator === Op.lte) range[operator].setMilliseconds(999);
+      } catch {
+        throw new AppError(400, '采购分配时间筛选格式无效，请使用北京时间 YYYY-MM-DD HH:mm:ss');
+      }
+    }
+    assert(
+      !range[Op.gte] || !range[Op.lte] || range[Op.gte] <= range[Op.lte],
+      '采购分配开始时间不能晚于结束时间',
+    );
+    purchaseWhere.purchaseAssignedAt = range;
   }
   if (query.shipStartDate || query.shipEndDate) {
     const dates = {};
@@ -345,6 +404,7 @@ export async function listOrders(query, user) {
   });
   return {
     serverNow: new Date().toISOString(),
+    purchaseAssignmentSummary: await purchaseAssignmentSummary(user, now),
     rows: result.rows.map(serializeItem),
     total: result.count,
     page,
@@ -363,7 +423,15 @@ export async function editItem(id, input, user) {
     assert(item, '记录不存在', 404);
     await assertItemAccess(item, user, t);
     assertOrderEditable(item);
-    if (item.version !== input.version)
+    const hasBase = Object.hasOwn(input, 'baseFields');
+    if (hasBase)
+      assert(
+        input.baseFields &&
+          typeof input.baseFields === 'object' &&
+          !Array.isArray(input.baseFields),
+        '原始字段快照格式错误',
+      );
+    if (!hasBase && item.version !== input.version)
       throw new AppError(409, '该商品已被其他人修改，请刷新后再编辑');
     const currentPurchase = await Purchase.findOne({ where: { itemId: item.id }, transaction: t });
     const definitions = await getFieldDefinitions(t);
@@ -377,10 +445,31 @@ export async function editItem(id, input, user) {
         : field;
     });
     const patch = validatePatch(input.fields, {
-      requireKeys: true,
+      requireKeys: !hasBase,
       fieldDefinitions: editableDefinitions,
     });
     const currentOrder = await Order.findByPk(item.orderId, { transaction: t });
+    if (hasBase) {
+      const conflicts = [];
+      for (const key of Object.keys(patch)) {
+        assert(Object.hasOwn(input.baseFields, key), `缺少字段原值：${key}`);
+        const field = definitions.find((entry) => entry.key === key);
+        const current =
+          key === 'orderNumber'
+            ? currentOrder.orderNumber
+            : field.group === 'purchase'
+              ? currentPurchase?.[key]
+              : item[key];
+        if (!sameFieldValue(key, current, input.baseFields[key]))
+          conflicts.push({
+            field: key,
+            label: field.label,
+            message: '已发生变化，请核对最新数据后再保存',
+          });
+      }
+      if (conflicts.length)
+        throw new AppError(409, '部分字段已发生变化，已保留本次填写内容', conflicts);
+    }
     // 禁止通过改订单身份或履约方绕过“官方来源”和 WFS 只读规则。
     for (const key of ['orderNumber', 'shopName', 'fulfillmentParty']) {
       if (!Object.hasOwn(patch, key)) continue;
@@ -396,7 +485,7 @@ export async function editItem(id, input, user) {
       delete patch[field.key];
     }
     const [order] = await Order.findOrCreate({
-      where: { orderNumber: patch.orderNumber },
+      where: { orderNumber: patch.orderNumber ?? currentOrder.orderNumber },
       transaction: t,
     });
     const parts = splitPatch(patch);
@@ -433,7 +522,10 @@ export async function editItem(id, input, user) {
       defaults: parts.purchase,
       transaction: t,
     });
-    await purchase.update(purchaseTimerPatch(currentPurchase, parts.purchase), { transaction: t });
+    await purchase.update(
+      procurementStatePatch(currentPurchase, purchaseTimerPatch(currentPurchase, parts.purchase)),
+      { transaction: t },
+    );
     await AuditLog.create(
       {
         userId: user.id,
@@ -483,10 +575,12 @@ export async function assignItems(input, user) {
       });
       assert(purchase, '采购记录不存在', 404);
       assert(
-        purchase.allocatable !== '否',
-        `商品 ${item.walmartSku || item.id} 标记为不可分配，请先修改可分配状态`,
+        purchase.allocatable === '是',
+        `商品 ${item.walmartSku || item.id} 尚未审核或不可分配，请先将是否可分配设置为“是”`,
       );
-      await purchase.update({ purchaseChannel }, { transaction: t });
+      await purchase.update(procurementStatePatch(purchase, { purchaseChannel }), {
+        transaction: t,
+      });
       await item.update(
         { purchaseChannelKey: channelKey(purchaseChannel), version: item.version + 1 },
         { transaction: t },

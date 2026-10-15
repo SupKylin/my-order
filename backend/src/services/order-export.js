@@ -13,6 +13,13 @@ const columns = [
   ...fields.flatMap(({ key, label }) => [
     { key, header: label },
     ...(key === 'purchaseStatus' ? [{ key: 'purchaseConfirmedAt', header: '采购成功时间' }] : []),
+    ...(key === 'allocatable' ? [{ key: 'reviewStatus', header: '审核状态' }] : []),
+    ...(key === 'purchaseChannel'
+      ? [
+          { key: 'purchaseAssignedAt', header: '采购分配时间' },
+          { key: 'supplierAssignmentStatus', header: '分配供应商状态' },
+        ]
+      : []),
   ]),
   { key: 'assigneeName', header: '采购人员' },
   { key: 'addressRisk', header: '风险地址标记' },
@@ -39,9 +46,18 @@ export function exportRow(item, selectedColumns = columns) {
   const row = serializeItem(item);
   return selectedColumns.map(({ key }) => {
     if (key === 'addressRisk') return row.addressRisk ? '风险地址' : '';
+    if (key === 'reviewStatus') return row.reviewStatus || '未审核';
+    if (key === 'supplierAssignmentStatus') return row.supplierAssignmentStatus || '未分配';
     const value =
       key === 'assigneeName' ? row.assignee?.displayName || row.assignee?.username : row[key];
     if (Array.isArray(value)) return value.join('、');
+    if (value && ['purchaseConfirmedAt', 'purchaseAssignedAt'].includes(key))
+      return new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date(value));
     if (value instanceof Date)
       return new Intl.DateTimeFormat('sv-SE', {
         timeZone: 'Asia/Shanghai',

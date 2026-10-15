@@ -31,7 +31,7 @@ const meta = useMeta();
             :value="channel"
             :label="channel" /></el-select></el-form-item></el-form
     ><el-alert
-      title="标记为“不可分配”的商品不能分配，请先调整状态。"
+      title="仅“是否可分配”为“是”的订单可以分配渠道；未审核或不可分配的订单请先调整状态。"
       type="info"
       :closable="false"
     /><template #footer

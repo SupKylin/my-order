@@ -64,9 +64,6 @@ export const fields = [
   f('purchaseLimit', '采购限价', 'purchase', 'money'),
   f('allocatable', '是否可分配', 'purchase', 'select', { options: ['是', '否'] }),
   f('unallocatableReason', '不可分配原因', 'purchase', 'textarea'),
-  f('supervisorConfirmed', '主管确认', 'purchase', 'select', {
-    options: ['是', '否', '已确认', '不可分配'],
-  }),
   f('priceFactor', '价格系数', 'purchase'),
   f('purchaseShipDate', '采购发货时间', 'purchase', 'datetime'),
   f('purchaseDeliveryDate', '采购到货时间', 'purchase', 'datetime'),
