@@ -6,7 +6,13 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', component: () => import('./views/Login.vue'), meta: { public: true } },
-    { path: '/', redirect: '/orders' },
+    { path: '/', redirect: '/home' },
+    { path: '/home', component: () => import('./views/Home.vue'), meta: { title: '首页' } },
+    {
+      path: '/store-summary',
+      component: () => import('./views/StoreSummary.vue'),
+      meta: { title: '店铺汇总' },
+    },
     {
       path: '/orders',
       component: () => import('./views/Orders.vue'),
@@ -68,14 +74,14 @@ const router = createRouter({
       component: () => import('./views/RiskAddresses.vue'),
       meta: { title: '风险地址维护', subtitle: '维护风险收件地址，完整地址匹配后自动标记订单。' },
     },
-    { path: '/:pathMatch(.*)*', redirect: '/orders' },
+    { path: '/:pathMatch(.*)*', redirect: '/home' },
   ],
 });
 router.beforeEach(async (to) => {
   const auth = useAuth();
   if (!auth.ready) await auth.restore();
   if (!to.meta.public && !auth.user) return { path: '/login', query: { redirect: to.fullPath } };
-  if (to.path === '/login' && auth.user) return '/orders';
+  if (to.path === '/login' && auth.user) return '/home';
   if (!to.meta.public && auth.user) await useMeta().load(true);
   if (!to.meta.public && auth.user && !canVisit(auth.user.role, to.path)) return '/orders';
 });

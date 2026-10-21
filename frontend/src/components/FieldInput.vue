@@ -4,7 +4,7 @@ import { Plus, Delete } from '@element-plus/icons-vue';
 import { uploadApi } from '../api/uploads';
 import { useMeta } from '../stores/meta';
 const props = defineProps({ field: Object, modelValue: [String, Number, Boolean, Date, Array] });
-const emit = defineEmits(['update:modelValue']);
+const emit = defineEmits(['update:modelValue', 'uploading']);
 const meta = useMeta(),
   busy = ref(false);
 // 手工清空要发出 null，后端才能区分“清空”与“未提供”。
@@ -21,7 +21,9 @@ const historicalOptions = computed(() =>
   multipleValue.value.filter((option) => !props.field.options.includes(option)),
 );
 async function upload(options) {
+  if (busy.value) return;
   busy.value = true;
+  emit('uploading', true);
   try {
     const result = await uploadApi.image(options.file);
     emit('update:modelValue', result.path);
@@ -30,6 +32,7 @@ async function upload(options) {
     options.onError(e);
   } finally {
     busy.value = false;
+    emit('uploading', false);
   }
 }
 </script>
@@ -85,6 +88,7 @@ async function upload(options) {
         circle
         size="small"
         aria-label="清除图片"
+        :disabled="busy"
         @click="value = null"
       />
     </div>

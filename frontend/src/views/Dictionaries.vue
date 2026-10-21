@@ -30,6 +30,7 @@ function edit(row) {
   dialog.value = true;
 }
 async function save() {
+  if (saving.value) return;
   if (!form.value.trim()) return ElMessage.warning('请输入选项名称');
   saving.value = true;
   try {
@@ -85,8 +86,10 @@ watch(
     :title="editing ? '编辑选项' : '新增选项'"
     width="480px"
     :close-on-click-modal="false"
+    :close-on-press-escape="!saving"
+    :show-close="!saving"
   >
-    <el-form label-position="top">
+    <el-form :disabled="saving" label-position="top">
       <el-form-item label="选项名称" required
         ><el-input v-model="form.value" maxlength="255" placeholder="填写下拉选项名称"
       /></el-form-item>

@@ -266,7 +266,7 @@ defineExpose({ refresh, total });
           :loading="loading"
           >查询</el-button
         >
-        <el-button :disabled="deleting" @click="reset">重置</el-button>
+        <el-button :disabled="loading || deleting" @click="reset">重置</el-button>
       </div>
     </form>
     <div class="management-table-region">

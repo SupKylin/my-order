@@ -26,6 +26,7 @@ function edit(row = null) {
   dialog.value = true;
 }
 async function save() {
+  if (saving.value) return;
   if (fields.some((field) => field.key !== 'address2' && !form[field.key].trim()))
     return ElMessage.warning('请填写地址一、城市、州和邮编');
   saving.value = true;
@@ -73,9 +74,10 @@ async function save() {
     :title="editing ? '编辑风险地址' : '新增风险地址'"
     width="640px"
     :close-on-click-modal="false"
+    :close-on-press-escape="!saving"
     :show-close="!saving"
   >
-    <el-form label-position="top" @submit.prevent="save"
+    <el-form :disabled="saving" label-position="top" @submit.prevent="save"
       ><div class="form-grid">
         <el-form-item
           v-for="field in fields"

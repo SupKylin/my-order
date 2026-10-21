@@ -15,6 +15,8 @@ import { migrateWalmart } from '../src/migrations/walmart.js';
 import { orderIdentityKey, channelKey } from '../src/lib/order-identity.js';
 import { CATALOG_TTL_MS } from '../src/services/walmart/catalog-cache.js';
 import { WALMART_ORDER_START_MS } from '../src/services/walmart/order-range.js';
+import { backfillWalmartCancellationIntent } from '../src/migrations/walmart-cancellation-intent.js';
+import { buildFilters } from '../src/services/orders.js';
 
 // 必须显式指定一次性测试数据库，绝不在用户订单库执行清理。
 const isolated = /^my_order_walmart_test_[0-9]+$/.test(config.db.database);
@@ -685,4 +687,83 @@ test('首次补查中暂停不记录完成进度，恢复后仍从接收起点�
   assert.equal(first.getTime(), WALMART_ORDER_START_MS);
   await state.reload();
   assert.ok(state.lastReconciledAt);
+});
+
+test('取消申请按商品行同步及筛选，旧回执回填幂等且不改状态和采购数据', async () => {
+  const cancelStore = await Store.create({
+    walmartStoreName: '取消测试',
+    systemStoreName: '取消测试店铺',
+    clientId: 'test',
+    clientSecret: 'test',
+  });
+  const raw = sample('Acknowledged', 'CANCEL-PO', 'CANCEL-ORDER');
+  raw.orderLines.orderLine[0].intentToCancel = 'TRUE';
+  raw.orderLines.orderLine.push({
+    ...structuredClone(raw.orderLines.orderLine[0]),
+    lineNumber: '2',
+    item: { sku: 'SKU-B', productName: '另一商品' },
+    intentToCancel: 'FALSE',
+  });
+  await persistOrder(cancelStore, raw, catalog, actor);
+  const first = await OrderItem.findOne({
+    where: { shopName: cancelStore.systemStoreName, walmartSku: 'SKU-A' },
+  });
+  const second = await OrderItem.findOne({
+    where: { shopName: cancelStore.systemStoreName, walmartSku: 'SKU-B' },
+  });
+  const purchase = await Purchase.findOne({ where: { itemId: first.id } });
+  await purchase.update({ purchaseStatus: '采购中', purchaseNote: '保留采购信息' });
+  const find = async (intent, extra = {}) =>
+    OrderItem.findAll({
+      ...buildFilters(
+        { shopName: cancelStore.systemStoreName, cancellationIntent: intent, ...extra },
+        Date.now(),
+        actor,
+      ),
+      order: [['id', 'ASC']],
+      subQuery: false,
+    });
+  assert.deepEqual(
+    (await find('requested')).map((x) => x.id),
+    [first.id],
+  );
+  assert.deepEqual(
+    (await find('not_requested')).map((x) => x.id),
+    [second.id],
+  );
+  assert.equal((await find('requested', { fulfillmentParty: 'WFS' })).length, 0);
+  assert.equal((await find('requested', { platformOrderStatus: '已取消' })).length, 0);
+  assert.throws(() => buildFilters({ cancellationIntent: 'invalid' }), /取消申请筛选无效/);
+  assert.equal((await find('')).length, 2);
+  // 即使平台保留取消意向，非已确认状态也不提示；两个筛选互补，不遗漏空状态。
+  for (const status of ['待确认', '已发货', '已取消', '已送达', '', null]) {
+    await first.update({ platformOrderStatus: status });
+    assert.equal((await find('requested')).length, 0);
+    assert.equal((await find('not_requested')).length, 2);
+  }
+  await first.update({ platformOrderStatus: '已确认' });
+  assert.equal((await find('requested', { platformOrderStatus: '已确认' })).length, 1);
+  assert.equal((await find('not_requested', { platformOrderStatus: '已确认' })).length, 1);
+  const snapshot = { ...first.walmart };
+  delete snapshot.intentToCancel;
+  await first.update({ walmart: snapshot });
+  await first.reload();
+  const version = first.version;
+  const updatedAt = first.updatedAt.getTime();
+  await backfillWalmartCancellationIntent();
+  await first.reload();
+  assert.equal(first.walmart.intentToCancel, true);
+  assert.equal(first.platformOrderStatus, '已确认');
+  assert.equal(first.version, version);
+  assert.equal(first.updatedAt.getTime(), updatedAt);
+  assert.equal(await backfillWalmartCancellationIntent(), 0);
+  await purchase.reload();
+  assert.equal(purchase.purchaseStatus, '采购中');
+  assert.equal(purchase.purchaseNote, '保留采购信息');
+  raw.orderLines.orderLine[0].intentToCancel = 'FALSE';
+  await persistOrder(cancelStore, raw, catalog, actor);
+  assert.equal((await find('requested')).length, 0);
+  assert.equal((await find('not_requested')).length, 2);
+  await second.update({ walmart: null });
+  assert.equal((await find('not_requested')).length, 2);
 });

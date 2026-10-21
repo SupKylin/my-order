@@ -14,7 +14,10 @@ export function useOrders() {
     router = useRouter(),
     meta = useMeta(),
     auth = useAuth();
-  const loading = ref(false),
+  const listLoading = ref(false),
+    initializing = ref(true),
+    refreshing = ref(false),
+    opening = ref(false),
     rows = ref([]),
     total = ref(0),
     selected = ref([]),
@@ -26,6 +29,10 @@ export function useOrders() {
     assignmentChannels = ref([]),
     assignBusy = ref(false),
     deleteBusy = ref(false);
+  // 列表、初始化和手动刷新分开计时，避免并行请求提前撤掉遮罩。
+  const loading = computed(
+    () => listLoading.value || initializing.value || refreshing.value || opening.value,
+  );
   const stats = reactive({ total: 0, unassigned: 0, inProgress: 0, afterSales: 0, shops: [] });
   const shippingDates = ref([]);
   const assignmentSummary = ref(null);
@@ -44,14 +51,15 @@ export function useOrders() {
     q: '',
     orderNumbers: '',
     shopNames: [],
-    orderStatus: '',
+    orderStatus: [],
     platformOrderStatus: '',
+    cancellationIntent: '',
     fulfillmentParty: '',
     shippingMode: '',
     purchasePlatforms: [],
-    purchaseStatus: '',
+    purchaseStatus: [],
     purchaseChannel: '',
-    priceFactorLevel: '',
+    priceFactorLevel: [],
     priceType: 'purchaseLinkAmount',
     minPrice: '',
     maxPrice: '',
@@ -68,7 +76,7 @@ export function useOrders() {
     purchaseAssignedStartTime: '',
     purchaseAssignedEndTime: '',
     shippingWarning: '',
-    trackingWarning: '',
+    trackingWarning: [],
     page: 1,
     pageSize: 20,
   });
@@ -87,7 +95,7 @@ export function useOrders() {
   /** 翻页保留勾选；只接受最后一次请求，避免较慢的旧查询覆盖新结果。 */
   async function load(background = false) {
     const generation = ++loadGeneration;
-    loading.value = true;
+    listLoading.value = true;
     try {
       const result = await orderApi.list({
         ...appliedFilters.value,
@@ -107,15 +115,22 @@ export function useOrders() {
       await nextTick();
       table.value?.syncSelection();
     } finally {
-      if (generation === loadGeneration) loading.value = false;
+      if (generation === loadGeneration) listLoading.value = false;
     }
   }
   async function refresh() {
-    clearSelection();
-    await load();
-    Object.assign(stats, await orderApi.dashboard());
+    if (refreshing.value) return;
+    refreshing.value = true;
+    try {
+      clearSelection();
+      await load();
+      Object.assign(stats, await orderApi.dashboard());
+    } finally {
+      refreshing.value = false;
+    }
   }
   async function search() {
+    if (loading.value) return;
     filters.page = 1;
     appliedFilters.value = snapshotFilters();
     clearSelection();
@@ -134,18 +149,20 @@ export function useOrders() {
     await changePage();
   }
   async function reset() {
+    if (loading.value) return;
     Object.assign(filters, {
       q: '',
       orderNumbers: '',
       shopNames: [],
-      orderStatus: '',
+      orderStatus: [],
       platformOrderStatus: '',
+      cancellationIntent: '',
       fulfillmentParty: '',
       shippingMode: '',
       purchasePlatforms: [],
-      purchaseStatus: '',
+      purchaseStatus: [],
       purchaseChannel: '',
-      priceFactorLevel: '',
+      priceFactorLevel: [],
       priceType: 'purchaseLinkAmount',
       minPrice: '',
       maxPrice: '',
@@ -162,7 +179,7 @@ export function useOrders() {
       purchaseAssignedStartTime: '',
       purchaseAssignedEndTime: '',
       shippingWarning: '',
-      trackingWarning: '',
+      trackingWarning: [],
       page: 1,
     });
     dates.value = [];
@@ -171,18 +188,25 @@ export function useOrders() {
     await search();
   }
   async function cardFilter(kind) {
-    Object.assign(filters, { purchaseChannel: '', purchaseStatus: '', page: 1 });
+    Object.assign(filters, { purchaseChannel: '', purchaseStatus: [], page: 1 });
     filters.afterSales = '';
     if (kind === 'unassigned') filters.purchaseChannel = true;
-    if (kind === 'progress') filters.purchaseStatus = '采购中';
+    if (kind === 'progress') filters.purchaseStatus = ['采购中'];
     if (kind === 'afterSales') filters.afterSales = '是';
   }
   async function edit(row) {
+    if (opening.value) return;
     if (row && !canEditOrder(row)) return ElMessage.warning('WFS 订单只读，不能修改');
-    editing.value = row ? await api.get(`/orders/${row.id}`) : null;
-    editor.value = true;
+    opening.value = true;
+    try {
+      editing.value = row ? await api.get(`/orders/${row.id}`) : null;
+      editor.value = true;
+    } finally {
+      opening.value = false;
+    }
   }
   async function openAssign(row) {
+    if (opening.value) return;
     // 单行分配独立于表格勾选，避免取消分配弹框后批量删除使用了错误的选择。
     assignmentItems.value = row ? [row] : [...selected.value];
     if (assignmentItems.value.some((item) => !canEditOrder(item)))
@@ -190,12 +214,18 @@ export function useOrders() {
     if (!assignmentItems.value.length) return ElMessage.warning('请先勾选商品明细');
     if (assignmentItems.value.some((item) => item.allocatable !== '是'))
       return ElMessage.warning('所选订单包含未审核或不可分配项，请先将是否可分配设置为“是”');
-    await meta.load(true);
-    assignmentChannels.value = [];
-    assignDialog.value = true;
+    opening.value = true;
+    try {
+      await meta.load(true);
+      assignmentChannels.value = [];
+      assignDialog.value = true;
+    } finally {
+      opening.value = false;
+    }
   }
   /** 分配携带每条明细的版本，冲突时由后端拒绝整批覆盖。 */
   async function assign() {
+    if (assignBusy.value) return;
     if (!assignmentChannels.value.length) return ElMessage.warning('请先选择采购渠道');
     assignBusy.value = true;
     try {
@@ -279,12 +309,16 @@ export function useOrders() {
   onMounted(async () => {
     // 数量和明细颜色共用时钟，跨过截止时间时一起更新，无需再次请求全部记录。
     warningTimer = setInterval(tickClock, 1000);
-    await meta.load();
-    users.value = await api.get('/order-owners');
-    // 兼容旧采购分配页面书签，重定向后仍可查看待分配记录。
-    if (route.query.assignedTo === 'unassigned') filters.purchaseChannel = true;
-    appliedFilters.value = snapshotFilters();
-    await refresh();
+    try {
+      await meta.load();
+      users.value = await api.get('/order-owners');
+      // 兼容旧采购分配页面书签，重定向后仍可查看待分配记录。
+      if (route.query.assignedTo === 'unassigned') filters.purchaseChannel = true;
+      appliedFilters.value = snapshotFilters();
+      await refresh();
+    } finally {
+      initializing.value = false;
+    }
   });
   watch(
     () => auth.user?.role,
@@ -306,6 +340,7 @@ export function useOrders() {
     meta,
     auth,
     loading,
+    opening,
     rows,
     total,
     selected,

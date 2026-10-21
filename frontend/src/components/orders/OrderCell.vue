@@ -12,6 +12,9 @@ const props = defineProps({
   warningNow: { type: Number, required: true },
 });
 const trackingWarning = computed(() => purchaseWarning(props.row, props.warningNow));
+const showCancellationIntent = computed(
+  () => props.row.platformOrderStatus === '已确认' && props.row.walmart?.intentToCancel === true,
+);
 const meta = useMeta();
 const value = computed(() => props.row[props.field.key]);
 const shippingHours = computed(() => shippingRemainingHours(value.value, props.warningNow));
@@ -19,14 +22,27 @@ const factorLabels = { low: '低', medium: '平', high: '高' };
 const purchaseTag = computed(() => {
   const status = value.value;
   if (!status) return 'info';
-  if (status.includes('失败') || status === '砍单') return 'danger';
+  if (status.includes('失败') || status.includes('砍单')) return 'danger';
   return status.includes('成功') ? 'success' : 'warning';
 });
 const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value.value : ''));
 </script>
 <template>
-  <div v-if="field.key === 'orderNumber'" class="order-number-cell">
+  <div
+    v-if="field.key === 'orderNumber'"
+    class="order-number-cell"
+    :class="{ 'has-cancellation-intent': showCancellationIntent }"
+  >
     <span class="mono order-number-text">{{ value ?? '—' }}</span>
+    <span v-if="showCancellationIntent" class="cancellation-intent-badge">
+      <el-tag
+        type="danger"
+        effect="dark"
+        size="small"
+        title="Walmart 已标记客户申请取消；请先核实取消申请再继续采购。申请不代表订单已正式取消。"
+        >客户申请取消</el-tag
+      >
+    </span>
     <span
       v-if="factorLabels[row.priceFactorLevel]"
       class="price-factor-badge"

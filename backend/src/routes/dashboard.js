@@ -5,9 +5,14 @@ import { allowedStoreNames } from '../permissions.js';
 import { ROLES } from '../fields.js';
 import { getFieldDefinitions } from '../services/dictionaries.js';
 import { config } from '../config.js';
+import { readHome } from '../services/home/index.js';
 
 export function createDashboardRouter() {
   const router = Router();
+  router.get('/home', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json(await readHome(req.user));
+  });
   router.get('/meta', async (req, res) =>
     res.json({
       fields: await getFieldDefinitions(),

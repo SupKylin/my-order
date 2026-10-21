@@ -10,12 +10,13 @@ const form = reactive({ username: '', password: '' }),
   router = useRouter(),
   route = useRoute();
 async function login() {
+  if (busy.value) return;
   if (!form.username || !form.password) return ElMessage.warning('请输入账号和密码');
   busy.value = true;
   try {
     await auth.login(form);
-    const target = String(route.query.redirect || '/orders');
-    router.replace(target.startsWith('/') && !target.startsWith('//') ? target : '/orders');
+    const target = String(route.query.redirect || '/home');
+    router.replace(target.startsWith('/') && !target.startsWith('//') ? target : '/home');
   } finally {
     busy.value = false;
   }

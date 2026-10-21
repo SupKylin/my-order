@@ -1,14 +1,18 @@
 <script setup>
 import { Check } from '@element-plus/icons-vue';
+import { computed } from 'vue';
 import { useMeta } from '../../stores/meta';
 import SkippedImportRows from './SkippedImportRows.vue';
-defineProps({
+const props = defineProps({
   preview: { type: Object, required: true },
   busy: Boolean,
   kind: { type: String, default: 'order' },
 });
 const emit = defineEmits(['back', 'reset', 'commit']);
 const meta = useMeta();
+const blockingErrorCount = computed(
+  () => props.preview.blockingErrorCount ?? props.preview.errorCount,
+);
 </script>
 <template>
   <div class="preview-stage">
@@ -29,7 +33,11 @@ const meta = useMeta();
     </div>
     <el-alert
       v-if="preview.errorCount"
-      :title="`存在 ${preview.errorCount} 个错误，整批尚未写入订单。请修正后重新上传。`"
+      :title="
+        blockingErrorCount
+          ? `存在 ${preview.errorCount} 个错误，整批尚未写入订单。请修正后重新上传。`
+          : `存在 ${preview.errorCount} 个错误，均属于跳过行；可确认更新匹配的订单，错误明细保留如下。`
+      "
       type="error"
       show-icon
       :closable="false"
@@ -130,10 +138,10 @@ const meta = useMeta();
       ></el-table
     >
     <div class="stage-actions">
-      <el-button @click="emit('back')">{{
+      <el-button :disabled="busy" @click="emit('back')">{{
         kind === 'purchase' ? '返回上传区' : '返回调整映射'
       }}</el-button
-      ><el-button v-if="preview.errorCount" @click="emit('reset')" type="primary"
+      ><el-button :disabled="busy" v-if="blockingErrorCount" @click="emit('reset')" type="primary"
         >重新上传文件</el-button
       ><el-button v-else type="primary" :loading="busy" :icon="Check" @click="emit('commit')">{{
         kind === 'purchase'

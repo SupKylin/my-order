@@ -27,6 +27,7 @@ const zones = ref([newZone()]);
 const templates = ref([]);
 const stage = ref('upload');
 const busy = ref(false);
+const initializing = ref(true);
 const preview = ref(null);
 const result = ref(null);
 function canImportPurchase(template) {
@@ -44,8 +45,12 @@ const readyCount = computed(
 );
 
 onMounted(async () => {
-  await meta.load();
-  templates.value = await templateApi.list();
+  try {
+    await meta.load();
+    templates.value = await templateApi.list();
+  } finally {
+    initializing.value = false;
+  }
 });
 function selectedTemplate(zone) {
   return purchaseTemplates.value.find((template) => template.id === zone.templateId);
@@ -64,6 +69,7 @@ function purchaseTemplate(zone) {
   };
 }
 async function uploadFile(zone, file) {
+  if (zone.uploading || busy.value || initializing.value) return;
   if (!/\.xlsx$/i.test(file.name)) return ElMessage.warning('仅支持 .xlsx 文件');
   zone.uploading = true;
   try {
@@ -90,6 +96,7 @@ async function pasteZone(event, zone) {
   await uploadFile(zone, file);
 }
 async function previewSources(selectedZones) {
+  if (busy.value || initializing.value) return;
   if (
     selectedZones.some(
       (zone) => !zone.file || !zone.sheetName || !selectedTemplate(zone) || zone.uploading,
@@ -118,6 +125,7 @@ function previewAll() {
   return previewSources(zones.value);
 }
 async function commit() {
+  if (busy.value) return;
   busy.value = true;
   try {
     result.value = await importApi.commitPurchases(preview.value.id);
@@ -136,7 +144,7 @@ function reset() {
 </script>
 
 <template>
-  <section v-if="stage === 'upload'" class="purchase-import-page">
+  <section v-if="stage === 'upload'" class="purchase-import-page" v-loading="initializing">
     <el-alert
       title="按系统店铺名＋客户订单号＋Walmart SKU 匹配，仅更新唯一匹配的已有明细；未匹配或有重复明细的行跳过，并在结果中列出。"
       type="info"
@@ -180,6 +188,7 @@ function reset() {
           type="danger"
           :icon="Delete"
           aria-label="移除上传区"
+          :disabled="busy || zone.uploading"
           @click="zones.splice(index, 1)"
         />
       </div>
@@ -187,6 +196,7 @@ function reset() {
       <el-select
         v-model="zone.templateId"
         class="purchase-template-select"
+        :disabled="busy || zone.uploading"
         placeholder="选择导入模板"
         filterable
       >
@@ -210,9 +220,11 @@ function reset() {
         drag
         accept=".xlsx"
         :show-file-list="false"
-        :disabled="zone.uploading"
+        :disabled="busy || zone.uploading"
         :http-request="(options) => uploadZone(zone, options)"
         class="purchase-zone-upload"
+        v-loading="zone.uploading"
+        element-loading-text="正在上传并读取工作表…"
       >
         <el-icon class="upload-icon"><UploadFilled /></el-icon>
         <h3>{{ zone.file ? zone.file.name : '将 Excel 文件拖到这里' }}</h3>
@@ -222,7 +234,7 @@ function reset() {
         <span>{{
           zone.file ? `${zone.file.sheets.length} 个工作表` : '仅支持 .xlsx，每区 1 个文件'
         }}</span>
-        <el-button :disabled="zone.uploading" @click="$event.currentTarget.focus()"
+        <el-button :disabled="busy || zone.uploading" @click="$event.currentTarget.focus()"
           >在此粘贴</el-button
         >
       </div>
@@ -250,11 +262,11 @@ function reset() {
           @click="previewSources([zone])"
           >上传并预览</el-button
         >
-        <el-button :disabled="zone.uploading" @click="zone.file = null">更换文件</el-button>
+        <el-button :disabled="busy || zone.uploading" @click="zone.file = null">更换文件</el-button>
       </div>
     </section>
     <el-empty
-      v-if="!purchaseTemplates.length"
+      v-if="!initializing && !purchaseTemplates.length"
       description="暂无可用模板，请映射店铺名、订单号、Walmart SKU 及采购字段"
     >
       <el-button type="primary" @click="router.push('/templates')">前往导入模板</el-button>

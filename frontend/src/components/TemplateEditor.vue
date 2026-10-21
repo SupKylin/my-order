@@ -12,6 +12,7 @@ const emit = defineEmits(['update:modelValue', 'saved']);
 const visible = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) }),
   meta = useMeta(),
   busy = ref(false),
+  initializing = ref(false),
   info = ref(null),
   uploadId = ref(null);
 const form = reactive({
@@ -24,22 +25,27 @@ watch(
   () => props.modelValue,
   async (open) => {
     if (!open) return;
-    await meta.load();
-    info.value = null;
-    uploadId.value = null;
-    Object.assign(
-      form,
-      props.template
-        ? JSON.parse(JSON.stringify(props.template))
-        : { name: '', sheetName: '', headerRow: 1, mappings: [] },
-    );
-    form.sheetName = '';
-    form.mappings = withoutDisabledTargets(form.mappings);
-    if (props.template)
-      info.value = {
-        columns: form.mappings.map((m) => ({ ...m, samples: [] })),
-        sheets: [],
-      };
+    initializing.value = true;
+    try {
+      await meta.load();
+      info.value = null;
+      uploadId.value = null;
+      Object.assign(
+        form,
+        props.template
+          ? JSON.parse(JSON.stringify(props.template))
+          : { name: '', sheetName: '', headerRow: 1, mappings: [] },
+      );
+      form.sheetName = '';
+      form.mappings = withoutDisabledTargets(form.mappings);
+      if (props.template)
+        info.value = {
+          columns: form.mappings.map((m) => ({ ...m, samples: [] })),
+          sheets: [],
+        };
+    } finally {
+      initializing.value = false;
+    }
   },
   { immediate: true },
 );
@@ -55,6 +61,7 @@ function withoutDisabledTargets(mappings) {
   );
 }
 async function upload(options) {
+  if (busy.value || initializing.value) return;
   busy.value = true;
   try {
     const result = await uploadApi.excel(options.file);
@@ -72,7 +79,7 @@ async function upload(options) {
   }
 }
 async function inspect() {
-  if (!uploadId.value) return;
+  if (!uploadId.value || busy.value || initializing.value) return;
   busy.value = true;
   try {
     info.value = await uploadApi.inspect(uploadId.value, form.sheetName, form.headerRow);
@@ -82,6 +89,7 @@ async function inspect() {
   }
 }
 async function save() {
+  if (busy.value || initializing.value) return;
   const issues = mappingIssues(form.mappings, meta.fields);
   if (issues.length) return ElMessage.warning(issues[0].message);
   busy.value = true;
@@ -108,8 +116,10 @@ async function save() {
     :title="template ? '编辑导入模板' : '创建导入模板'"
     width="900px"
     :close-on-click-modal="false"
+    :close-on-press-escape="!busy && !initializing"
+    :show-close="!busy && !initializing"
     destroy-on-close
-    ><el-form label-position="top"
+    ><el-form v-loading="initializing" :disabled="busy || initializing" label-position="top"
       ><div class="template-controls template-name-controls">
         <el-form-item label="模板名称" class="flex-one"
           ><el-input
@@ -125,7 +135,10 @@ async function save() {
       </p>
       <div v-if="info" class="template-controls">
         <el-form-item v-if="uploadId" label="示例工作表（仅用于读取表头）"
-          ><el-select v-model="form.sheetName" :disabled="!uploadId" @change="inspect"
+          ><el-select
+            v-model="form.sheetName"
+            :disabled="!uploadId || busy || initializing"
+            @change="inspect"
             ><el-option
               v-for="sheet in info.sheets"
               :key="sheet.name"
@@ -151,8 +164,8 @@ async function save() {
       description="上传示例文件后，选择每一列对应的系统字段"
       :image-size="90"
     /><template #footer
-      ><el-button @click="visible = false">取消</el-button
-      ><el-button type="primary" :loading="busy" :disabled="!info" @click="save"
+      ><el-button :disabled="busy || initializing" @click="visible = false">取消</el-button
+      ><el-button type="primary" :loading="busy" :disabled="!info || initializing" @click="save"
         >保存模板</el-button
       ></template
     ></el-dialog

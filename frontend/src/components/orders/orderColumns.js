@@ -1,7 +1,8 @@
-// 主表先展示订单信息，再展示采购信息；商品及收件字段仅在折叠区展示。
+// 主表先展示订单信息（含商品数量），再展示采购信息；其余商品及收件字段在折叠区展示。
 const orderKeys = [
   'shopName',
   'orderNumber',
+  'quantity',
   'orderDate',
   'platformShipDate',
   'platformTrackingNumber',
@@ -39,6 +40,7 @@ const labels = { purchaseStatus: '采购状态', merchantName: '商家名' };
 const widths = {
   shopName: 125,
   orderNumber: 220,
+  quantity: 90,
   platformShipDate: 155,
   platformTrackingNumber: 200,
   orderStatus: 210,

@@ -220,6 +220,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.order-number-cell.has-cancellation-intent {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.cancellation-intent-badge {
+  flex-basis: 100%;
+  order: 1;
+}
 .price-factor-badge {
   flex-shrink: 0;
   padding: 0 6px;

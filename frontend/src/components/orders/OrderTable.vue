@@ -66,7 +66,7 @@ defineExpose({
       :align="field.type === 'money' ? 'right' : 'left'"
       :show-overflow-tooltip="
         !['image', 'storeOwner'].includes(field.type) &&
-        !['platformShipDate', 'purchaseStatus'].includes(field.key)
+        !['orderNumber', 'platformShipDate', 'purchaseStatus'].includes(field.key)
       "
     >
       <template #default="{ row }"

@@ -111,12 +111,13 @@ export async function prepareImport(input, user, kind = 'legacy') {
       template,
       (buffer) => saveImage(buffer, user.id, upload.originalName),
       fieldDefinitions,
-      { allowedStoreNames: allowed },
+      { allowedStoreNames: allowed, retainInvalidIdentity: kind === 'purchase' },
     );
     for (const key of ['rows', 'errors', 'warnings'])
       data[key].push(
         ...extracted[key].map((row) => ({
           ...row,
+          sourceId: upload.id,
           sourceName: upload.originalName,
           ...(key === 'rows'
             ? {
@@ -201,6 +202,9 @@ export async function prepareImport(input, user, kind = 'legacy') {
       kind === 'purchase' &&
       !Object.keys(row.patch).some((key) => fieldMap[key]?.group === 'purchase') &&
       !row.purchaseSkuMapped &&
+      !data.errors.some(
+        (error) => error.sourceId === row.sourceId && error.row === row.rowNumber,
+      ) &&
       row.action !== 'missing'
     )
       data.errors.push({
@@ -230,6 +234,7 @@ export function previewResult(job) {
     updated: rows.filter((r) => r.action === 'update').length,
     ...skippedResult(rows),
     errorCount: job.errors.length,
+    blockingErrorCount: blockingImportErrors(job).length,
     errors: job.errors.slice(0, 200),
     warnings: job.warnings.slice(0, 100),
     rows: rows.slice(0, 100),
@@ -239,6 +244,16 @@ export function previewResult(job) {
     purchaseChannel: job.templateSnapshot.purchaseChannel || null,
     createdAt: job.createdAt,
   };
+}
+
+/** 未匹配行的错误保留报告，但不阻塞；无法关联到行的错误继续阻塞旧预览。 */
+function blockingImportErrors(job) {
+  if (job.templateSnapshot.importKind !== 'purchase') return job.errors;
+  const rowKey = (source, row) => JSON.stringify([source.sourceId || source.sourceName || '', row]);
+  const skipped = new Set(
+    job.rows.filter((row) => row.action === 'missing').map((row) => rowKey(row, row.rowNumber)),
+  );
+  return job.errors.filter((error) => !skipped.has(rowKey(error, error.row)));
 }
 
 /** 完整保留未匹配清单，预览、提交结果及历史记录使用同一份报告。 */
@@ -255,7 +270,7 @@ function skippedResult(rows) {
     }));
   return { skipped: skippedRows.length, skippedRows };
 }
-/** 幂等提交预览；版本冲突或任意错误都会中止整个事务。 */
+/** 幂等提交预览；版本冲突或匹配行的校验错误中止整个事务。 */
 export async function commitImport(id, user, kind = 'legacy') {
   assertPurchaseImport(kind);
   return db.transaction(async (t) => {
@@ -277,7 +292,7 @@ export async function commitImport(id, user, kind = 'legacy') {
       '导入匹配规则已更新，请重新预览',
       409,
     );
-    assert(!job.errors.length, '存在错误行，请修正 Excel 后重新预览');
+    assert(!blockingImportErrors(job).length, '存在错误行，请修正 Excel 后重新预览');
     // 不能按已停用字段的旧预览提交，重新预览会保留源列并解除该映射。
     assert(
       !job.rows.some((row) => Object.hasOwn(row.patch || {}, 'supervisorConfirmed')),

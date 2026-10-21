@@ -11,7 +11,7 @@ export async function extractRows(
   template,
   savePicture,
   fieldDefinitions = fields,
-  { allowedStoreNames = null } = {},
+  { allowedStoreNames = null, retainInvalidIdentity = false } = {},
 ) {
   const sheet = loaded.workbook.getWorksheet(template.sheetName);
   if (!sheet) throw new AppError(400, `找不到工作表“${template.sheetName}”`);
@@ -114,6 +114,18 @@ export async function extractRows(
     } catch (e) {
       for (const detail of e.details || [{ message: e.message }])
         errors.push({ row: rowNumber, ...detail });
+      // 采购导入仍需用身份字段判断错误行是否存在目标，不能让未匹配行阻塞整批。
+      // 这里只保留定位信息，错误行绝不携带待写入的采购数据。
+      if (retainInvalidIdentity)
+        rows.push({
+          rowNumber,
+          patch: Object.fromEntries(
+            ['shopName', 'orderNumber', 'walmartSku'].map((key) => [
+              key,
+              excelText(raw[key] ?? '').trim(),
+            ]),
+          ),
+        });
     }
   }
   if (!rows.length && !errors.length)

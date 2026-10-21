@@ -236,6 +236,58 @@ test('混合有效、未匹配、歧义及空店铺行只更新唯一目标；�
   assert.deepEqual((await getImportPreview(p.id)).skippedRows, result.skippedRows);
 });
 
+test('未匹配行的字段错误保留且不阻塞，匹配行错误仍阻塞，同名文件行号不串联', async () => {
+  const item = await createItem('PARTIAL-ERROR');
+  const columns = ['shopName', 'orderNumber', 'walmartSku', 'purchaseNote', 'allocatable'];
+  const before = await OrderItem.count();
+  const mixed = await preview(
+    [
+      ['店铺A', 'PARTIAL-ERROR', '001', '有效更新', '是'],
+      ['店铺A', 'NO-SUCH-ORDER', '001', '不写入', '非法选项'],
+      ['店铺A', '', '001', '缺少订单号', '非法选项'],
+    ],
+    columns,
+  );
+  assert.ok(mixed.errorCount > 0);
+  assert.equal(mixed.blockingErrorCount, 0);
+  assert.equal(mixed.updated, 1);
+  assert.equal(mixed.skipped, 2);
+  const result = await commitImport(mixed.id, actor, 'purchase');
+  assert.equal(result.updated, 1);
+  assert.equal(result.skipped, 2);
+  assert.equal(await OrderItem.count(), before);
+  assert.equal((await Purchase.findOne({ where: { itemId: item.id } })).purchaseNote, '有效更新');
+  assert.deepEqual((await getImportPreview(mixed.id)).errors, mixed.errors);
+  assert.equal((await commitImport(mixed.id, actor, 'purchase')).alreadyCompleted, true);
+
+  const missing = await preview([['店铺A', 'NO-SUCH-ORDER', '001', '', '非法选项']], columns);
+  const invalid = await preview(
+    [['店铺A', 'PARTIAL-ERROR', '001', '不得写入', '非法选项']],
+    columns,
+  );
+  assert.ok(invalid.blockingErrorCount > 0);
+  await assert.rejects(commitImport(invalid.id, actor, 'purchase'), /存在错误行/);
+  // 同名 Excel 同行号，一个未匹配一个匹配错误，不能错误地消除阻塞校验。
+  const snapshots = await Promise.all([missing, invalid].map((p) => ImportJob.findByPk(p.id)));
+  const batch = await prepareImport(
+    {
+      sources: snapshots.map((job) => ({
+        uploadId: job.uploadId,
+        template: job.templateSnapshot,
+        sheetName: '采购',
+      })),
+    },
+    actor,
+    'purchase',
+  );
+  assert.ok(batch.blockingErrorCount > 0);
+  await assert.rejects(commitImport(batch.id, actor, 'purchase'), /存在错误行/);
+  assert.equal((await Purchase.findOne({ where: { itemId: item.id } })).purchaseNote, '有效更新');
+  const allSkipped = await commitImport(missing.id, actor, 'purchase');
+  assert.equal(allSkipped.updated, 0);
+  assert.equal(allSkipped.skipped, 1);
+});
+
 test('超过 100 行的未匹配清单完整返回，全未匹配仍可完成且不创建订单', async () => {
   const before = await Order.count();
   const p = await preview(
@@ -497,4 +549,88 @@ test('旧模板解绑渠道与工作表，用户所选工作表生效，旧预�
   assert.equal(saved.purchaseChannelId, null);
   assert.equal(saved.mappings.at(-1).field, '');
   assert.equal(saved.mappings.at(-1).header, '渠道');
+});
+
+test('四项多选按框内并集、框间交集查询，分页、统计及两种导出一致', async () => {
+  const prefix = 'MULTI-FILTER-';
+  const success = ['采购成功未出跟踪号', '采购成功已出跟踪号'];
+  const fixtures = [
+    [success[0], '运营A', '0.7', 12, null],
+    [success[1], '运营B', '0.85', 60, null],
+    [success[0], '运营A', '0.82', 30, null],
+    ['采购中', '运营A', '0.7', 12, null],
+    [success[0], '运营C', '0.7', 12, null],
+    [success[0], '运营A', '待定', 12, null],
+    [success[0], '运营A', '0.7', 12, '已填写'],
+    [success[0], '运营A', '0.7', null, null],
+  ];
+  for (const [
+    index,
+    [purchaseStatus, orderStatus, priceFactor, hours, trackingNumber],
+  ] of fixtures.entries()) {
+    const item = await createItem(prefix + index);
+    await item.update({ orderStatus, platformShipDate: '2026-10-16' });
+    await Purchase.update(
+      {
+        purchaseStatus,
+        priceFactor,
+        trackingNumber,
+        purchaseConfirmedAt: hours == null ? null : new Date(Date.now() - hours * 3600000),
+      },
+      { where: { itemId: item.id } },
+    );
+  }
+  const filters = {
+    q: prefix,
+    purchaseStatus: success,
+    orderStatus: ['运营A', '运营B'],
+    priceFactorLevel: ['low', 'high'],
+    trackingWarning: ['waiting', 'red'],
+    pageSize: 1,
+  };
+  const result = await listOrders(filters);
+  assert.equal(result.total, 2);
+  assert.equal(result.rows.length, 1);
+  assert.equal(
+    result.shippingDates.reduce((sum, row) => sum + row.count, 0),
+    2,
+  );
+  const second = await listOrders({ ...filters, page: 2 });
+  assert.deepEqual(
+    new Set([...result.rows, ...second.rows].map((row) => row.orderNumber)),
+    new Set([prefix + '0', prefix + '1']),
+  );
+  // JSON 查询参数与导出的数组条件产生完全相同的查询结果。
+  const getFilters = Object.fromEntries(
+    Object.entries(filters).map(([key, value]) => [
+      key,
+      Array.isArray(value) ? JSON.stringify(value) : value,
+    ]),
+  );
+  assert.equal((await listOrders(getFilters)).total, 2);
+  assert.equal((await listOrders({ ...filters, trackingWarning: ['all', 'red'] })).total, 3);
+  assert.equal((await listOrders({ ...filters, trackingWarning: [] })).total, 4);
+  for (const purchaseTemplate of [false, true]) {
+    const chunks = [];
+    const stream = new Writable({
+      write(chunk, _encoding, done) {
+        chunks.push(chunk);
+        done();
+      },
+    });
+    stream.setHeader = () => {};
+    await exportOrders({ filters }, stream, purchaseTemplate);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.concat(chunks));
+    const sheet = workbook.worksheets[0];
+    assert.equal(sheet.rowCount - 1, 2);
+    const orderColumn = sheet.getRow(1).values.indexOf('订单号');
+    assert.deepEqual(
+      new Set([
+        sheet.getRow(2).getCell(orderColumn).text,
+        sheet.getRow(3).getCell(orderColumn).text,
+      ]),
+      new Set([prefix + '0', prefix + '1']),
+    );
+  }
 });

@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   Box,
+  House,
   Document,
   Upload,
   Clock,
@@ -30,6 +31,8 @@ const auth = useAuth(),
   route = useRoute(),
   router = useRouter();
 const menus = [
+  { path: '/home', label: '首页', icon: House },
+  { path: '/store-summary', label: '店铺汇总', icon: House },
   { path: '/orders', label: '订单管理', icon: Box },
   // 订单统一由 Walmart API 接入，保留 Excel 导入入口代码。
   // { path: '/imports/new', label: '导入订单', icon: Upload },
@@ -54,18 +57,26 @@ watch(
   },
 );
 const showPassword = ref(false);
+const signingOut = ref(false);
 const sidebarOpen = ref(true);
 const managementPage = computed(
   () =>
-    ['/templates', '/imports', '/users', '/stores'].includes(route.path) ||
-    route.path.startsWith('/settings/'),
+    ['/home', '/store-summary', '/templates', '/imports', '/users', '/stores'].includes(
+      route.path,
+    ) || route.path.startsWith('/settings/'),
 );
 async function signOut() {
+  if (signingOut.value) return;
+  signingOut.value = true;
   try {
     await ElMessageBox.confirm('确认退出当前账号？', '退出登录', { type: 'info' });
     await auth.logout();
     router.replace('/login');
-  } catch {}
+  } catch {
+    // 用户取消或请求失败后允许再次操作；请求错误由统一拦截器提示。
+  } finally {
+    signingOut.value = false;
+  }
 }
 </script>
 <template>
@@ -79,7 +90,7 @@ async function signOut() {
           :inert="!sidebarOpen"
           :aria-hidden="!sidebarOpen"
         >
-          <router-link to="/orders" class="brand"
+          <router-link to="/home" class="brand"
             ><div class="brand-mark">
               <el-icon :size="24"><Box /></el-icon>
             </div>
@@ -107,7 +118,7 @@ async function signOut() {
               <strong>{{ auth.user?.displayName }}</strong
               ><small>{{ meta.roles[auth.user?.role] || '团队成员' }}</small>
             </div>
-            <el-button text circle aria-label="退出登录" @click="signOut"
+            <el-button text circle aria-label="退出登录" :loading="signingOut" @click="signOut"
               ><el-icon><SwitchButton /></el-icon
             ></el-button>
           </div>

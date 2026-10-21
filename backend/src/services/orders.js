@@ -1,4 +1,4 @@
-import { Op, fn, col, where as sqlWhere } from 'sequelize';
+import { Op, fn, col, literal, where as sqlWhere } from 'sequelize';
 import { db, Order, OrderItem, Purchase, AuditLog, itemInclude, serializeItem } from '../models.js';
 import { fields } from '../fields.js';
 import { addressKey } from '../lib/address-key.js';
@@ -7,6 +7,7 @@ import { validatePatch, normalizeValue } from '../validation.js';
 import { getFieldDefinitions } from './dictionaries.js';
 import { channelKey, orderIdentityKey } from '../lib/order-identity.js';
 import { priceFactorPatterns } from '../lib/price-factor.js';
+import { filterValues } from '../lib/filter-values.js';
 import { shippingWindow } from '../lib/shipping-window.js';
 import { assertOrderEditable } from '../lib/order-write-policy.js';
 import { orderScope, assertItemAccess } from '../permissions.js';
@@ -155,7 +156,13 @@ export function buildFilters(query, now = Date.now(), user) {
     );
     if (names.length) where.shopName = { [Op.in]: [...new Set(names)] };
   } else if (query.shopName) where.shopName = String(query.shopName);
-  if (query.orderStatus) where.orderStatus = String(query.orderStatus);
+  for (const [key, target, label] of [
+    ['orderStatus', where, '运营订单状态'],
+    ['purchaseStatus', purchaseWhere, '采购状态'],
+  ]) {
+    const values = filterValues(query[key], `${label}筛选格式无效`);
+    if (values.length) target[key] = values.length === 1 ? values[0] : { [Op.in]: values };
+  }
   if (query.platformOrderStatus) where.platformOrderStatus = String(query.platformOrderStatus);
   if (query.fulfillmentParty) {
     const party = String(query.fulfillmentParty).trim().toUpperCase();
@@ -164,8 +171,33 @@ export function buildFilters(query, now = Date.now(), user) {
       sqlWhere(fn('UPPER', fn('TRIM', col('OrderItem.fulfillmentParty'))), { [Op.in]: values }),
     ];
   }
-  for (const key of ['purchaseStatus', 'settlement', 'allocatable', 'afterSales', 'shippingMode'])
+  for (const key of ['settlement', 'allocatable', 'afterSales', 'shippingMode'])
     if (query[key]) purchaseWhere[key] = String(query[key]);
+  if (query.cancellationIntent !== undefined && query.cancellationIntent !== '') {
+    assert(['requested', 'not_requested'].includes(query.cancellationIntent), '取消申请筛选无效');
+    // 与红色提示一致：已确认且有取消意向。反向筛选包含其他状态和空状态。
+    const intent = fn(
+      'COALESCE',
+      // 固定 JSON 路径避免 Sequelize fn 将 $ 转义为 $$；不拼接用户输入。
+      fn(
+        'JSON_UNQUOTE',
+        fn('JSON_EXTRACT', col('OrderItem.walmart'), literal("'$.intentToCancel'")),
+      ),
+      'false',
+    );
+    where[Op.and] = [
+      ...(where[Op.and] || []),
+      query.cancellationIntent === 'requested'
+        ? { [Op.and]: [{ platformOrderStatus: '已确认' }, sqlWhere(intent, Op.eq, 'true')] }
+        : {
+            [Op.or]: [
+              { platformOrderStatus: { [Op.ne]: '已确认' } },
+              { platformOrderStatus: null },
+              sqlWhere(intent, Op.ne, 'true'),
+            ],
+          },
+    ];
+  }
   // GET 使用 JSON 数组，导出 POST 使用原数组；多个平台按“任一匹配”查询。
   if (query.purchasePlatforms) {
     let platforms = query.purchasePlatforms;
@@ -214,21 +246,27 @@ export function buildFilters(query, now = Date.now(), user) {
       1,
     );
   }
-  if (query.priceFactorLevel) {
-    const level = query.priceFactorLevel;
-    assert(['low', 'medium', 'high'].includes(level), '价格系数等级筛选无效');
+  const factorLevels = filterValues(query.priceFactorLevel, '价格系数等级筛选无效', [
+    'low',
+    'medium',
+    'high',
+  ]);
+  if (factorLevels.length) {
     const factor = col('purchase.priceFactor');
-    const conditions = [sqlWhere(factor, { [Op.regexp]: priceFactorPatterns.numeric })];
-    for (const grade of ['high', 'medium']) {
-      if (level === grade || level === 'low')
-        conditions.push(
-          sqlWhere(factor, {
-            [level === grade ? Op.regexp : Op.notRegexp]: priceFactorPatterns[grade],
-          }),
-        );
-    }
+    const groups = factorLevels.map((level) => {
+      const conditions = [sqlWhere(factor, { [Op.regexp]: priceFactorPatterns.numeric })];
+      for (const grade of ['high', 'medium']) {
+        if (level === grade || level === 'low')
+          conditions.push(
+            sqlWhere(factor, {
+              [level === grade ? Op.regexp : Op.notRegexp]: priceFactorPatterns[grade],
+            }),
+          );
+      }
+      return { [Op.and]: conditions };
+    });
     // 和渠道等条件取交集；必须在分页与总数统计前筛选。
-    where[Op.and] = [...(where[Op.and] || []), ...conditions];
+    where[Op.and] = [...(where[Op.and] || []), { [Op.or]: groups }];
   }
   const priceFields = {
     purchaseLinkAmount: purchaseWhere,
@@ -333,11 +371,13 @@ export function buildFilters(query, now = Date.now(), user) {
       { platformShipDate: dates, platformOrderStatus: '已确认' },
     ];
   }
-  if (query.trackingWarning) {
-    assert(
-      ['all', 'waiting', 'yellow', 'red'].includes(query.trackingWarning),
-      '未出跟踪号筛选无效',
-    );
+  const trackingLevels = filterValues(query.trackingWarning, '未出跟踪号筛选无效', [
+    'all',
+    'waiting',
+    'yellow',
+    'red',
+  ]);
+  if (trackingLevels.length) {
     const conditions = [
       sqlWhere(col('purchase.purchaseStatus'), { [Op.regexp]: PURCHASE_SUCCESS_PATTERN }),
       {
@@ -359,8 +399,14 @@ export function buildFilters(query, now = Date.now(), user) {
       yellow: { [Op.gt]: new Date(now - 48 * hour), [Op.lte]: new Date(now - 24 * hour) },
       red: { [Op.lte]: new Date(now - 48 * hour) },
     };
-    if (query.trackingWarning !== 'all')
-      conditions.push({ '$purchase.purchaseConfirmedAt$': ranges[query.trackingWarning] });
+    if (!trackingLevels.includes('all')) {
+      const selectedRanges = trackingLevels.map((level) => ({
+        '$purchase.purchaseConfirmedAt$': ranges[level],
+      }));
+      conditions.push(
+        selectedRanges.length === 1 ? selectedRanges[0] : { [Op.or]: selectedRanges },
+      );
+    }
     where[Op.and] = [...(where[Op.and] || []), ...conditions];
   }
   const include = [

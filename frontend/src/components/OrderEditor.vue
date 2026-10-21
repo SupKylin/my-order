@@ -15,8 +15,16 @@ const meta = useMeta(),
   original = ref({}),
   conflictMessage = ref(''),
   busy = ref(false),
+  initializing = ref(false),
+  uploadingFields = reactive(new Set()),
   openGroups = ref(['order', 'purchase']);
 const visible = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) });
+// 多个图片字段可分别上传；全部结束后才能保存，避免丢失尚未返回的图片地址。
+const blocked = computed(() => busy.value || initializing.value || uploadingFields.size > 0);
+function trackUpload(key, uploading) {
+  if (uploading) uploadingFields.add(key);
+  else uploadingFields.delete(key);
+}
 const sections = [
   { key: 'order', label: '订单信息', note: '订单身份、平台时间与状态' },
   { key: 'product', label: '商品与收件信息', note: '由 Walmart 同步 · 只读' },
@@ -26,21 +34,27 @@ watch(
   () => props.modelValue,
   async (show) => {
     if (!show) return;
-    await meta.load();
-    openGroups.value = ['order', 'purchase'];
-    conflictMessage.value = '';
-    for (const f of meta.fields) {
-      let value = props.item?.[f.key] ?? null;
-      if (f.type === 'datetime' && value)
-        value = new Date(value).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });
-      form[f.key] = value;
+    initializing.value = true;
+    try {
+      await meta.load();
+      openGroups.value = ['order', 'purchase'];
+      conflictMessage.value = '';
+      for (const f of meta.fields) {
+        let value = props.item?.[f.key] ?? null;
+        if (f.type === 'datetime' && value)
+          value = new Date(value).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });
+        form[f.key] = value;
+      }
+      original.value = JSON.parse(JSON.stringify(form));
+    } finally {
+      initializing.value = false;
     }
-    original.value = JSON.parse(JSON.stringify(form));
   },
   { immediate: true },
 );
 /** 只提交用户实际修改的字段及其原值，避免旧表单覆盖后台同步或他人的无关修改。 */
 async function save() {
+  if (blocked.value) return;
   if (!canEditOrder(props.item)) return ElMessage.warning('WFS 订单只读，不能修改');
   busy.value = true;
   try {
@@ -83,6 +97,8 @@ async function save() {
     :title="item?.id ? '编辑商品明细' : '新增商品明细'"
     size="800px"
     :close-on-click-modal="false"
+    :close-on-press-escape="!blocked"
+    :show-close="!blocked"
     destroy-on-close
     ><div class="drawer-intro">
       <span class="pill">{{ item?.orderNumber || '新订单' }}</span
@@ -105,7 +121,7 @@ async function save() {
       :closable="false"
       show-icon
     />
-    <el-form label-position="top"
+    <el-form v-loading="initializing" :disabled="busy || initializing" label-position="top"
       ><el-collapse v-model="openGroups"
         ><el-collapse-item v-for="section in sections" :key="section.key" :name="section.key"
           ><template #title
@@ -145,12 +161,23 @@ async function save() {
                 >
                 <span class="muted">请先将是否可分配设置为“是”后选择渠道</span>
               </template>
-              <FieldInput v-else :field="field" v-model="form[field.key]" />
+              <FieldInput
+                v-else
+                :field="field"
+                v-model="form[field.key]"
+                @uploading="trackUpload(field.key, $event)"
+              />
             </el-form-item></div></el-collapse-item></el-collapse></el-form
     ><template #footer
       ><span class="muted drawer-tip">页面内清空字段并保存，会主动清除该字段。</span
-      ><el-button @click="visible = false">取消</el-button
-      ><el-button type="primary" :loading="busy" @click="save">保存修改</el-button></template
+      ><el-button :disabled="blocked" @click="visible = false">取消</el-button
+      ><el-button
+        type="primary"
+        :loading="busy"
+        :disabled="initializing || uploadingFields.size > 0"
+        @click="save"
+        >保存修改</el-button
+      ></template
     ></el-drawer
   >
 </template>

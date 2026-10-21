@@ -13,6 +13,7 @@ const WalmartSyncDialog = defineAsyncComponent(
 );
 const syncingStore = ref(null);
 const saving = ref(false);
+const opening = ref(false);
 const dialog = ref(false);
 const editing = ref(null);
 const users = ref([]);
@@ -29,30 +30,37 @@ async function load() {
 }
 
 async function edit(row = null) {
-  users.value = await userApi.list();
-  editing.value = row;
-  Object.assign(
-    form,
-    row
-      ? {
-          walmartStoreName: row.walmartStoreName,
-          systemStoreName: row.systemStoreName,
-          ownerId: row.ownerId ?? null,
-          clientId: row.clientId,
-          clientSecret: row.clientSecret,
-        }
-      : {
-          walmartStoreName: '',
-          systemStoreName: '',
-          ownerId: null,
-          clientId: '',
-          clientSecret: '',
-        },
-  );
-  dialog.value = true;
+  if (opening.value) return;
+  opening.value = true;
+  try {
+    users.value = await userApi.list();
+    editing.value = row;
+    Object.assign(
+      form,
+      row
+        ? {
+            walmartStoreName: row.walmartStoreName,
+            systemStoreName: row.systemStoreName,
+            ownerId: row.ownerId ?? null,
+            clientId: row.clientId,
+            clientSecret: row.clientSecret,
+          }
+        : {
+            walmartStoreName: '',
+            systemStoreName: '',
+            ownerId: null,
+            clientId: '',
+            clientSecret: '',
+          },
+    );
+    dialog.value = true;
+  } finally {
+    opening.value = false;
+  }
 }
 
 async function save() {
+  if (saving.value) return;
   if (!form.walmartStoreName.trim() || !form.systemStoreName.trim())
     return ElMessage.warning('请填写 Walmart 店铺名和系统店铺名');
   if (!editing.value && (!form.clientId.trim() || !form.clientSecret.trim()))
@@ -80,7 +88,9 @@ async function save() {
     description="维护店铺名称对应关系与 API 认证信息。"
   >
     <template #actions
-      ><el-button type="primary" :icon="Plus" @click="edit()">新增店铺</el-button></template
+      ><el-button type="primary" :icon="Plus" :loading="opening" @click="edit()"
+        >新增店铺</el-button
+      ></template
     >
 
     <el-table-column label="Walmart 店铺名" prop="walmartStoreName" min-width="220" />
@@ -107,7 +117,7 @@ async function save() {
     </el-table-column>
     <el-table-column label="操作" width="180" fixed="right">
       <template #default="{ row }">
-        <el-button link type="primary" @click="edit(row)">编辑</el-button>
+        <el-button link type="primary" :loading="opening" @click="edit(row)">编辑</el-button>
         <el-button link type="primary" @click="syncingStore = row">订单同步</el-button>
       </template>
     </el-table-column>
@@ -126,8 +136,10 @@ async function save() {
     :title="editing ? '编辑店铺' : '新增店铺'"
     width="560px"
     :close-on-click-modal="false"
+    :close-on-press-escape="!saving"
+    :show-close="!saving"
   >
-    <el-form label-position="top">
+    <el-form :disabled="saving" label-position="top">
       <el-form-item label="Walmart 店铺名" required>
         <el-input v-model="form.walmartStoreName" maxlength="191" />
       </el-form-item>
@@ -153,7 +165,7 @@ async function save() {
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="dialog = false">取消</el-button>
+      <el-button :disabled="saving" @click="dialog = false">取消</el-button>
       <el-button type="primary" :loading="saving" @click="save">保存店铺</el-button>
     </template>
   </el-dialog>

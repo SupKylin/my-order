@@ -1,4 +1,11 @@
-const common = ['/orders', '/imports/purchases/new', '/templates', '/imports'];
+const common = [
+  '/home',
+  '/store-summary',
+  '/orders',
+  '/imports/purchases/new',
+  '/templates',
+  '/imports',
+];
 const paths = {
   operations: [...common, '/settings/risk-addresses', '/settings/order-statuses'],
   purchasing: [

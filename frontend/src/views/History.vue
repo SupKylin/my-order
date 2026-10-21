@@ -10,10 +10,17 @@ const SkippedImportRows = defineAsyncComponent(
 );
 const details = ref(null),
   show = ref(false);
+const viewing = ref(null);
 async function view(row) {
-  details.value = await importApi.get(row.id);
-  details.value.createdBy = row.createdBy;
-  show.value = true;
+  if (viewing.value !== null) return;
+  viewing.value = row.id;
+  try {
+    details.value = await importApi.get(row.id);
+    details.value.createdBy = row.createdBy;
+    show.value = true;
+  } finally {
+    viewing.value = null;
+  }
 }
 onMounted(async () => {
   await useMeta().load();
@@ -50,7 +57,14 @@ onMounted(async () => {
       ><template #default="{ row }">{{ fmtDate(row.committedAt, true) }}</template></el-table-column
     ><el-table-column label="操作" width="100" fixed="right"
       ><template #default="{ row }"
-        ><el-button link type="primary" @click="view(row)">查看详情</el-button></template
+        ><el-button
+          link
+          type="primary"
+          :loading="viewing === row.id"
+          :disabled="viewing !== null && viewing !== row.id"
+          @click="view(row)"
+          >查看详情</el-button
+        ></template
       ></el-table-column
     >
   </ManagementList>

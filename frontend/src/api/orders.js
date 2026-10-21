@@ -12,6 +12,12 @@ export const orderApi = {
     api.get('/orders', {
       params: {
         ...queryFilters(filters),
+        ...Object.fromEntries(
+          ['purchaseStatus', 'orderStatus', 'trackingWarning', 'priceFactorLevel'].map((key) => [
+            key,
+            Array.isArray(filters[key]) ? JSON.stringify(filters[key]) : filters[key],
+          ]),
+        ),
         shopNames: JSON.stringify(filters.shopNames || []),
         purchasePlatforms: JSON.stringify(filters.purchasePlatforms || []),
       },

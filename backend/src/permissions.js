@@ -1,7 +1,7 @@
 import { Store } from './models.js';
 import { assert } from './errors.js';
 
-const common = ['orders', 'imports', 'templates', 'audit-logs'];
+const common = ['home', 'orders', 'imports', 'templates', 'audit-logs'];
 export const rolePermissions = {
   admin: ['*'],
   purchasing: [...common, 'purchaseChannel', 'purchasePlatform', 'purchaseStatus'],

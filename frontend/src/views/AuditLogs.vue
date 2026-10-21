@@ -55,9 +55,16 @@ const summary = computed(() => {
   const { changes: _, ...rest } = details.value?.details || {};
   return JSON.stringify(rest, null, 2);
 });
+const viewing = ref(null);
 async function view(row) {
-  details.value = await api.get(`/audit-logs/${row.id}`);
-  show.value = true;
+  if (viewing.value !== null) return;
+  viewing.value = row.id;
+  try {
+    details.value = await api.get(`/audit-logs/${row.id}`);
+    show.value = true;
+  } finally {
+    viewing.value = null;
+  }
 }
 onMounted(async () => {
   if (auth.user?.role === 'admin') users.value = await api.get('/users');
@@ -110,7 +117,14 @@ onMounted(async () => {
       >
       <el-table-column label="详情" width="90" fixed="right"
         ><template #default="{ row }"
-          ><el-button link type="primary" @click="view(row)">查看</el-button></template
+          ><el-button
+            link
+            type="primary"
+            :loading="viewing === row.id"
+            :disabled="viewing !== null && viewing !== row.id"
+            @click="view(row)"
+            >查看</el-button
+          ></template
         ></el-table-column
       >
     </ManagementList>

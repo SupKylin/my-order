@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { assert } from '../../errors.js';
 import { walmartImage } from '../../lib/product-image.js';
+import { hasCancellationIntent } from '../../lib/cancellation-intent.js';
 
 export const lineStatuses = (line) =>
   (line.orderLineStatuses?.orderLineStatus ?? []).map((entry) => entry.status);
@@ -161,6 +162,8 @@ export function mapOrderLine(store, order, line, catalog) {
       purchaseOrderId: order.purchaseOrderId,
       lineNumber: line.lineNumber,
       statuses: lineStatuses(line),
+      // 取消意向独立于实际状态，不能将 Acknowledged 擅自改为 Cancelled。
+      intentToCancel: hasCancellationIntent(line.intentToCancel),
       orderDate: order.orderDate,
       estimatedShipDate: order.shippingInfo?.estimatedShipDate,
       estimatedDeliveryDate: order.shippingInfo?.estimatedDeliveryDate,

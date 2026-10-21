@@ -36,6 +36,27 @@ function order(status = 'Created') {
   };
 }
 
+test('取消申请按商品行独立保存，不将已确认改为已取消，FALSE 不误判为真', () => {
+  const raw = order('Acknowledged');
+  const line = raw.orderLines.orderLine[0];
+  for (const [value, expected] of [
+    ['TRUE', true],
+    [true, true],
+    [' true ', true],
+    ['FALSE', false],
+    [false, false],
+    [undefined, false],
+    [null, false],
+    ['', false],
+  ]) {
+    line.intentToCancel = value;
+    const result = mapOrderLine({ id: 1, systemStoreName: '店铺' }, raw, line);
+    assert.equal(result.walmart.intentToCancel, expected);
+    assert.equal(result.fields.platformOrderStatus, '已确认');
+    assert.equal(result.fields.purchaseStatus, undefined);
+  }
+});
+
 test('官方图片直接映射到商品图片字段，缺失图片清空旧值，不接受其他域名', () => {
   const raw = order();
   const line = raw.orderLines.orderLine[0];

@@ -34,6 +34,7 @@ const {
   meta,
   auth,
   loading,
+  opening,
   rows,
   total,
   selected,
@@ -65,6 +66,7 @@ const {
   assign,
 } = useOrders();
 const columnDialog = ref(false);
+const columnsOpening = ref(false);
 const batchOrderDialog = ref(false);
 const batchOrderDraft = ref('');
 const exportBusy = ref(false);
@@ -84,6 +86,7 @@ const activeAdvancedFilters = computed(
       'purchaseChannel',
       'orderStatus',
       'platformOrderStatus',
+      'cancellationIntent',
       'fulfillmentParty',
       'shippingMode',
       'purchasePlatforms',
@@ -129,9 +132,15 @@ async function applyBatchOrderSearch() {
   await search();
 }
 async function openColumnDialog() {
-  await meta.load();
-  if (!columnsReady.value) await loadColumns();
-  if (columnsReady.value) columnDialog.value = true;
+  if (columnsOpening.value) return;
+  columnsOpening.value = true;
+  try {
+    await meta.load();
+    if (!columnsReady.value) await loadColumns();
+    if (columnsReady.value) columnDialog.value = true;
+  } finally {
+    columnsOpening.value = false;
+  }
 }
 async function applyColumns(value) {
   if (await saveColumns(value)) {
@@ -299,12 +308,17 @@ async function submitStatus() {
             @click="operationsOpen = !operationsOpen"
             >{{ operationsOpen ? '收起操作' : '展开操作' }}</el-button
           >
-          <el-button :icon="Setting" @click="openColumnDialog">表头设置</el-button
-          ><el-button :icon="Refresh" @click="refresh">刷新</el-button>
+          <el-button :icon="Setting" :loading="columnsOpening" @click="openColumnDialog"
+            >表头设置</el-button
+          ><el-button :icon="Refresh" :loading="loading" @click="refresh">刷新</el-button>
           <!-- 订单统一由 Walmart API 接入，保留人工新增入口代码。
           <el-button :icon="Plus" @click="edit(null)">新增明细</el-button>
           -->
-          <el-button :icon="User" :disabled="!selected.length" @click="openAssign()"
+          <el-button
+            :icon="User"
+            :loading="opening"
+            :disabled="!selected.length || loading"
+            @click="openAssign()"
             >批量分配采购渠道</el-button
           >
           <!-- 保留 Excel 订单导入代码，暂不开放入口。
@@ -342,7 +356,14 @@ async function submitStatus() {
               :key="shop"
               :label="shop"
               :value="shop" /></el-select
-          ><el-select v-model="filters.purchaseStatus" placeholder="采购状态" clearable
+          ><el-select
+            v-model="filters.purchaseStatus"
+            aria-label="采购状态筛选"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="采购状态"
+            clearable
             ><el-option
               v-for="status in meta.fieldMap.purchaseStatus?.options"
               :key="status"
@@ -419,6 +440,9 @@ async function submitStatus() {
           </el-select>
           <el-select
             v-model="filters.trackingWarning"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
             placeholder="未出跟踪号"
             aria-label="未出跟踪号筛选"
             clearable
@@ -440,6 +464,9 @@ async function submitStatus() {
           </el-select>
           <el-select
             v-model="filters.priceFactorLevel"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
             placeholder="价格系数等级"
             aria-label="价格系数等级"
             clearable
@@ -470,7 +497,23 @@ async function submitStatus() {
               :value="status"
             />
           </el-select>
-          <el-select v-model="filters.orderStatus" placeholder="运营订单状态" clearable
+          <el-select
+            v-model="filters.cancellationIntent"
+            placeholder="客户取消申请"
+            aria-label="客户取消申请筛选"
+            clearable
+          >
+            <el-option label="客户申请取消" value="requested" />
+            <el-option label="无取消申请提示" value="not_requested" />
+          </el-select>
+          <el-select
+            v-model="filters.orderStatus"
+            aria-label="运营订单状态筛选"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="运营订单状态"
+            clearable
             ><el-option
               v-for="status in meta.fieldMap.orderStatus?.options"
               :key="status"
@@ -537,8 +580,10 @@ async function submitStatus() {
           </div>
         </div>
         <div class="filter-actions">
-          <el-button type="primary" plain :icon="Search" @click="search">查询</el-button>
-          <el-button text @click="reset">重置</el-button>
+          <el-button type="primary" plain :icon="Search" :loading="loading" @click="search"
+            >查询</el-button
+          >
+          <el-button text :disabled="loading" @click="reset">重置</el-button>
           <el-button text type="primary" @click="filters.storeOwnerId = auth.user.id"
             >只看我的店铺</el-button
           >
@@ -547,7 +592,12 @@ async function submitStatus() {
       <div v-if="selected.length" class="selection-bar">
         <span
           >已跨页选中 <strong>{{ selected.length }}</strong> 条商品明细</span
-        ><el-button type="primary" size="small" :icon="User" @click="openAssign()"
+        ><el-button
+          type="primary"
+          size="small"
+          :icon="User"
+          :loading="opening"
+          @click="openAssign()"
           >批量分配采购渠道</el-button
         ><el-button size="small" :icon="EditPen" @click="openStatusDialog"
           >批量更改运营订单状态</el-button
@@ -574,6 +624,7 @@ async function submitStatus() {
           v-model:current-page="filters.page"
           v-model:page-size="filters.pageSize"
           :total="total"
+          :disabled="loading"
           :page-sizes="[20, 50, 100]"
           layout="total, sizes, prev, pager, next"
           @current-change="changePage"
@@ -602,6 +653,7 @@ async function submitStatus() {
     <p class="dialog-description">将选中的 {{ statusItems.length }} 条商品明细更改为：</p>
     <el-select
       v-model="statusDraft"
+      :disabled="statusBusy"
       placeholder="选择运营订单状态"
       aria-label="批量选择运营订单状态"
       filterable
@@ -636,7 +688,7 @@ async function submitStatus() {
     <template #footer>
       <el-button @click="batchOrderDialog = false">取消</el-button>
       <el-button @click="batchOrderDraft = ''">清空</el-button>
-      <el-button type="primary" @click="applyBatchOrderSearch">查询</el-button>
+      <el-button type="primary" :loading="loading" @click="applyBatchOrderSearch">查询</el-button>
     </template>
   </el-dialog>
   <OrderColumnSettings

@@ -6,6 +6,7 @@ const showPassword = defineModel({ type: Boolean });
 const saving = ref(false);
 const password = reactive({ oldPassword: '', newPassword: '', confirm: '' });
 async function changePassword() {
+  if (saving.value) return;
   if (password.newPassword !== password.confirm) return ElMessage.warning('两次新密码不一致');
   saving.value = true;
   try {
@@ -19,8 +20,15 @@ async function changePassword() {
 }
 </script>
 <template>
-  <el-dialog v-model="showPassword" title="修改登录密码" width="440px" destroy-on-close
-    ><el-form label-position="top"
+  <el-dialog
+    v-model="showPassword"
+    title="修改登录密码"
+    width="440px"
+    :close-on-click-modal="!saving"
+    :close-on-press-escape="!saving"
+    :show-close="!saving"
+    destroy-on-close
+    ><el-form :disabled="saving" label-position="top"
       ><el-form-item label="原密码"
         ><el-input
           v-model="password.oldPassword"
@@ -40,7 +48,7 @@ async function changePassword() {
           show-password
           autocomplete="new-password" /></el-form-item></el-form
     ><template #footer
-      ><el-button @click="showPassword = false">取消</el-button
+      ><el-button :disabled="saving" @click="showPassword = false">取消</el-button
       ><el-button type="primary" :loading="saving" @click="changePassword"
         >保存密码</el-button
       ></template

@@ -42,17 +42,19 @@ test('预警与日期、价格、渠道取交集，清空预警恢复原筛选�
       [Op.lte]: '2026-10-10',
     });
     assert.deepEqual(result.where.orderAmount, { [Op.gte]: '10.00' });
-    assert.equal(result.where[Op.and].length, 4);
-    assert.equal(result.where[Op.and][3].platformOrderStatus, '已确认');
+    const warning = result.where[Op.and].find(
+      (condition) => condition.platformOrderStatus === '已确认',
+    );
+    assert.ok(warning);
     assert.deepEqual(
-      result.where[Op.and][3].platformShipDate,
+      warning.platformShipDate,
       level === 'red'
         ? { [Op.lt]: '2026-10-05' }
         : { [Op.gte]: '2026-10-05', [Op.lte]: '2026-10-05' },
     );
     assert.ok(result.include[1].where[Op.and]);
   }
-  assert.equal(buildFilters({ shippingWarning: '' }, now).where[Op.and], undefined);
+  assert.deepEqual(buildFilters({ shippingWarning: '' }, now).where[Op.and], [{}]);
   assert.equal(buildFilters({}, now).where.platformOrderStatus, undefined);
   assert.throws(() => buildFilters({ shippingWarning: 'unknown' }), /发货预警筛选无效/);
 });
@@ -64,6 +66,8 @@ test('分页和预警统计复用同一时刻生成的条件，统计不受分�
     return { rows: [], count: 7 };
   });
   t.mock.method(OrderItem, 'findAll', async (query) => {
+    // 当日分配汇总另行查询，不混入发货日期统计的断言。
+    if (!query.attributes.includes('platformShipDate')) return [];
     statsQuery = query;
     return [{ platformShipDate: '2026-10-06', count: '7' }];
   });
@@ -83,10 +87,12 @@ test('分页和预警统计复用同一时刻生成的条件，统计不受分�
 test('未选择预警筛选时列表包含全部状态，但顶部预警数量仅统计已确认', async (t) => {
   t.mock.method(OrderItem, 'findAndCountAll', async (query) => {
     assert.equal(query.where.platformOrderStatus, undefined);
-    assert.equal(query.where[Op.and], undefined);
+    assert.deepEqual(query.where[Op.and], [{}]);
     return { rows: [], count: 12 };
   });
   t.mock.method(OrderItem, 'findAll', async (query) => {
+    // 当日分配汇总另行查询，不混入发货日期统计的断言。
+    if (!query.attributes.includes('platformShipDate')) return [];
     assert.equal(query.where[Op.and][1].platformOrderStatus, '已确认');
     return [{ platformShipDate: '2026-10-06', count: '2' }];
   });

@@ -38,6 +38,7 @@ function edit(row) {
   dialog.value = true;
 }
 async function save() {
+  if (saving.value) return;
   saving.value = true;
   try {
     if (editing.value) await userApi.update(editing.value.id, { ...form });
@@ -100,7 +101,9 @@ onMounted(async () => {
     :title="editing ? '编辑团队账号' : '创建团队账号'"
     width="480px"
     :close-on-click-modal="false"
-    ><el-form label-position="top"
+    :close-on-press-escape="!saving"
+    :show-close="!saving"
+    ><el-form :disabled="saving" label-position="top"
       ><el-form-item label="姓名"
         ><el-input
           v-model="form.displayName"
@@ -127,7 +130,7 @@ onMounted(async () => {
           autocomplete="new-password" /></el-form-item
       ><el-form-item label="启用账号"><el-switch v-model="form.active" /></el-form-item></el-form
     ><template #footer
-      ><el-button @click="dialog = false">取消</el-button
+      ><el-button :disabled="saving" @click="dialog = false">取消</el-button
       ><el-button type="primary" :loading="saving" @click="save">保存账号</el-button></template
     ></el-dialog
   >
