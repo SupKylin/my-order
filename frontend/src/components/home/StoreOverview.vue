@@ -9,8 +9,8 @@ import { PLATFORM_TIME_ZONE } from '../../utils/businessTime';
 const loading = ref(false),
   stores = ref([]),
   today = ref('');
-const keyword = ref(''),
-  appliedKeyword = ref(''),
+const storeIds = ref([]),
+  appliedStoreIds = ref([]),
   ownerId = ref(null),
   appliedOwnerId = ref(null),
   page = ref(1),
@@ -19,9 +19,7 @@ const filtered = computed(() =>
   stores.value.filter(
     (row) =>
       (!appliedOwnerId.value || row.ownerId === appliedOwnerId.value) &&
-      [row.name, row.walmartName, row.owner].some((value) =>
-        value?.toLowerCase().includes(appliedKeyword.value.toLowerCase()),
-      ),
+      (!appliedStoreIds.value.length || appliedStoreIds.value.includes(row.id)),
   ),
 );
 const visible = computed(() =>
@@ -82,12 +80,12 @@ function moneySum(key) {
   return `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`;
 }
 function query() {
-  appliedKeyword.value = keyword.value.trim();
+  appliedStoreIds.value = [...(storeIds.value || [])];
   appliedOwnerId.value = ownerId.value;
   page.value = 1;
 }
 function reset() {
-  keyword.value = '';
+  storeIds.value = [];
   ownerId.value = null;
   query();
 }
@@ -143,13 +141,23 @@ onMounted(load);
         }}</span>
       </div>
       <div class="management-filters">
-        <el-input
-          v-model="keyword"
-          class="management-keyword"
+        <el-select
+          v-model="storeIds"
+          class="overview-store-filter"
+          multiple
+          collapse-tags
+          collapse-tags-tooltip
           clearable
-          placeholder="系统店铺名、Walmart 店铺名或所属账号"
-          @keyup.enter="query"
-        />
+          placeholder="全部店铺"
+          aria-label="店铺筛选"
+        >
+          <el-option
+            v-for="store in stores"
+            :key="store.id"
+            :value="store.id"
+            :label="store.name"
+          />
+        </el-select>
         <StoreOwnerSelect v-model="ownerId" :stores="stores" />
         <el-button type="primary" plain :icon="Search" @click="query">查询</el-button>
         <el-button @click="reset">重置</el-button>

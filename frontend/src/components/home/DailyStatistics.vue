@@ -7,10 +7,10 @@ import StoreOwnerSelect from './StoreOwnerSelect.vue';
 const props = defineProps({ byStore: Boolean });
 const loading = ref(false),
   report = ref(null);
-const storeId = ref(null),
+const storeIds = ref([]),
   ownerId = ref(null),
   dates = ref([]);
-const applied = ref({ storeId: null, ownerId: null, dates: [] });
+const applied = ref({ storeIds: [], ownerId: null, dates: [] });
 const page = ref(1),
   pageSize = ref(50);
 const columns = [
@@ -33,7 +33,9 @@ const filtered = computed(() => {
   );
   return source.filter(
     (row) =>
-      (!props.byStore || !applied.value.storeId || row.storeId === applied.value.storeId) &&
+      (!props.byStore ||
+        !applied.value.storeIds.length ||
+        applied.value.storeIds.includes(row.storeId)) &&
       (!props.byStore || !applied.value.ownerId || ownerStores.has(row.storeId)) &&
       (!applied.value.dates?.length ||
         (row.date >= applied.value.dates[0] && row.date <= applied.value.dates[1])),
@@ -45,14 +47,14 @@ const visible = computed(() =>
 const incomplete = computed(() => filtered.value.some((row) => !row.ready));
 function query() {
   applied.value = {
-    storeId: storeId.value,
+    storeIds: [...(storeIds.value || [])],
     ownerId: ownerId.value,
     dates: [...(dates.value || [])],
   };
   page.value = 1;
 }
 function reset() {
-  storeId.value = null;
+  storeIds.value = [];
   ownerId.value = null;
   dates.value = [];
   query();
@@ -91,11 +93,15 @@ onMounted(load);
       <StoreOwnerSelect v-if="byStore" v-model="ownerId" :stores="report?.stores || []" />
       <el-select
         v-if="byStore"
-        v-model="storeId"
+        v-model="storeIds"
         class="daily-store-filter"
+        multiple
+        collapse-tags
+        collapse-tags-tooltip
         clearable
         filterable
         placeholder="全部店铺"
+        aria-label="店铺筛选"
       >
         <el-option
           v-for="store in report?.stores || []"
