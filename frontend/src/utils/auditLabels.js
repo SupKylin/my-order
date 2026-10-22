@@ -13,6 +13,7 @@ export const auditActions = {
   edit_item: '编辑订单',
   assign_purchase_channels: '分配采购渠道',
   batch_update_order_status: '批量更新运营状态',
+  batch_update_purchase_status: '批量更新采购状态',
   walmart_sync_order: 'Walmart同步',
   walmart_sync_config: '调整同步配置',
   create_store: '新增店铺',

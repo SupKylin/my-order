@@ -6,6 +6,7 @@ import {
   editItem,
   assignItems,
   updateOrderStatus,
+  updatePurchaseStatus,
 } from '../services/orders.js';
 import { deleteItems } from '../services/order-deletion.js';
 import { exportOrders } from '../services/order-export.js';
@@ -33,6 +34,9 @@ export function createOrdersRouter() {
   }
   router.post('/orders/batch-status', async (req, res) =>
     res.json(await updateOrderStatus(req.body, req.user)),
+  );
+  router.post('/orders/batch-purchase-status', async (req, res) =>
+    res.json(await updatePurchaseStatus(req.body, req.user)),
   );
   router.get('/orders/:id', async (req, res) => res.json(await getItem(req.params.id, req.user)));
   router.post('/orders', async (req, res) =>

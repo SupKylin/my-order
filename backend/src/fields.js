@@ -46,7 +46,7 @@ export const fields = [
   f('productSpecification', '商品规格', 'product', 'textarea'),
   f('walmartSku', 'WalmartSku', 'product'),
   f('productImage', '商品图片', 'product', 'image'),
-  f('quantity', '数量', 'product', 'integer'),
+  f('quantity', '商品数量', 'product', 'integer'),
   f('recipientName', '姓名', 'product'),
   f('address1', '地址一', 'product'),
   f('address2', '地址二', 'product'),
@@ -54,6 +54,7 @@ export const fields = [
   f('state', '州', 'product'),
   f('postalCode', '邮编', 'product'),
   f('phone', '电话', 'product'),
+  f('purchaseQuantity', '采购数量', 'purchase', 'integer'),
   f('purchaseUrl', '采购商品链接', 'purchase', 'url'),
   f('purchaseSku', '采购Sku', 'purchase'),
   f('purchaseLinkAmount', '采购商品链接金额', 'purchase', 'money'),
@@ -84,6 +85,7 @@ export const fields = [
 ];
 export const fieldMap = Object.fromEntries(fields.map((f) => [f.key, f]));
 export const aliases = {
+  数量: 'quantity',
   店铺: 'shopName',
   店铺名称: 'shopName',
   订单编号: 'orderNumber',

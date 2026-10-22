@@ -27,7 +27,13 @@ test('状态多选兼容 GET JSON、导出数组和旧单选，空数组不限�
 });
 
 test('多选拒绝非法格式和等级，不将全部提醒误作不限订单', () => {
-  for (const key of ['purchaseStatus', 'orderStatus', 'trackingWarning', 'priceFactorLevel']) {
+  for (const key of [
+    'purchaseChannel',
+    'purchaseStatus',
+    'orderStatus',
+    'trackingWarning',
+    'priceFactorLevel',
+  ]) {
     for (const value of ['[bad', [null], [1], {}, [''], Array(201).fill('x')])
       assert.throws(() => buildFilters({ [key]: value }), /筛选.*无效/);
   }

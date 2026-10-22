@@ -87,7 +87,9 @@ test('导出工作簿包含完整字段且按筛选导出，勾选 ID 不覆盖�
       order: { orderNumber: 'TEST-2' },
       platformTrackingNumber: 'PLATFORM-TRACK-2',
       walmartSku: 'SKU-002',
+      quantity: 3,
       purchase: {
+        purchaseQuantity: 5,
         purchaseSku: 'BUY-002',
         purchaseChannel: ['渠道A', '渠道B'],
         assignee: { displayName: '采购员甲' },
@@ -117,6 +119,8 @@ test('导出工作簿包含完整字段且按筛选导出，勾选 ID 不覆盖�
     assert.equal(sheet.getRow(2).getCell(headers.indexOf('订单号')).value, 'TEST-2');
     assert.equal(sheet.getRow(2).getCell(headers.indexOf('WalmartSku')).value, 'SKU-002');
     assert.equal(sheet.getRow(2).getCell(headers.indexOf('采购Sku')).value, 'BUY-002');
+    assert.equal(sheet.getRow(2).getCell(headers.indexOf('商品数量')).value, 3);
+    assert.equal(sheet.getRow(2).getCell(headers.indexOf('采购数量')).value, 5);
     assert.equal(
       sheet.getRow(2).getCell(headers.indexOf('平台发货物流单号')).value,
       'PLATFORM-TRACK-2',
@@ -191,7 +195,13 @@ test('采购模板下拉复用当前启用选项，支持长名称及逗号，�
         id: 2,
         order: { orderNumber: 'HISTORICAL' },
         operationsNote: '优先处理',
-        purchase: { purchasePlatform: '停用的旧平台', shippingMode: 'FBA', allocatable: '是' },
+        quantity: 3,
+        purchase: {
+          purchaseQuantity: 5,
+          purchasePlatform: '停用的旧平台',
+          shippingMode: 'FBA',
+          allocatable: '是',
+        },
       },
       { id: 1, order: { orderNumber: 'EMPTY' }, purchase: {} },
     ];
@@ -203,9 +213,14 @@ test('采购模板下拉复用当前启用选项，支持长名称及逗号，�
     const sheet = workbook.worksheets[0];
     const options = workbook.getWorksheet('_purchase_options');
     assert.equal(sheet.name, '采购信息');
-    assert.equal(sheet.columnCount, 14);
-    assert.equal(sheet.getCell('N1').value, '运营备注');
-    assert.equal(sheet.getCell('N2').value, '优先处理');
+    assert.equal(sheet.columnCount, 15);
+    assert.equal(sheet.getCell('O1').value, '运营备注');
+    assert.equal(sheet.getCell('O2').value, '优先处理');
+    assert.equal(sheet.getCell('D1').value, '商品数量');
+    assert.equal(sheet.getCell('E1').value, '采购数量');
+    assert.equal(sheet.getCell('D2').value, 3);
+    assert.equal(sheet.getCell('E2').value, 5);
+    assert.equal(sheet.getCell('E3').value ?? '', '');
     assert.equal(sheet.rowCount, 3);
     assert.deepEqual(
       sheet.getRow(1).values.slice(1),
@@ -216,15 +231,15 @@ test('采购模板下拉复用当前启用选项，支持长名称及逗号，�
       choices.map((_, index) => options.getCell(index + 2, 1).value),
       choices,
     );
-    assert.equal(sheet.getCell('H2').value, '停用的旧平台');
-    assert.ok(!choices.includes(sheet.getCell('H2').value));
-    assert.equal(sheet.getCell('H3').value ?? '', '');
+    assert.equal(sheet.getCell('I2').value, '停用的旧平台');
+    assert.ok(!choices.includes(sheet.getCell('I2').value));
+    assert.equal(sheet.getCell('I3').value ?? '', '');
     for (const [column, key, expected] of [
-      ['H', 'purchasePlatform', choices],
-      ['I', 'shippingMode', ['FBM', 'FBA']],
-      ['L', 'allocatable', ['是', '否']],
+      ['I', 'purchasePlatform', choices],
+      ['J', 'shippingMode', ['FBM', 'FBA']],
+      ['M', 'allocatable', ['是', '否']],
     ]) {
-      const sourceColumn = { H: 'A', I: 'B', L: 'C' }[column];
+      const sourceColumn = { I: 'A', J: 'B', M: 'C' }[column];
       const name = `purchase_options_${key}`;
       assert.deepEqual(workbook.definedNames.getRanges(name).ranges, [
         `'_purchase_options'!$${sourceColumn}$2:$${sourceColumn}$${expected.length + 1}`,
@@ -243,7 +258,7 @@ test('采购模板下拉复用当前启用选项，支持长名称及逗号，�
       }
     }
     assert.equal(sheet.getCell('G2').dataValidation?.type, undefined);
-    assert.equal(sheet.getCell('H1').dataValidation?.type, undefined);
+    assert.equal(sheet.getCell('I1').dataValidation?.type, undefined);
 
     // 下一次导出必须重新读取维护后的选项，旧下载文件保留当时的快照。
     choices = ['平台新名称'];
@@ -257,8 +272,8 @@ test('采购模板下拉复用当前启用选项，支持长名称及逗号，�
     choices = [];
     const empty = await exportPurchaseTemplate();
     assert.equal(empty.getWorksheet('_purchase_options').getCell('A2').value ?? '', '');
-    assert.equal(empty.worksheets[0].getCell('H2').value, '停用的旧平台');
-    assert.equal(empty.worksheets[0].getCell('H3').dataValidation.allowBlank, true);
+    assert.equal(empty.worksheets[0].getCell('I2').value, '停用的旧平台');
+    assert.equal(empty.worksheets[0].getCell('I3').dataValidation.allowBlank, true);
   } finally {
     OrderItem.count = originals.count;
     OrderItem.findAll = originals.findAll;

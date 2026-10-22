@@ -199,7 +199,7 @@ onUnmounted(() => clearInterval(timer));
           :title="`${order.customerOrderId} · ${order.lines.length} 条明细`"
         >
           <div v-for="line in order.lines" :key="line.walmart.lineNumber" class="preview-line">
-            <strong>SKU {{ line.fields.walmartSku }} · 数量 {{ line.fields.quantity }}</strong>
+            <strong>SKU {{ line.fields.walmartSku }} · 商品数量 {{ line.fields.quantity }}</strong>
             <p>{{ line.fields.productName }}</p>
             <p>
               平台订单状态：{{ line.fields.platformOrderStatus || '—' }} · 商品规格：{{

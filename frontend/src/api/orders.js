@@ -1,17 +1,25 @@
 import { api } from './http';
 
 // 使用独立空值条件，避免“未分配”与用户自定义的渠道名称冲突。
-const queryFilters = (filters) => ({
-  ...filters,
-  purchaseChannel: filters.purchaseChannel === true ? '' : filters.purchaseChannel,
-  purchaseChannelEmpty: filters.purchaseChannel === true,
-});
+const queryFilters = (filters) => {
+  const channels = Array.isArray(filters.purchaseChannel)
+    ? filters.purchaseChannel
+    : filters.purchaseChannel
+      ? [filters.purchaseChannel]
+      : [];
+  return {
+    ...filters,
+    purchaseChannel: channels.filter((value) => value !== true),
+    purchaseChannelEmpty: channels.includes(true),
+  };
+};
 
 export const orderApi = {
   list: (filters) =>
     api.get('/orders', {
       params: {
         ...queryFilters(filters),
+        purchaseChannel: JSON.stringify(queryFilters(filters).purchaseChannel),
         ...Object.fromEntries(
           ['purchaseStatus', 'orderStatus', 'trackingWarning', 'priceFactorLevel'].map((key) => [
             key,
@@ -40,6 +48,8 @@ export const orderApi = {
   remove: (id, version) => api.delete(`/orders/${id}`, { data: { version } }),
   removeMany: (items) => api.post('/orders/batch-delete', { items }),
   updateStatus: (items, orderStatus) => api.post('/orders/batch-status', { items, orderStatus }),
+  updatePurchaseStatus: (items, purchaseStatus) =>
+    api.post('/orders/batch-purchase-status', { items, purchaseStatus }),
   // 版本随明细一起提交，服务器拒绝覆盖其他人员刚刚做出的分配。
   assign: (items, purchaseChannel) => api.post('/assignments', { items, purchaseChannel }),
 };

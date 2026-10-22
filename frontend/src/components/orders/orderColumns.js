@@ -15,6 +15,7 @@ const orderKeys = [
   'tax',
 ];
 const purchaseKeys = [
+  'purchaseQuantity',
   'purchaseSku',
   'purchaseStatus',
   'purchaseConfirmedAt',
@@ -41,6 +42,7 @@ const widths = {
   shopName: 125,
   orderNumber: 220,
   quantity: 90,
+  purchaseQuantity: 100,
   platformShipDate: 155,
   platformTrackingNumber: 200,
   orderStatus: 210,

@@ -73,6 +73,11 @@ const exportBusy = ref(false);
 const exportMessage = ref('');
 const statusDialog = ref(false);
 const statusBusy = ref(false);
+const statusOpening = ref(false);
+const statusField = ref('orderStatus');
+const statusLabel = computed(() =>
+  statusField.value === 'purchaseStatus' ? '采购状态' : '运营订单状态',
+);
 const statusDraft = ref('');
 const statusItems = ref([]);
 const advancedFiltersOpen = ref(false);
@@ -237,23 +242,36 @@ async function copyTrackingNumbers() {
     ElMessage.error('复制失败，请检查浏览器剪贴板权限');
   }
 }
-function openStatusDialog() {
+async function openStatusDialog(field = 'orderStatus') {
+  if (statusOpening.value || statusBusy.value) return;
   if (selected.value.some((item) => !canEditOrder(item)))
     return ElMessage.warning('WFS 订单不能修改状态，请重新选择');
   statusItems.value = selected.value.map(({ id, version }) => ({ id, version }));
   if (!statusItems.value.length) return ElMessage.warning('请先勾选商品明细');
-  statusDraft.value = '';
-  statusDialog.value = true;
+  if (statusItems.value.length > 500) return ElMessage.warning('单次最多更改 500 条商品明细');
+  statusOpening.value = true;
+  try {
+    await meta.load(true);
+    statusField.value = field;
+    statusDraft.value = '';
+    statusDialog.value = true;
+  } finally {
+    statusOpening.value = false;
+  }
 }
 async function submitStatus() {
-  if (!statusDraft.value) return ElMessage.warning('请选择运营订单状态');
+  if (!statusDraft.value) return ElMessage.warning(`请选择${statusLabel.value}`);
   if (statusBusy.value) return;
   statusBusy.value = true;
   try {
-    const result = await orderApi.updateStatus(statusItems.value, statusDraft.value);
+    const update =
+      statusField.value === 'purchaseStatus'
+        ? orderApi.updatePurchaseStatus
+        : orderApi.updateStatus;
+    const result = await update(statusItems.value, statusDraft.value);
     statusDialog.value = false;
     table.value?.clearSelection();
-    ElMessage.success(`已更新 ${result.updated} 条商品明细的运营订单状态`);
+    ElMessage.success(`已更新 ${result.updated} 条商品明细的${statusLabel.value}`);
     await refresh();
   } finally {
     statusBusy.value = false;
@@ -320,6 +338,13 @@ async function submitStatus() {
             :disabled="!selected.length || loading"
             @click="openAssign()"
             >批量分配采购渠道</el-button
+          >
+          <el-button
+            :icon="EditPen"
+            :loading="statusOpening"
+            :disabled="!selected.length || loading || statusBusy"
+            @click="openStatusDialog('purchaseStatus')"
+            >批量更改采购状态</el-button
           >
           <!-- 保留 Excel 订单导入代码，暂不开放入口。
           <el-button type="primary" :icon="Upload" @click="router.push('/imports/new')">导入订单</el-button>
@@ -475,7 +500,15 @@ async function submitStatus() {
             <el-option label="平（0.8 ≤ 系数 < 0.85）" value="medium" />
             <el-option label="高（≥ 0.85）" value="high" />
           </el-select>
-          <el-select v-model="filters.purchaseChannel" placeholder="采购渠道" clearable filterable>
+          <el-select
+            v-model="filters.purchaseChannel"
+            placeholder="采购渠道"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            clearable
+            filterable
+          >
             <el-option label="未分配" :value="true" />
             <el-option
               v-for="channel in meta.fieldMap.purchaseChannel?.options"
@@ -599,7 +632,19 @@ async function submitStatus() {
           :loading="opening"
           @click="openAssign()"
           >批量分配采购渠道</el-button
-        ><el-button size="small" :icon="EditPen" @click="openStatusDialog"
+        ><el-button
+          size="small"
+          :icon="EditPen"
+          :loading="statusOpening"
+          :disabled="loading || statusBusy"
+          @click="openStatusDialog('purchaseStatus')"
+          >批量更改采购状态</el-button
+        ><el-button
+          size="small"
+          :icon="EditPen"
+          :loading="statusOpening"
+          :disabled="loading || statusBusy"
+          @click="openStatusDialog('orderStatus')"
           >批量更改运营订单状态</el-button
         ><el-button size="small" :icon="CopyDocument" @click="copyTrackingNumbers"
           >复制物流单号</el-button
@@ -644,7 +689,7 @@ async function submitStatus() {
   />
   <el-dialog
     v-model="statusDialog"
-    title="批量更改运营订单状态"
+    :title="`批量更改${statusLabel}`"
     width="460px"
     :close-on-click-modal="!statusBusy"
     :close-on-press-escape="!statusBusy"
@@ -654,13 +699,13 @@ async function submitStatus() {
     <el-select
       v-model="statusDraft"
       :disabled="statusBusy"
-      placeholder="选择运营订单状态"
-      aria-label="批量选择运营订单状态"
+      :placeholder="`选择${statusLabel}`"
+      :aria-label="`批量选择${statusLabel}`"
       filterable
       style="width: 100%"
     >
       <el-option
-        v-for="status in meta.fieldMap.orderStatus?.options"
+        v-for="status in meta.fieldMap[statusField]?.options"
         :key="status"
         :label="status"
         :value="status"

@@ -29,7 +29,8 @@ export const purchaseTemplateColumns = [
   ['shopName', '店铺名'],
   ['orderNumber', '订单号'],
   ['walmartSku', 'WalmartSku'],
-  ['quantity', '数量'],
+  ['quantity', '商品数量'],
+  ['purchaseQuantity', '采购数量'],
   ['purchaseUrl', '采购商品链接'],
   ['purchaseSku', '采购Sku'],
   ['purchaseLinkAmount', '采购商品链接金额'],
@@ -163,7 +164,7 @@ export async function exportOrders(
   sheet.columns = selectedColumns.map(({ key, header }) => ({
     header,
     width: key === 'purchaseUrl' ? 40 : 22,
-    style: { numFmt: key === 'quantity' ? '0' : '@' },
+    style: { numFmt: ['quantity', 'purchaseQuantity'].includes(key) ? '0' : '@' },
   }));
   sheet.autoFilter = { from: 'A1', to: { row: 1, column: selectedColumns.length } };
   sheet.getRow(1).font = { bold: true };

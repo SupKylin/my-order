@@ -157,7 +157,7 @@ test('服务器筛选按同一 24/48 小时边界，和价格、渠道、状态�
       { '$purchase.purchaseConfirmedAt$': expected },
     );
     assert.deepEqual(filters.where.orderAmount, { [Op.gte]: '10.00' });
-    assert.ok(filters.include[1].where[Op.and]);
+    assert.equal(filters.include[1].where[Op.or].length, 1);
     assert.equal(filters.include[1].where.purchaseStatus, status);
   }
   // 数据权限会附加独立 AND 条件，不能再假定提醒范围是最后一项。

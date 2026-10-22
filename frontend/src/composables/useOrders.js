@@ -58,7 +58,7 @@ export function useOrders() {
     shippingMode: '',
     purchasePlatforms: [],
     purchaseStatus: [],
-    purchaseChannel: '',
+    purchaseChannel: [],
     priceFactorLevel: [],
     priceType: 'purchaseLinkAmount',
     minPrice: '',
@@ -161,7 +161,7 @@ export function useOrders() {
       shippingMode: '',
       purchasePlatforms: [],
       purchaseStatus: [],
-      purchaseChannel: '',
+      purchaseChannel: [],
       priceFactorLevel: [],
       priceType: 'purchaseLinkAmount',
       minPrice: '',
@@ -188,9 +188,9 @@ export function useOrders() {
     await search();
   }
   async function cardFilter(kind) {
-    Object.assign(filters, { purchaseChannel: '', purchaseStatus: [], page: 1 });
+    Object.assign(filters, { purchaseChannel: [], purchaseStatus: [], page: 1 });
     filters.afterSales = '';
-    if (kind === 'unassigned') filters.purchaseChannel = true;
+    if (kind === 'unassigned') filters.purchaseChannel = [true];
     if (kind === 'progress') filters.purchaseStatus = ['采购中'];
     if (kind === 'afterSales') filters.afterSales = '是';
   }
@@ -303,7 +303,7 @@ export function useOrders() {
   watch(
     () => route.query.assignedTo,
     (value) => {
-      filters.purchaseChannel = value === 'unassigned' ? true : '';
+      filters.purchaseChannel = value === 'unassigned' ? [true] : [];
     },
   );
   onMounted(async () => {
@@ -313,7 +313,7 @@ export function useOrders() {
       await meta.load();
       users.value = await api.get('/order-owners');
       // 兼容旧采购分配页面书签，重定向后仍可查看待分配记录。
-      if (route.query.assignedTo === 'unassigned') filters.purchaseChannel = true;
+      if (route.query.assignedTo === 'unassigned') filters.purchaseChannel = [true];
       appliedFilters.value = snapshotFilters();
       await refresh();
     } finally {

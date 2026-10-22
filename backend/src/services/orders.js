@@ -111,6 +111,8 @@ export async function upsertImported(patch, transaction, actor, target = undefin
   await Purchase.create(
     {
       itemId: item.id,
+      // 只在首次创建订单时初始化；历史空值、人工修改或清空均不由后续同步覆盖。
+      purchaseQuantity: item.quantity ?? null,
       ...procurementStatePatch(null, purchaseTimerPatch(null, parts.purchase)),
       assignedTo: actor.id,
       assignedAt: new Date(),
@@ -228,24 +230,29 @@ export function buildFilters(query, now = Date.now(), user) {
     assert(query[key] === 'empty' || options.includes(query[key]), '审核或供应商分配状态筛选无效');
     purchaseWhere[key] = query[key] === 'empty' ? { [Op.or]: [null, ''] } : query[key];
   }
+  const channelConditions = [];
   if (query.purchaseChannelEmpty === 'true' || query.purchaseChannelEmpty === true) {
     // 同时兼容未填写、历史单选空文本，以及多选序列化后的空数组。
-    purchaseWhere[Op.or] = [
+    channelConditions.push(
       { purchaseChannel: null },
       sqlWhere(fn('TRIM', col('purchase.purchaseChannel')), { [Op.in]: ['', '[]', 'null', '""'] }),
-    ];
-  } else if (query.purchaseChannel) {
-    const channelColumn = col('purchase.purchaseChannel');
-    // 旧单选文本和新数组均支持按其中一个渠道筛选；查询值由 Sequelize 转义。
-    purchaseWhere[Op.and] = sqlWhere(
-      fn(
-        'JSON_CONTAINS',
-        fn('IF', fn('JSON_VALID', channelColumn), channelColumn, fn('JSON_ARRAY', channelColumn)),
-        JSON.stringify(String(query.purchaseChannel)),
-      ),
-      1,
     );
   }
+  for (const channel of filterValues(query.purchaseChannel, '采购渠道筛选格式无效')) {
+    const channelColumn = col('purchase.purchaseChannel');
+    // 旧单选文本和新数组均支持按其中一个渠道筛选；查询值由 Sequelize 转义。
+    channelConditions.push(
+      sqlWhere(
+        fn(
+          'JSON_CONTAINS',
+          fn('IF', fn('JSON_VALID', channelColumn), channelColumn, fn('JSON_ARRAY', channelColumn)),
+          JSON.stringify(channel),
+        ),
+        1,
+      ),
+    );
+  }
+  if (channelConditions.length) purchaseWhere[Op.or] = channelConditions;
   const factorLevels = filterValues(query.priceFactorLevel, '价格系数等级筛选无效', [
     'low',
     'medium',
@@ -645,6 +652,14 @@ export async function assignItems(input, user) {
 
 /** 批量状态更新与单条编辑共用字典校验，任一版本冲突则整批回滚。 */
 export async function updateOrderStatus(input, user) {
+  return updateBatchStatus(input, user, 'orderStatus', '运营订单状态');
+}
+
+export async function updatePurchaseStatus(input, user) {
+  return updateBatchStatus(input, user, 'purchaseStatus', '采购状态');
+}
+
+async function updateBatchStatus(input, user, key, label) {
   const entries = input?.items;
   assert(
     Array.isArray(entries) && entries.length > 0 && entries.length <= 500,
@@ -655,13 +670,14 @@ export async function updateOrderStatus(input, user) {
     '商品明细参数错误',
   );
   assert(new Set(entries.map((entry) => entry.id)).size === entries.length, '商品明细不能重复');
-  assert(typeof input.orderStatus === 'string' && input.orderStatus.trim(), '请选择运营订单状态');
+  assert(typeof input[key] === 'string' && input[key].trim(), `请选择${label}`);
   await db.transaction(async (transaction) => {
     const definitions = await getFieldDefinitions(transaction);
-    const { orderStatus } = validatePatch(
-      { orderStatus: input.orderStatus },
-      { fieldDefinitions: definitions.filter((field) => field.key === 'orderStatus') },
+    const patch = validatePatch(
+      { [key]: input[key] },
+      { fieldDefinitions: definitions.filter((field) => field.key === key) },
     );
+    const now = new Date();
     for (const entry of [...entries].sort((a, b) => a.id - b.id)) {
       const item = await OrderItem.findByPk(entry.id, {
         transaction,
@@ -671,13 +687,25 @@ export async function updateOrderStatus(input, user) {
       await assertItemAccess(item, user, transaction);
       assertOrderEditable(item);
       assert(item.version === entry.version, '部分商品已更新，请刷新后重试', 409);
-      await item.update({ orderStatus, version: item.version + 1 }, { transaction });
+      if (key === 'purchaseStatus') {
+        const purchase = await Purchase.findOne({
+          where: { itemId: item.id },
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+        assert(purchase, '采购记录不存在', 404);
+        await purchase.update(purchaseTimerPatch(purchase, patch, { now }), { transaction });
+        await item.update({ version: item.version + 1 }, { transaction });
+      } else {
+        await item.update({ ...patch, version: item.version + 1 }, { transaction });
+      }
     }
     await AuditLog.create(
       {
         userId: user.id,
-        action: 'batch_update_order_status',
-        details: { itemIds: entries.map((entry) => entry.id), orderStatus },
+        action:
+          key === 'purchaseStatus' ? 'batch_update_purchase_status' : 'batch_update_order_status',
+        details: { itemIds: entries.map((entry) => entry.id), ...patch },
       },
       { transaction },
     );

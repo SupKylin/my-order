@@ -7,6 +7,7 @@ import { migratePurchaseConfirmation } from './migrations/purchase-confirmation.
 import { migrateProcurementFields } from './migrations/procurement-fields.js';
 import { migrateProcurementState } from './migrations/procurement-state.js';
 import { migratePurchaseAssignment } from './migrations/purchase-assignment.js';
+import { migratePurchaseQuantity } from './migrations/purchase-quantity.js';
 
 /** 仅增加本次所需表和可空字段，禁止通过 alter/force 改写现有业务表。 */
 export async function migrateDictionaries() {
@@ -59,6 +60,7 @@ export async function migrateStores() {
 
 /** 仅扩展指定列的容量，保留旧数据；不使用 sync alter/force 重建业务表。 */
 export async function migrateOrderFields() {
+  await migratePurchaseQuantity();
   await migratePurchaseAssignment();
   await migrateProcurementState();
   await migrateProcurementFields();

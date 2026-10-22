@@ -29,6 +29,7 @@
 - 变体只读取 `GET /v3/items/{sku}?productIdType=SKU` 返回的 `ItemResponse` 中匹配 SKU 的 `variantGroupInfo.groupingAttributes`，不解析标题。正式同步按店铺＋SKU 复用订单中已保存的成功规格快照，缓存 24 小时；一次任务内按 SKU 去重查询。缓存到期或缺失时重新请求，失败保留原规格和原抓取时间，不延长有效期。预览始终查询最新商品接口，不写缓存。无需 Redis 或新增数据表。
 - `orderAmount` 为当前商品行 PRODUCT 与 SHIPPING 的 `chargeAmount.amount` 合计，税费单独保存，不再乘数量。履约方直接取 `shipNode.type`，不同于人工采购字段“发货模式”（FBM/FBA）。
 - 商品图片保存 Walmart 官方返回的图片 URL，列表、只读商品信息和订单导出共用该字段；不从标题猜测图片或规格。既有图片保留，禁止通过人工编辑或采购导入替换。完整订单导出生成嵌入式缩略图，不把官方图片 URL 改写为采购上传地址。
+- 商品数量沿用 `quantity`，取当前商品行 `orderLineQuantity.amount`；新订单首次创建时将采购数量 `purchaseQuantity` 初始化为相同值。后续同步仅更新商品数量，不改采购数量；历史订单的采购数量保持空值，不由同步补齐。
 - 出单日期对应接口下单时间 `orderDate`；时间戳原值保存在平台快照，现有 DATEONLY 列按固定 PST（UTC−8）转换。平台详情展示原时间戳转换结果。发货预警仅适用于平台订单状态为“已确认”的明细，行颜色、倒计时、数量统计与预警筛选使用相同范围；截止时间仍为平台发货日期次日北京时间 15:00。
 
 ## 预览和运行
