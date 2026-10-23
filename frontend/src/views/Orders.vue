@@ -19,6 +19,7 @@ import { orderApi } from '../api/orders';
 import OrderTable from '../components/orders/OrderTable.vue';
 import PurchaseAssignmentSummary from '../components/orders/PurchaseAssignmentSummary.vue';
 import { canEditOrder } from '../utils/orderWritePolicy';
+import { canManageProcurement } from '../utils/permissions';
 import { useOrderTablePreferences } from '../composables/useOrderTablePreferences';
 import { orderColumns } from '../components/orders/orderColumns';
 // 弹窗只在打开时挂载，因此不会提前下载编辑表单和图片上传逻辑。
@@ -65,6 +66,7 @@ const {
   openAssign,
   assign,
 } = useOrders();
+const procurementAllowed = computed(() => canManageProcurement(auth.user?.role));
 const columnDialog = ref(false);
 const columnsOpening = ref(false);
 const batchOrderDialog = ref(false);
@@ -243,6 +245,7 @@ async function copyTrackingNumbers() {
   }
 }
 async function openStatusDialog(field = 'orderStatus') {
+  if (field === 'purchaseStatus' && !procurementAllowed.value) return;
   if (statusOpening.value || statusBusy.value) return;
   if (selected.value.some((item) => !canEditOrder(item)))
     return ElMessage.warning('WFS 订单不能修改状态，请重新选择');
@@ -260,6 +263,7 @@ async function openStatusDialog(field = 'orderStatus') {
   }
 }
 async function submitStatus() {
+  if (statusField.value === 'purchaseStatus' && !procurementAllowed.value) return;
   if (!statusDraft.value) return ElMessage.warning(`请选择${statusLabel.value}`);
   if (statusBusy.value) return;
   statusBusy.value = true;
@@ -333,6 +337,7 @@ async function submitStatus() {
           <el-button :icon="Plus" @click="edit(null)">新增明细</el-button>
           -->
           <el-button
+            v-if="procurementAllowed"
             :icon="User"
             :loading="opening"
             :disabled="!selected.length || loading"
@@ -340,6 +345,7 @@ async function submitStatus() {
             >批量分配采购渠道</el-button
           >
           <el-button
+            v-if="procurementAllowed"
             :icon="EditPen"
             :loading="statusOpening"
             :disabled="!selected.length || loading || statusBusy"
@@ -626,6 +632,7 @@ async function submitStatus() {
         <span
           >已跨页选中 <strong>{{ selected.length }}</strong> 条商品明细</span
         ><el-button
+          v-if="procurementAllowed"
           type="primary"
           size="small"
           :icon="User"
@@ -633,6 +640,7 @@ async function submitStatus() {
           @click="openAssign()"
           >批量分配采购渠道</el-button
         ><el-button
+          v-if="procurementAllowed"
           size="small"
           :icon="EditPen"
           :loading="statusOpening"
@@ -657,6 +665,7 @@ async function submitStatus() {
           :rows="rows"
           :loading="loading"
           :show-operations="operationsOpen"
+          :can-assign="procurementAllowed"
           :warning-now="warningNow"
           @selection-change="selected = $event"
           @edit="edit"
@@ -680,7 +689,7 @@ async function submitStatus() {
   </div>
   <OrderEditor v-if="editor" v-model="editor" :item="editing" @saved="refresh" />
   <AssignmentDialog
-    v-if="assignDialog"
+    v-if="assignDialog && procurementAllowed"
     v-model="assignDialog"
     v-model:channels="assignmentChannels"
     :count="assignmentItems.length"

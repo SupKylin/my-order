@@ -190,14 +190,17 @@ test('非法或停用状态、无权限、WFS、版本冲突及不存在的记�
     assert.equal(saved.purchaseConfirmedAt, null);
     assert.equal(await AuditLog.count(), logCount);
   }
-  await updatePurchaseStatus({ items: entries([first]), purchaseStatus: success }, operator);
+  await assert.rejects(
+    updatePurchaseStatus({ items: entries([first]), purchaseStatus: success }, operator),
+    { status: 403 },
+  );
   await updatePurchaseStatus(
     { items: entries([other]), purchaseStatus: success },
     { id: actor.id, role: 'purchasing' },
   );
 });
 
-test('运营状态原有批量接口不修改采购状态，新采购接口可正常提交', async () => {
+test('运营状态原有批量接口不修改采购状态，运营账号不能调用采购状态接口', async () => {
   const row = await makeItem({ purchaseStatus: success, purchaseConfirmedAt: previousTime });
   await updateOrderStatus({ items: entries([row]), orderStatus: '已发货' }, actor);
   const saved = await getItem(row.id);
@@ -226,9 +229,9 @@ test('运营状态原有批量接口不修改采购状态，新采购接口可�
       body: JSON.stringify({ items: entries([saved]), purchaseStatus: '采购失败' }),
     },
   );
-  assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { updated: 1 });
-  assert.equal((await getItem(row.id)).purchaseStatus, '采购失败');
+  assert.equal(response.status, 403);
+  await response.json();
+  assert.equal((await getItem(row.id)).purchaseStatus, success);
 });
 
 test('多渠道与未分配取并集，兼容旧值，并与其他筛选、权限和两类导出一致', async () => {

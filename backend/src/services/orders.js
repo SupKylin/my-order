@@ -10,7 +10,7 @@ import { priceFactorPatterns } from '../lib/price-factor.js';
 import { filterValues } from '../lib/filter-values.js';
 import { shippingWindow } from '../lib/shipping-window.js';
 import { assertOrderEditable } from '../lib/order-write-policy.js';
-import { orderScope, assertItemAccess } from '../permissions.js';
+import { orderScope, assertItemAccess, requirePermission } from '../permissions.js';
 import { procurementStatePatch } from '../lib/procurement-state.js';
 import { sameFieldValue } from '../lib/order-concurrency.js';
 import { purchaseAssignmentSummary } from './purchase-assignment-summary.js';
@@ -501,6 +501,12 @@ export async function editItem(id, input, user) {
       requireKeys: !hasBase,
       fieldDefinitions: editableDefinitions,
     });
+    for (const key of ['purchaseStatus', 'purchaseChannel']) {
+      if (!Object.hasOwn(patch, key)) continue;
+      if (!sameFieldValue(key, currentPurchase?.[key], patch[key])) requirePermission(user, key);
+      // 兼容旧表单携带未改变的字段，不让只读字段参与覆盖或冲突检查。
+      else if (user.role === 'operations') delete patch[key];
+    }
     const currentOrder = await Order.findByPk(item.orderId, { transaction: t });
     if (hasBase) {
       const conflicts = [];
@@ -593,6 +599,7 @@ export async function editItem(id, input, user) {
 }
 /** 多选渠道覆盖原值；批量分配要么全部成功，要么整批回滚。 */
 export async function assignItems(input, user) {
+  requirePermission(user, 'purchaseChannel');
   const entries = input?.items;
   assert(
     Array.isArray(entries) && entries.length > 0 && entries.length <= 500,
@@ -656,6 +663,7 @@ export async function updateOrderStatus(input, user) {
 }
 
 export async function updatePurchaseStatus(input, user) {
+  requirePermission(user, 'purchaseStatus');
   return updateBatchStatus(input, user, 'purchaseStatus', '采购状态');
 }
 

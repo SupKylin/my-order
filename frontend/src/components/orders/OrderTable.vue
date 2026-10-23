@@ -10,6 +10,7 @@ const props = defineProps({
   columns: { type: Array, required: true },
   loading: Boolean,
   showOperations: Boolean,
+  canAssign: Boolean,
   warningNow: { type: Number, required: true },
 });
 const emit = defineEmits(['selection-change', 'edit', 'assign', 'import']);
@@ -77,7 +78,9 @@ defineExpose({
       ><template #default="{ row }">
         <template v-if="canEditOrder(row)">
           <el-button link type="primary" @click="emit('edit', row)">编辑</el-button>
-          <el-button link type="primary" @click="emit('assign', row)">分配渠道</el-button>
+          <el-button v-if="canAssign" link type="primary" @click="emit('assign', row)"
+            >分配渠道</el-button
+          >
         </template>
         <span v-else class="muted" title="由 Walmart 同步维护">WFS 只读</span>
       </template></el-table-column

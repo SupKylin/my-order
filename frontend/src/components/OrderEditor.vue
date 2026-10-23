@@ -3,6 +3,8 @@ import { reactive, ref, watch, computed } from 'vue';
 import { ElMessage } from 'element-plus';
 import FieldInput from './FieldInput.vue';
 import { useMeta } from '../stores/meta';
+import { useAuth } from '../stores/auth';
+import { canManageProcurement } from '../utils/permissions';
 import { orderApi } from '../api/orders';
 import { canEditOrder } from '../utils/orderWritePolicy';
 import { fmtBeijingDate } from '../utils/format';
@@ -11,6 +13,7 @@ const platformReadOnly = (field) =>
 const props = defineProps({ modelValue: Boolean, item: Object });
 const emit = defineEmits(['update:modelValue', 'saved']);
 const meta = useMeta(),
+  auth = useAuth(),
   form = reactive({}),
   original = ref({}),
   conflictMessage = ref(''),
@@ -18,6 +21,10 @@ const meta = useMeta(),
   initializing = ref(false),
   uploadingFields = reactive(new Set()),
   openGroups = ref(['order', 'purchase']);
+const fieldReadOnly = (field) =>
+  platformReadOnly(field) ||
+  (!canManageProcurement(auth.user?.role) &&
+    ['purchaseStatus', 'purchaseChannel'].includes(field.key));
 const visible = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) });
 // 多个图片字段可分别上传；全部结束后才能保存，避免丢失尚未返回的图片地址。
 const blocked = computed(() => busy.value || initializing.value || uploadingFields.size > 0);
@@ -60,7 +67,7 @@ async function save() {
   try {
     const fields = Object.fromEntries(
       meta.fields
-        .filter((field) => !platformReadOnly(field))
+        .filter((field) => !fieldReadOnly(field))
         .filter(
           (field) => JSON.stringify(form[field.key]) !== JSON.stringify(original.value[field.key]),
         )
@@ -140,7 +147,7 @@ async function save() {
               :label="field.label"
               :required="field.required"
               :class="{ 'full-width': ['textarea', 'url'].includes(field.type) }"
-              ><template v-if="platformReadOnly(field)">
+              ><template v-if="fieldReadOnly(field)">
                 <el-image
                   v-if="field.type === 'image' && form[field.key]"
                   :src="meta.imageUrl(form[field.key], true)"
@@ -149,7 +156,11 @@ async function save() {
                   preview-teleported
                   style="width: 100px; height: 100px"
                 />
-                <span v-else style="overflow-wrap: anywhere">{{ form[field.key] ?? '—' }}</span>
+                <span v-else style="overflow-wrap: anywhere">{{
+                  Array.isArray(form[field.key])
+                    ? form[field.key].join(' / ') || '—'
+                    : (form[field.key] ?? '—')
+                }}</span>
               </template>
               <template v-else-if="field.key === 'purchaseChannel' && form.allocatable !== '是'">
                 <span>{{ form.purchaseChannel?.join(' / ') || '未分配' }}</span>

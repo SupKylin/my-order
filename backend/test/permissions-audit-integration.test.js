@@ -67,10 +67,10 @@ async function request(role, path, method = 'GET', body, binary = false) {
     headers: response.headers,
   };
 }
-async function preview(rows, user = users.operations) {
+async function preview(rows, user = users.operations, columns = keys) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('采购');
-  sheet.addRow(keys);
+  sheet.addRow(columns);
   rows.forEach((row) => sheet.addRow(row));
   const id = randomUUID();
   const upload = await Upload.create({
@@ -84,7 +84,15 @@ async function preview(rows, user = users.operations) {
   files.push(path);
   await workbook.xlsx.writeFile(path);
   return prepareImport(
-    { sources: [{ uploadId: id, template, sheetName: '采购' }] },
+    {
+      sources: [
+        {
+          uploadId: id,
+          template: { ...template, mappings: columns.map((field) => ({ header: field, field })) },
+          sheetName: '采购',
+        },
+      ],
+    },
     user,
     'purchase',
   );
@@ -657,9 +665,9 @@ test('审核及供应商状态增量回填，编辑、分配、导入与官方�
   assert.deepEqual(state(await read('ORPHAN')), ['已审核', null]);
   assert.deepEqual((await read('NONE')).purchaseChannel, ['渠道A']);
 
-  const edit = async (fields) => {
+  const edit = async (fields, role = 'operations') => {
     const current = await read();
-    return request('operations', `/orders/${items.A.id}`, 'PUT', {
+    return request(role, `/orders/${items.A.id}`, 'PUT', {
       version: current.version,
       fields: { orderNumber: 'ORDER-A', ...fields },
     });
@@ -668,10 +676,10 @@ test('审核及供应商状态增量回填，编辑、分配、导入与官方�
   assert.equal((await edit({ supplierAssignmentStatus: '已分配' })).status, 400);
   assert.equal((await edit({ allocatable: null })).status, 200);
   assert.deepEqual(state(await read()), [null, null]);
-  assert.equal((await edit({ purchaseChannel: null })).status, 200);
-  assert.equal((await edit({ purchaseChannel: ['渠道A'] })).status, 400);
+  assert.equal((await edit({ purchaseChannel: null }, 'admin')).status, 200);
+  assert.equal((await edit({ purchaseChannel: ['渠道A'] }, 'admin')).status, 400);
   const unreviewed = await read();
-  const blocked = await request('operations', '/assignments', 'POST', {
+  const blocked = await request('admin', '/assignments', 'POST', {
     items: [{ id: unreviewed.id, version: unreviewed.version }],
     purchaseChannel: ['渠道A'],
   });
@@ -696,7 +704,7 @@ test('审核及供应商状态增量回填，编辑、分配、导入与官方�
   const approved = await read();
   assert.equal(
     (
-      await request('operations', '/assignments', 'POST', {
+      await request('admin', '/assignments', 'POST', {
         items: [{ id: approved.id, version: approved.version }],
         purchaseChannel: ['渠道A'],
       })
@@ -716,7 +724,10 @@ test('审核及供应商状态增量回填，编辑、分配、导入与官方�
     200,
   );
   assert.deepEqual(state(await read()), ['不可分配', '不可分配']);
-  assert.equal((await edit({ allocatable: '是', purchaseChannel: ['渠道A'] })).status, 200);
+  assert.equal(
+    (await edit({ allocatable: '是', purchaseChannel: ['渠道A'] }, 'admin')).status,
+    200,
+  );
 
   const remote = {
     purchaseOrderId: 'STATE-PO',
@@ -942,7 +953,7 @@ test('采购分配时间仅跟随渠道真实变化，迁移保留空历史，�
   );
   const read = async (name = 'A') => (await request('admin', `/orders/${items[name].id}`)).data;
   const edit = async (fields) =>
-    request('operations', `/orders/${items.A.id}`, 'PUT', {
+    request('admin', `/orders/${items.A.id}`, 'PUT', {
       version: (await read()).version,
       fields: { orderNumber: 'ORDER-A', ...fields },
     });
@@ -1152,5 +1163,161 @@ test('采购平台多选使用维护选项，列表与导出同范围且不扩�
     const sheet = workbook.worksheets[0];
     assert.equal(sheet.rowCount, 3);
     assert.deepEqual([sheet.getCell('A2').value, sheet.getCell('A3').value].sort(), ['A', 'B']);
+  }
+});
+
+test('运营不能编辑或清空采购状态及渠道，也不能通过单条和批量接口绕过', async () => {
+  await users.purchasing.update({ role: 'purchasing' });
+  await DictionaryOption.findOrCreate({ where: { kind: 'purchaseStatus', value: '采购中' } });
+  await DictionaryOption.findOrCreate({ where: { kind: 'purchaseStatus', value: '采购失败' } });
+  await Purchase.update(
+    {
+      allocatable: '是',
+      purchaseStatus: '采购中',
+      purchaseChannel: ['渠道A'],
+      purchaseNote: 'protected',
+    },
+    { where: { itemId: items.A.id } },
+  );
+  const read = async () => (await request('operations', `/orders/${items.A.id}`)).data;
+  const current = await read();
+  for (const fields of [
+    { purchaseStatus: '采购失败' },
+    { purchaseStatus: null },
+    { purchaseChannel: [] },
+    { purchaseChannel: null },
+  ]) {
+    const response = await request('operations', `/orders/${current.id}`, 'PUT', {
+      version: current.version,
+      fields: { ...fields, purchaseNote: 'must roll back' },
+      baseFields: Object.fromEntries(Object.keys(fields).map((key) => [key, current[key]])),
+    });
+    assert.equal(response.status, 403);
+    assert.equal((await read()).purchaseNote, 'protected');
+    assert.equal((await read()).version, current.version);
+  }
+  for (const [path, payload] of [
+    ['/assignments', { purchaseChannel: ['渠道A'] }],
+    ['/assignments', { purchaseChannel: [] }],
+    ['/orders/batch-purchase-status', { purchaseStatus: '采购失败' }],
+  ])
+    assert.equal(
+      (
+        await request('operations', path, 'POST', {
+          items: [{ id: current.id, version: current.version }],
+          ...payload,
+        })
+      ).status,
+      403,
+    );
+  // 旧表单携带原值时仍能保存其他字段。
+  const compatible = await request('operations', `/orders/${current.id}`, 'PUT', {
+    version: current.version,
+    fields: {
+      orderNumber: current.orderNumber,
+      purchaseStatus: current.purchaseStatus,
+      purchaseChannel: current.purchaseChannel,
+      purchaseNote: 'allowed note',
+    },
+  });
+  assert.equal(compatible.status, 200);
+  const saved = await read();
+  assert.equal(saved.purchaseNote, 'allowed note');
+  assert.equal(saved.purchaseStatus, '采购中');
+  assert.deepEqual(saved.purchaseChannel, ['渠道A']);
+  assert.equal(
+    (
+      await request('operations', '/orders/batch-status', 'POST', {
+        items: [{ id: saved.id, version: saved.version }],
+        orderStatus: '砍单',
+      })
+    ).status,
+    200,
+  );
+  for (const role of ['admin', 'purchasing']) {
+    const row = await read();
+    assert.equal(
+      (
+        await request(role, `/orders/${row.id}`, 'PUT', {
+          version: row.version,
+          fields: { orderNumber: row.orderNumber, purchaseStatus: '采购失败' },
+        })
+      ).status,
+      200,
+    );
+    const next = await read();
+    assert.equal(
+      (
+        await request(role, '/assignments', 'POST', {
+          items: [{ id: next.id, version: next.version }],
+          purchaseChannel: ['渠道A'],
+        })
+      ).status,
+      200,
+    );
+  }
+});
+
+test('运营导入跳过采购状态并提示，其他字段继续更新，旧预览也不能覆盖状态', async () => {
+  const columns = ['shopName', 'orderNumber', 'walmartSku', 'purchaseStatus', 'purchaseNote'];
+  const read = async () => (await request('operations', `/orders/${items.A.id}`)).data;
+  await Purchase.update({ purchaseStatus: '采购中' }, { where: { itemId: items.A.id } });
+  for (const status of ['采购失败', '不存在的状态']) {
+    const job = await preview(
+      [['A', 'ORDER-A', 'SKU', status, 'import-' + status]],
+      users.operations,
+      columns,
+    );
+    assert.equal(job.blockingErrorCount, 0);
+    assert.equal(job.updated, 1);
+    assert.ok(job.warnings.some((warning) => /无权修改采购状态/.test(warning.message)));
+    const done = await request('operations', `/imports/purchases/${job.id}/commit`, 'POST', {});
+    assert.equal(done.status, 200);
+    assert.equal(done.data.updated, 1);
+    assert.equal((await read()).purchaseStatus, '采购中');
+    assert.equal((await read()).purchaseNote, 'import-' + status);
+  }
+  const before = await read();
+  const onlyStatus = await preview(
+    [['A', 'ORDER-A', 'SKU', '采购失败']],
+    users.operations,
+    columns.slice(0, 4),
+  );
+  assert.equal(onlyStatus.updated, 0);
+  assert.equal(onlyStatus.skipped, 1);
+  assert.match(onlyStatus.skippedRows[0].reason, /无权修改采购状态/);
+  const skipped = await request(
+    'operations',
+    `/imports/purchases/${onlyStatus.id}/commit`,
+    'POST',
+    {},
+  );
+  assert.equal(skipped.status, 200);
+  assert.equal(skipped.data.updated, 0);
+  assert.equal((await read()).version, before.version);
+
+  const old = await preview([['A', 'ORDER-A', 'SKU', 'old preview', '是']]);
+  const stored = await ImportJob.findByPk(old.id);
+  stored.rows[0].patch.purchaseStatus = '采购失败';
+  stored.changed('rows', true);
+  await stored.save();
+  const committed = await request('operations', `/imports/purchases/${old.id}/commit`, 'POST', {});
+  assert.equal(committed.status, 200);
+  assert.equal((await read()).purchaseStatus, '采购中');
+  assert.equal((await read()).purchaseNote, 'old preview');
+  const committedJob = await ImportJob.findByPk(old.id);
+  assert.ok(committedJob.warnings.some((warning) => /无权修改采购状态/.test(warning.message)));
+  for (const role of ['admin', 'purchasing']) {
+    const job = await preview(
+      [['A', 'ORDER-A', 'SKU', '采购失败', 'by-' + role]],
+      users[role],
+      columns,
+    );
+    assert.equal(job.updated, 1);
+    assert.equal(
+      (await request(role, `/imports/purchases/${job.id}/commit`, 'POST', {})).status,
+      200,
+    );
+    assert.equal((await read()).purchaseStatus, '采购失败');
   }
 });

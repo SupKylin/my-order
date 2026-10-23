@@ -18,3 +18,6 @@ const paths = {
 export function canVisit(role, path) {
   return role === 'admin' || Boolean(paths[role]?.includes(path));
 }
+export function canManageProcurement(role) {
+  return role === 'admin' || role === 'purchasing';
+}

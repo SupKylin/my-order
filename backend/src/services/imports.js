@@ -90,6 +90,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
   const data = { rows: [], errors: [], warnings: [] };
   const allowed = await allowedStoreNames(user);
   const snapshots = [];
+  const ignoredStatusSources = new Set();
   let firstTemplate;
   const fieldDefinitions = await getFieldDefinitions();
   for (const entry of sources) {
@@ -106,13 +107,28 @@ export async function prepareImport(input, user, kind = 'legacy') {
     template.sheetName = entry.sheetName;
     validateImportMappings(template, kind);
     firstTemplate ||= template;
+    const ignoreStatus =
+      user.role === 'operations' &&
+      template.mappings.some((mapping) => mapping.field === 'purchaseStatus');
+    if (ignoreStatus) ignoredStatusSources.add(upload.id);
     const extracted = await extractRows(
       await loadWorkbook(uploadPath(upload)),
-      template,
+      ignoreStatus
+        ? {
+            ...template,
+            mappings: template.mappings.filter((mapping) => mapping.field !== 'purchaseStatus'),
+          }
+        : template,
       (buffer) => saveImage(buffer, user.id, upload.originalName),
       fieldDefinitions,
       { allowedStoreNames: allowed, retainInvalidIdentity: kind === 'purchase' },
     );
+    if (ignoreStatus)
+      extracted.warnings.push({
+        row: template.headerRow,
+        field: 'purchaseStatus',
+        message: '运营账号无权修改采购状态，已跳过该字段并保留原值',
+      });
     for (const key of ['rows', 'errors', 'warnings'])
       data[key].push(
         ...extracted[key].map((row) => ({
@@ -206,13 +222,18 @@ export async function prepareImport(input, user, kind = 'legacy') {
         (error) => error.sourceId === row.sourceId && error.row === row.rowNumber,
       ) &&
       row.action !== 'missing'
-    )
-      data.errors.push({
-        row: row.rowNumber,
-        sourceName: row.sourceName,
-        label: '采购字段',
-        message: '本行没有可更新的采购字段',
-      });
+    ) {
+      if (ignoredStatusSources.has(row.sourceId)) {
+        row.action = 'missing';
+        row.skipReason = '运营账号无权修改采购状态，本行没有其他可更新的采购字段';
+      } else
+        data.errors.push({
+          row: row.rowNumber,
+          sourceName: row.sourceName,
+          label: '采购字段',
+          message: '本行没有可更新的采购字段',
+        });
+    }
   }
   const job = await ImportJob.create({
     id: randomUUID(),
@@ -306,6 +327,27 @@ export async function commitImport(id, user, kind = 'legacy') {
     let added = 0,
       updated = 0;
     const allowed = await allowedStoreNames(user, t);
+    // 角色可能在预览后变化，旧预览提交时也不能绕过字段权限。
+    for (const row of job.rows) {
+      delete row.patch.purchaseChannel;
+      if (user.role !== 'operations' || !Object.hasOwn(row.patch, 'purchaseStatus')) continue;
+      delete row.patch.purchaseStatus;
+      job.warnings.push({
+        row: row.rowNumber,
+        sourceId: row.sourceId,
+        sourceName: row.sourceName,
+        field: 'purchaseStatus',
+        message: '运营账号无权修改采购状态，已跳过该字段并保留原值',
+      });
+      if (
+        row.action === 'update' &&
+        !Object.keys(row.patch).some((key) => fieldMap[key]?.group === 'purchase') &&
+        !row.purchaseSkuMapped
+      ) {
+        row.action = 'missing';
+        row.skipReason = '运营账号无权修改采购状态，本行没有其他可更新的采购字段';
+      }
+    }
     // 店铺归属在预览后可能变化，提交前重新授权，越权行单独跳过。
     if (allowed)
       for (const row of job.rows) {
@@ -399,8 +441,16 @@ export async function commitImport(id, user, kind = 'legacy') {
     }
     // JSON 内部属性变更需显式标记，保证提交阶段新增的跳过原因保存到历史记录。
     job.changed('rows', true);
+    job.changed('warnings', true);
     await job.update(
-      { status: 'completed', rows: job.rows, added, updated, committedAt: new Date() },
+      {
+        status: 'completed',
+        rows: job.rows,
+        warnings: job.warnings,
+        added,
+        updated,
+        committedAt: new Date(),
+      },
       { transaction: t },
     );
     await AuditLog.create(

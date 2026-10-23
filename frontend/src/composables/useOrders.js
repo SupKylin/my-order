@@ -7,6 +7,7 @@ import { useMeta } from '../stores/meta';
 import { useAuth } from '../stores/auth';
 import { countShippingWarnings } from '../utils/shippingWarning';
 import { canEditOrder } from '../utils/orderWritePolicy';
+import { canManageProcurement } from '../utils/permissions';
 
 /** 统一管理订单查询、编辑与采购分配，每次页面挂载独立创建状态。 */
 export function useOrders() {
@@ -206,6 +207,7 @@ export function useOrders() {
     }
   }
   async function openAssign(row) {
+    if (!canManageProcurement(auth.user?.role)) return;
     if (opening.value) return;
     // 单行分配独立于表格勾选，避免取消分配弹框后批量删除使用了错误的选择。
     assignmentItems.value = row ? [row] : [...selected.value];
@@ -225,6 +227,7 @@ export function useOrders() {
   }
   /** 分配携带每条明细的版本，冲突时由后端拒绝整批覆盖。 */
   async function assign() {
+    if (!canManageProcurement(auth.user?.role)) return;
     if (assignBusy.value) return;
     if (!assignmentChannels.value.length) return ElMessage.warning('请先选择采购渠道');
     assignBusy.value = true;
