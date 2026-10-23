@@ -21,6 +21,7 @@ export const auditActions = {
   create_user: '新增账号',
   edit_user: '编辑账号',
   save_risk_address: '维护风险地址',
+  import_risk_addresses: '批量导入风险地址',
   delete_risk_address: '删除风险地址',
   management_batch_delete: '批量删除',
 };

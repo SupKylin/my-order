@@ -1,11 +1,31 @@
 <script setup>
 import ManagementList from '../components/ManagementList.vue';
+import RiskAddressImport from '../components/RiskAddressImport.vue';
 import { reactive, ref } from 'vue';
-import { Plus } from '@element-plus/icons-vue';
+import { Plus, Download, Upload } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { riskAddressApi } from '../api/riskAddresses';
 
 const list = ref(null);
+const importDialog = ref(false),
+  downloading = ref(false);
+async function downloadTemplate() {
+  if (downloading.value) return;
+  downloading.value = true;
+  try {
+    const blob = await riskAddressApi.template();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = '风险地址导入模板.xlsx';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch {
+    // 下载失败由 HTTP 拦截器提示，按钮恢复后可重试。
+  } finally {
+    downloading.value = false;
+  }
+}
 const fields = [
   { key: 'address1', label: '地址一' },
   { key: 'address2', label: '地址二' },
@@ -50,9 +70,13 @@ async function save() {
     placeholder="搜索地址、城市、州、邮编、备注"
     description="完整匹配地址一、地址二、城市、州、邮编，忽略大小写和多余空格。"
   >
-    <template #actions
-      ><el-button type="primary" :icon="Plus" @click="edit()">新增风险地址</el-button></template
-    >
+    <template #actions>
+      <el-button :icon="Download" :loading="downloading" @click="downloadTemplate"
+        >下载导入模板</el-button
+      >
+      <el-button :icon="Upload" @click="importDialog = true">Excel 批量上传</el-button>
+      <el-button type="primary" :icon="Plus" @click="edit()">新增风险地址</el-button>
+    </template>
 
     <el-table-column
       v-for="field in fields"
@@ -69,6 +93,7 @@ async function save() {
       </template></el-table-column
     >
   </ManagementList>
+  <RiskAddressImport v-if="importDialog" v-model="importDialog" @imported="load" />
   <el-dialog
     v-model="dialog"
     :title="editing ? '编辑风险地址' : '新增风险地址'"

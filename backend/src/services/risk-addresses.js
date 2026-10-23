@@ -4,7 +4,7 @@ import { assert } from '../errors.js';
 
 export const listRiskAddresses = () => RiskAddress.findAll({ order: [['id', 'DESC']] });
 
-export async function saveRiskAddress(id, input, actor) {
+export function normalizeRiskAddress(input) {
   const values = Object.fromEntries(
     addressFields.map((key) => [
       key,
@@ -21,6 +21,11 @@ export async function saveRiskAddress(id, input, actor) {
   assert(values.note.length <= 12000, '备注最多 12000 个字符');
   values.addressKey = addressKey(values);
   assert(values.addressKey, '请填写地址一、城市、州和邮编；地址二可留空');
+  return values;
+}
+
+export async function saveRiskAddress(id, input, actor) {
+  const values = normalizeRiskAddress(input);
   return db.transaction(async (transaction) => {
     const row = id
       ? await RiskAddress.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE })

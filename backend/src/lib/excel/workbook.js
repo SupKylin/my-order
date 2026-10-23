@@ -5,7 +5,7 @@ import { AppError } from '../../errors.js';
 import { fields, aliases } from '../../fields.js';
 
 /** 解压限额在工作簿实例化前检查，避免异常文件占满内存。 */
-export async function loadWorkbook(filePath) {
+export async function loadWorkbook(filePath, { maxExpandedBytes = 300 * 1024 * 1024 } = {}) {
   const buffer = await fs.readFile(filePath);
   let zip, workbook;
   try {
@@ -13,7 +13,7 @@ export async function loadWorkbook(filePath) {
     const files = Object.values(zip.files);
     if (
       files.length > 25000 ||
-      files.reduce((n, f) => n + (f._data?.uncompressedSize || 0), 0) > 300 * 1024 * 1024
+      files.reduce((n, f) => n + (f._data?.uncompressedSize || 0), 0) > maxExpandedBytes
     )
       throw new Error('压缩包解压后超过安全限额');
     if (!zip.file('xl/workbook.xml')) throw new Error('不是 Excel 工作簿');
