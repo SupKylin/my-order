@@ -37,7 +37,6 @@ export const purchaseTemplateColumns = [
   ['purchasePlatform', '采购平台'],
   ['shippingMode', '发货方式（FBA/FBM）'],
   ['merchantName', '采购商家名'],
-  ['purchaseLimit', '采购限价'],
   ['allocatable', '是否可分配'],
   ['unallocatableReason', '不可分配原因'],
   ['operationsNote', '运营备注'],

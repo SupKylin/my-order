@@ -28,7 +28,7 @@ async function getStore(id) {
 }
 
 /** 专用 MySQL 连接持有命名锁，覆盖多进程与手动/定时任务竞争。 */
-async function acquireLock(storeId) {
+export async function acquireLock(storeId) {
   const connection = await db.connectionManager.getConnection();
   const key = `walmart-sync:${storeId}`;
   try {

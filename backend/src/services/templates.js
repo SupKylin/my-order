@@ -35,7 +35,9 @@ export async function templatePayload(input) {
       mappings: Array.isArray(input.mappings)
         ? input.mappings.map((mapping) =>
             // 兼容旧模板：停用目标保留源表头，避免阻断其他采购字段导入。
-            ['purchaseChannel', 'supervisorConfirmed'].includes(mapping?.field)
+            ['purchaseChannel', 'supervisorConfirmed', 'purchaseLimit', 'priceFactor'].includes(
+              mapping?.field,
+            )
               ? { ...mapping, field: '' }
               : mapping,
           )

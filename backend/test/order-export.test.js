@@ -213,9 +213,9 @@ test('采购模板下拉复用当前启用选项，支持长名称及逗号，�
     const sheet = workbook.worksheets[0];
     const options = workbook.getWorksheet('_purchase_options');
     assert.equal(sheet.name, '采购信息');
-    assert.equal(sheet.columnCount, 15);
-    assert.equal(sheet.getCell('O1').value, '运营备注');
-    assert.equal(sheet.getCell('O2').value, '优先处理');
+    assert.equal(sheet.columnCount, 14);
+    assert.equal(sheet.getCell('N1').value, '运营备注');
+    assert.equal(sheet.getCell('N2').value, '优先处理');
     assert.equal(sheet.getCell('D1').value, '商品数量');
     assert.equal(sheet.getCell('E1').value, '采购数量');
     assert.equal(sheet.getCell('D2').value, 3);
@@ -237,9 +237,9 @@ test('采购模板下拉复用当前启用选项，支持长名称及逗号，�
     for (const [column, key, expected] of [
       ['I', 'purchasePlatform', choices],
       ['J', 'shippingMode', ['FBM', 'FBA']],
-      ['M', 'allocatable', ['是', '否']],
+      ['L', 'allocatable', ['是', '否']],
     ]) {
-      const sourceColumn = { I: 'A', J: 'B', M: 'C' }[column];
+      const sourceColumn = { I: 'A', J: 'B', L: 'C' }[column];
       const name = `purchase_options_${key}`;
       assert.deepEqual(workbook.definedNames.getRanges(name).ranges, [
         `'_purchase_options'!$${sourceColumn}$2:$${sourceColumn}$${expected.length + 1}`,

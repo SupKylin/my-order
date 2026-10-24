@@ -36,6 +36,133 @@ function order(status = 'Created') {
   };
 }
 
+test('Walmart 资助使用原商品金额加运费，激励不重复加回，其他优惠仍用成交价', () => {
+  const raw = order();
+  const line = raw.orderLines.orderLine[0];
+  line.orderLineQuantity.amount = '1';
+  line.charges.charge = [
+    {
+      chargeType: 'PRODUCT',
+      chargeAmount: { amount: '49.59', currency: 'USD' },
+      tax: { taxAmount: { amount: '3.22' } },
+    },
+    {
+      chargeType: 'SHIPPING',
+      chargeAmount: { amount: '25.99', currency: 'USD' },
+      tax: { taxAmount: { amount: '1.69' } },
+    },
+  ];
+  line.incentive = {
+    type: 'Walmart funded',
+    originalPrice: { amount: '55.09', currency: 'USD' },
+    walmartFundedIncentive: { amount: '-5.50', currency: 'USD' },
+  };
+  const mapped = () => mapOrderLine({ id: 1, systemStoreName: '测试' }, raw, line);
+  assert.equal(mapped().fields.orderAmount, '81.08000000000000000000');
+  assert.equal(mapped().fields.tax, '4.91000000000000000000');
+  assert.deepEqual(mapped().walmart.incentive, line.incentive);
+  assert.equal(mapped().fields.quantity, '1');
+  line.charges.charge[0].chargeAmount.amount = '55.09';
+  assert.equal(mapped().fields.orderAmount, '81.08000000000000000000');
+  line.charges.charge[0].chargeAmount.amount = '49.59';
+  for (const type of ['Reduced referral', 'Seller funded', 'UNKNOWN']) {
+    line.incentive.type = type;
+    assert.equal(mapped().fields.orderAmount, '75.58000000000000000000');
+  }
+  line.incentive.type = 'Walmart funded';
+  for (const original of [
+    null,
+    { amount: '-1', currency: 'USD' },
+    { amount: '55.09', currency: 'EUR' },
+  ]) {
+    line.incentive.originalPrice = original;
+    assert.throws(mapped, /金额|USD/);
+  }
+  delete line.incentive;
+  assert.equal(mapped().fields.orderAmount, '75.58000000000000000000');
+});
+
+test('多件资助订单以原单价乘商品数量，运费与普通费用不重复乘数量', () => {
+  const raw = order();
+  const line = raw.orderLines.orderLine[0];
+  line.orderLineQuantity.amount = '2';
+  line.charges.charge = [
+    { chargeType: 'PRODUCT', chargeAmount: { amount: '165.78', currency: 'USD' } },
+    { chargeType: 'SHIPPING', chargeAmount: { amount: '10', currency: 'USD' } },
+  ];
+  line.incentive = {
+    type: 'Walmart funded',
+    originalPrice: { amount: '90.77', currency: 'USD' },
+    walmartFundedIncentive: { amount: '-7.88', currency: 'USD' },
+  };
+  const mapped = () => mapOrderLine({ id: 1, systemStoreName: '测试' }, raw, line);
+  assert.equal(Number(mapped().fields.orderAmount), 191.54);
+  line.incentive.originalPrice.amount = '31.50';
+  line.charges.charge = [{ chargeType: 'PRODUCT', chargeAmount: { amount: '57.94', currency: 'USD' } }];
+  assert.equal(Number(mapped().fields.orderAmount), 63);
+  for (const quantity of ['', '0', '-1', '1.5']) {
+    line.orderLineQuantity.amount = quantity;
+    assert.throws(mapped, /数量/);
+  }
+  line.orderLineQuantity.amount = '2';
+  delete line.incentive;
+  assert.equal(Number(mapped().fields.orderAmount), 57.94);
+});
+
+test('订单列表、后续游标与详情查询均请求 incentiveInfo', async () => {
+  const urls = [];
+  const client = new WalmartClient(
+    { clientId: 'id', clientSecret: 'secret' },
+    {
+      fetchImpl: async (url) => {
+        if (url.pathname === '/v3/token')
+          return new Response(JSON.stringify({ access_token: 'token' }));
+        urls.push(url);
+        if (url.pathname === '/v3/orders/PO-1')
+          return new Response(JSON.stringify({ order: order() }));
+        return new Response(
+          JSON.stringify({
+            list: {
+              elements: { order: [] },
+              meta: { nextCursor: url.searchParams.has('cursor') ? null : '?cursor=2' },
+            },
+          }),
+        );
+      },
+    },
+  );
+  for await (const _ of client.orders(new Date(), new Date())) {
+  }
+  await client.order('PO-1');
+  assert.equal(urls.length, 7);
+  assert.ok(urls.every((url) => url.searchParams.get('incentiveInfo') === 'true'));
+});
+
+test('自动确认回执省略激励时保留刚查询的金额，避免保存后降回优惠价', async () => {
+  const latest = order();
+  latest.orderLines.orderLine[0].incentive = {
+    type: 'Walmart funded',
+    originalPrice: { amount: '55.09', currency: 'USD' },
+  };
+  for (const missing of [undefined, null]) {
+    const saved = [];
+    const acknowledged = order('Acknowledged');
+    if (missing === null) acknowledged.orderLines.orderLine[0].incentive = null;
+    const result = await acknowledgePersistedOrder({
+      purchaseOrderId: 'PO-1',
+      client: { order: async () => latest, acknowledge: async () => acknowledged },
+      save: async (raw) =>
+        saved.push(
+          mapOrderLine({ id: 1, systemStoreName: '测试' }, raw, raw.orderLines.orderLine[0]),
+        ),
+      mark: async () => {},
+    });
+    assert.equal(result, 'acknowledged');
+    assert.equal(saved[0].fields.orderAmount, saved[1].fields.orderAmount);
+    assert.equal(saved[1].fields.orderAmount, '165.27000000000000000000');
+  }
+});
+
 test('取消申请按商品行独立保存，不将已确认改为已取消，FALSE 不误判为真', () => {
   const raw = order('Acknowledged');
   const line = raw.orderLines.orderLine[0];

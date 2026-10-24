@@ -10,6 +10,7 @@ import { canEditOrder } from '../utils/orderWritePolicy';
 import { fmtBeijingDate } from '../utils/format';
 const platformReadOnly = (field) =>
   field.group === 'product' || ['orderNumber', 'shopName', 'fulfillmentParty'].includes(field.key);
+const derivedPurchaseFields = new Set(['purchaseLimit', 'priceFactor']);
 const props = defineProps({ modelValue: Boolean, item: Object });
 const emit = defineEmits(['update:modelValue', 'saved']);
 const meta = useMeta(),
@@ -23,6 +24,7 @@ const meta = useMeta(),
   openGroups = ref(['order', 'purchase']);
 const fieldReadOnly = (field) =>
   platformReadOnly(field) ||
+  derivedPurchaseFields.has(field.key) ||
   (!canManageProcurement(auth.user?.role) &&
     ['purchaseStatus', 'purchaseChannel'].includes(field.key));
 const visible = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) });

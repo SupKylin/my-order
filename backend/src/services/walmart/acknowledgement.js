@@ -26,6 +26,15 @@ export async function acknowledgePersistedOrder({ purchaseOrderId, client, save,
       )
     )
       throw new Error('Walmart 未返回完整确认状态，下次重新查询');
+    // POST 回执可能省略 incentive 或返回 null；保留刚才 GET 已核实的同一商品行激励。
+    // 不使用历史数据库快照，避免沿用过期价格。
+    for (const line of orderLines(acknowledged)) {
+      const previous = orderLines(latest).find(
+        (entry) => entry.lineNumber === line.lineNumber && entry.item?.sku === line.item?.sku,
+      );
+      if (line.incentive == null && previous?.incentive)
+        line.incentive = structuredClone(previous.incentive);
+    }
     await save(acknowledged);
     await mark('acknowledged', null);
     return 'acknowledged';
