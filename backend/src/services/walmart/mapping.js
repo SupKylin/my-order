@@ -76,7 +76,7 @@ export function isActiveOrder(order) {
 }
 
 /** 费用为 API 商品行金额，用十进制整数相加，不按商品数量再次乘算。 */
-function sumAmounts(values) {
+function sumAmounts(values, multiplier = 1n) {
   if (!values.length) return undefined;
   const scale = 10n ** 20n;
   const total = values.reduce((sum, value) => {
@@ -84,8 +84,42 @@ function sumAmounts(values) {
     assert(/^\d+(\.\d{1,20})?$/.test(text), 'Walmart 金额格式无效');
     const [whole, fraction = ''] = text.split('.');
     return sum + BigInt(whole) * scale + BigInt(fraction.padEnd(20, '0'));
-  }, 0n);
+  }, 0n) * multiplier;
   return `${total / scale}.${String(total % scale).padStart(20, '0')}`;
+}
+
+export function isWalmartFunded(line) {
+  return (
+    String(line.incentive?.type ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/[_\s]+/g, ' ') === 'walmart funded'
+  );
+}
+
+/** 平台出资原价为单价，乘售出数量；PRODUCT/SHIPPING 已是行金额，不再乘数量。 */
+export function orderLineAmount(line) {
+  const charges = line.charges?.charge ?? [];
+  assert(
+    charges.every(
+      (charge) => !charge.chargeAmount?.currency || charge.chargeAmount.currency === 'USD',
+    ),
+    '暂不支持非 USD 订单',
+  );
+  const amounts = (type) =>
+    charges
+      .filter((charge) => charge.chargeType === type && charge.chargeAmount?.amount != null)
+      .map((charge) => charge.chargeAmount.amount);
+  let product = amounts('PRODUCT');
+  if (isWalmartFunded(line)) {
+    const original = line.incentive.originalPrice;
+    assert(original?.amount != null, 'Walmart 资助订单缺少原商品金额，需重新查询');
+    assert(original.currency === 'USD', 'Walmart 资助原商品金额必须为 USD');
+    const quantity = String(line.orderLineQuantity?.amount ?? '');
+    assert(/^\d+$/.test(quantity) && BigInt(quantity) > 0n, 'Walmart 资助商品数量无效');
+    product = [sumAmounts([original.amount], BigInt(quantity))];
+  }
+  return sumAmounts([...product, ...amounts('SHIPPING')]);
 }
 
 export function mapOrderLine(store, order, line, catalog) {
@@ -98,12 +132,6 @@ export function mapOrderLine(store, order, line, catalog) {
   assert(typeof line.item?.sku === 'string' && line.item.sku, '缺少 Walmart SKU');
   const address = order.shippingInfo?.postalAddress ?? {};
   const charges = line.charges?.charge ?? [];
-  assert(
-    charges.every(
-      (charge) => !charge.chargeAmount?.currency || charge.chargeAmount.currency === 'USD',
-    ),
-    '暂不支持非 USD 订单',
-  );
   const fields = {
     orderNumber: order.customerOrderId,
     shopName: store.systemStoreName,
@@ -122,13 +150,7 @@ export function mapOrderLine(store, order, line, catalog) {
     phone: order.shippingInfo?.phone,
     platformOrderStatus: platformStatusText(lineStatuses(line)),
     fulfillmentParty: order.shipNode?.type,
-    orderAmount: sumAmounts(
-      charges
-        .filter(
-          (c) => ['PRODUCT', 'SHIPPING'].includes(c.chargeType) && c.chargeAmount?.amount != null,
-        )
-        .map((c) => c.chargeAmount.amount),
-    ),
+    orderAmount: orderLineAmount(line),
     tax: sumAmounts(
       charges.filter((c) => c.tax?.taxAmount?.amount != null).map((c) => c.tax.taxAmount.amount),
     ),
@@ -158,6 +180,7 @@ export function mapOrderLine(store, order, line, catalog) {
     },
     walmart: {
       commercialMappingVersion: 1,
+      incentive: line.incentive ?? null,
       storeId: store.id,
       purchaseOrderId: order.purchaseOrderId,
       lineNumber: line.lineNumber,

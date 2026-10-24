@@ -108,6 +108,7 @@ export class WalmartClient {
         createdEndDate: new Date(end).toISOString(),
         limit: '200',
         productInfo: 'true',
+        incentiveInfo: 'true',
         shipNodeType,
       });
       let path = `/v3/orders?${params}`;
@@ -146,7 +147,7 @@ export class WalmartClient {
 
   async order(purchaseOrderId) {
     const body = await this.request(
-      `/v3/orders/${encodeURIComponent(purchaseOrderId)}?productInfo=true`,
+      `/v3/orders/${encodeURIComponent(purchaseOrderId)}?productInfo=true&incentiveInfo=true`,
     );
     assert(body.order?.purchaseOrderId === purchaseOrderId, 'Walmart 订单号响应不一致', 502);
     return body.order;

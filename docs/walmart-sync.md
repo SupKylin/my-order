@@ -27,7 +27,7 @@
 - 平台状态保存在 `order_items.walmart`，不覆盖人工维护的内部订单状态、采购状态、采购渠道、采购金额或采购人员。新增明细采购人员绑定启用同步的账号。
 - `platformOrderStatus`（平台订单状态）独立列保存中文状态；未知状态保留接口原文，多状态以逗号分隔。`productSpecification`（商品规格）独立 TEXT 列按接口 `groupingAttributes` 顺序提取属性值，以 `, ` 拼接，例如 `Brick red, Card Bag`。平台状态显示在订单列表并可筛选，规格保留在商品折叠详情中，两者参与完整订单导出；商品规格禁止人工修改，采购导入不能映射更新这两个字段。商品接口成功但没有属性时清空旧规格，查询失败则保留原值。
 - 变体只读取 `GET /v3/items/{sku}?productIdType=SKU` 返回的 `ItemResponse` 中匹配 SKU 的 `variantGroupInfo.groupingAttributes`，不解析标题。正式同步按店铺＋SKU 复用订单中已保存的成功规格快照，缓存 24 小时；一次任务内按 SKU 去重查询。缓存到期或缺失时重新请求，失败保留原规格和原抓取时间，不延长有效期。预览始终查询最新商品接口，不写缓存。无需 Redis 或新增数据表。
-- `orderAmount` 为当前商品行 PRODUCT 与 SHIPPING 的 `chargeAmount.amount` 合计，税费单独保存，不再乘数量。履约方直接取 `shipNode.type`，不同于人工采购字段“发货模式”（FBM/FBA）。
+- 列表（含后续分页）和单笔订单查询均传 `incentiveInfo=true`。`orderAmount` 通常为当前商品行 PRODUCT 与 SHIPPING 的 `chargeAmount.amount` 合计；当 `incentive.type` 为 `Walmart funded` 时，以 `incentive.originalPrice.amount × orderLineQuantity.amount` 替换商品金额，再加 SHIPPING（原价为单件价格）。平台出资不扣卖家收入，不额外再加 `walmartFundedIncentive`，税费单独保存，PRODUCT/SHIPPING 已是行金额，不再次乘数量。原价缺失、格式无效或不是 USD 时停止该单保存并报错，避免静默记录优惠价。其他激励（如佣金减免）不按原价恢复。激励详情同时保存在商品平台快照；确认订单的 POST 回执省略激励时，只保留确认前 GET 已核实的同一行（行号＋SKU）激励。履约方直接取 `shipNode.type`，不同于人工采购字段“发货模式”（FBM/FBA）。
 - 商品图片保存 Walmart 官方返回的图片 URL，列表、只读商品信息和订单导出共用该字段；不从标题猜测图片或规格。既有图片保留，禁止通过人工编辑或采购导入替换。完整订单导出生成嵌入式缩略图，不把官方图片 URL 改写为采购上传地址。
 - 商品数量沿用 `quantity`，取当前商品行 `orderLineQuantity.amount`；新订单首次创建时将采购数量 `purchaseQuantity` 初始化为相同值。后续同步仅更新商品数量，不改采购数量；历史订单的采购数量保持空值，不由同步补齐。
 - 出单日期对应接口下单时间 `orderDate`；时间戳原值保存在平台快照，现有 DATEONLY 列按固定 PST（UTC−8）转换。平台详情展示原时间戳转换结果。发货预警仅适用于平台订单状态为“已确认”的明细，行颜色、倒计时、数量统计与预警筛选使用相同范围；截止时间仍为平台发货日期次日北京时间 15:00。
@@ -50,6 +50,26 @@
 
 ## 验证
 
+### Walmart 资助金额历史修复
+
+2026-10-24 核对 MY-L-16 的客户订单 `200015410440051`：PRODUCT 为 49.59，SHIPPING 为 25.99；开启激励查询后返回 `type: "Walmart funded"`、`originalPrice: 55.09 USD`、`walmartFundedIncentive: -5.50 USD`。正确不含税订单金额是 **81.08**，旧金额为 75.58。
+
+先发布新同步逻辑、备份数据库，再运行独立脚本。该脚本不接入启动迁移，避免部署健康检查等待远端 API。默认只读预览，输出 JSONL 形式的店铺、客户订单号、SKU、修改前后金额和价格系数；不输出密钥或客户地址。
+
+```bash
+# 在项目根目录预览指定订单；Docker 中工作目录为 /app。
+node backend/scripts/repair-walmart-incentives.js --store MY-L-16 --order 200015410440051
+# 检查预览后应用同一范围
+node backend/scripts/repair-walmart-incentives.js --store MY-L-16 --order 200015410440051 --apply
+# 不传 store/order 则核对全部店铺已有订单（含已送达/取消的历史单）
+node backend/scripts/repair-walmart-incentives.js
+node backend/scripts/repair-walmart-incentives.js --apply
+```
+
+生产环境可以用 `docker exec -w /app my-order node backend/scripts/repair-walmart-incentives.js ...` 执行，并将输出保存在本次发布备份目录。预览与应用各自重新 GET 官方订单，应用以当时最新响应为准。按店铺串行、每批读取100条已有回执，复用已有请求超时和限流退避；不新增订单、不调用确认或取消接口。
+
+修复与正常同步共用店铺命名锁，忙碌店铺跳过后可重试。仅修正三字段唯一匹配且店铺ID、PO、商品行号绑定一致的 Walmart 资助明细；事务内更新订单金额、对应价格系数和激励快照/回执激励字段，不覆盖采购备注、状态、渠道、采购数量、税费或其他业务字段。重复执行不会重复加价。失败或跳过返回非零退出码并保留原因；部分成功可重跑。首页、店铺销售统计和导出使用数据库订单金额，修复后刷新即采用新值。该流程无需新增数据库字段、依赖或消息队列。
+
 ```powershell
 node --test backend/test/walmart.test.js
 $env:DB_NAME = 'my_order_walmart_test_' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
@@ -61,3 +81,5 @@ npm run build
 集成测试仅使用临时隔离数据库及模拟 Walmart 客户端，执行结束清理自己创建的测试库；未显式指定测试库时跳过。不会请求正式 Walmart 确认接口。
 
 官方接口依据：[订单列表](https://developer.walmart.com/us-marketplace/reference/getallorders)、[订单详情](https://developer.walmart.com/us-marketplace/reference/getanorder)、[确认订单](https://developer.walmart.com/us-marketplace/reference/acknowledgeorders)、[商品详情](https://developer.walmart.com/us-marketplace/reference/getanitem)。
+
+多件资助验证：MYZ-L-5 的 200015299277051 返回商品行金额165.78、数量2、原单价90.77、每件资助-7.88，恢复后商品行金额181.54；200015172627660 数量2、原单价31.50，恢复后63.00。不得将单件原价直接当作整行金额。

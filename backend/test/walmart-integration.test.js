@@ -17,6 +17,8 @@ import { CATALOG_TTL_MS } from '../src/services/walmart/catalog-cache.js';
 import { WALMART_ORDER_START_MS } from '../src/services/walmart/order-range.js';
 import { backfillWalmartCancellationIntent } from '../src/migrations/walmart-cancellation-intent.js';
 import { buildFilters } from '../src/services/orders.js';
+import { repairOrderIncentives } from '../src/services/walmart/incentive-repair.js';
+import { derivePurchaseFields } from '../src/lib/purchase-derived.js';
 
 // 必须显式指定一次性测试数据库，绝不在用户订单库执行清理。
 const isolated = /^my_order_walmart_test_[0-9]+$/.test(config.db.database);
@@ -766,4 +768,119 @@ test('取消申请按商品行同步及筛选，旧回执回填幂等且不改�
   assert.equal((await find('not_requested')).length, 2);
   await second.update({ walmart: null });
   assert.equal((await find('not_requested')).length, 2);
+});
+
+test('激励修复先预览，应用只改金额与系数，重复执行幂等且同步不再覆盖', async () => {
+  const raw = sample('Acknowledged', 'INCENTIVE-PO', 'INCENTIVE-ORDER');
+  const line = raw.orderLines.orderLine[0];
+  line.charges = {
+    charge: [
+      {
+        chargeType: 'PRODUCT',
+        chargeAmount: { amount: '49.59', currency: 'USD' },
+        tax: { taxAmount: { amount: '4.91' } },
+      },
+      { chargeType: 'SHIPPING', chargeAmount: { amount: '25.99', currency: 'USD' } },
+    ],
+  };
+  await persistOrder(store, raw, catalog, actor);
+  const parent = await Order.findOne({ where: { orderNumber: raw.customerOrderId } });
+  const item = await OrderItem.findOne({ where: { orderId: parent.id } });
+  const purchase = await Purchase.findOne({ where: { itemId: item.id } });
+  await purchase.update({
+    purchaseLinkAmount: '40',
+    purchaseNote: '保留采购备注',
+    purchaseQuantity: '2',
+    purchaseStatus: '采购中',
+    ...derivePurchaseFields({
+      orderAmount: item.orderAmount,
+      tax: item.tax,
+      purchaseLinkAmount: '40',
+    }),
+  });
+  await purchase.reload();
+  const oldVersion = item.version;
+  const oldPurchase = purchase.toJSON();
+  const receipt = await WalmartReceipt.findOne({
+    where: { storeId: store.id, purchaseOrderId: raw.purchaseOrderId },
+  });
+  line.incentive = {
+    type: 'Walmart funded',
+    originalPrice: { amount: 55.09, currency: 'USD' },
+    walmartFundedIncentive: { amount: -5.5, currency: 'USD' },
+  };
+  const count = await OrderItem.count();
+  assert.equal((await repairOrderIncentives(store, raw))[0].status, 'would_update');
+  await item.reload();
+  await receipt.reload();
+  assert.equal(Number(item.orderAmount), 75.58);
+  assert.equal(item.version, oldVersion);
+  assert.equal(receipt.raw.orderLines.orderLine[0].incentive, undefined);
+  const [result] = await repairOrderIncentives(store, raw, { apply: true });
+  assert.equal(result.status, 'updated');
+  await item.reload();
+  await purchase.reload();
+  assert.equal(Number(item.orderAmount), 81.08);
+  assert.equal(Number(item.tax), 4.91);
+  assert.equal(
+    Number(purchase.priceFactor),
+    Number(
+      derivePurchaseFields({ orderAmount: '81.08', tax: '4.91', purchaseLinkAmount: '40' })
+        .priceFactor,
+    ),
+  );
+  for (const key of Object.keys(oldPurchase).filter(
+    (key) => !['priceFactor', 'updatedAt'].includes(key),
+  ))
+    assert.deepEqual(purchase[key], oldPurchase[key], key);
+  assert.equal((await repairOrderIncentives(store, raw, { apply: true }))[0].status, 'unchanged');
+  await item.reload();
+  assert.equal(item.version, oldVersion + 1);
+  await persistOrder(store, raw, catalog, actor);
+  await item.reload();
+  assert.equal(Number(item.orderAmount), 81.08);
+  assert.equal(await OrderItem.count(), count);
+  const wrong = structuredClone(raw);
+  wrong.purchaseOrderId = 'WRONG-PO';
+  assert.equal((await repairOrderIncentives(store, wrong, { apply: true }))[0].status, 'skipped');
+
+  // 一单多行中有无效激励时，已处理商品行和回执也必须整体回滚。
+  const rollback = structuredClone(raw);
+  rollback.purchaseOrderId = 'ROLLBACK-INCENTIVE-PO';
+  rollback.customerOrderId = 'ROLLBACK-INCENTIVE-ORDER';
+  delete rollback.orderLines.orderLine[0].incentive;
+  rollback.orderLines.orderLine.push({
+    ...structuredClone(rollback.orderLines.orderLine[0]),
+    lineNumber: '2',
+    item: { sku: 'SKU-ROLLBACK', productName: '回滚测试商品' },
+  });
+  await persistOrder(store, rollback, catalog, actor);
+  rollback.orderLines.orderLine[0].incentive = line.incentive;
+  rollback.orderLines.orderLine[1].incentive = { type: 'Walmart funded' };
+  await assert.rejects(repairOrderIncentives(store, rollback, { apply: true }), /缺少原商品金额/);
+  const rollbackParent = await Order.findOne({ where: { orderNumber: rollback.customerOrderId } });
+  const unchanged = await OrderItem.findAll({ where: { orderId: rollbackParent.id } });
+  assert.ok(
+    unchanged.every((row) => Number(row.orderAmount) === 75.58 && row.walmart.incentive === null),
+  );
+});
+
+test('多件资助商品历史修复与再次同步保持原单价乘数量', async () => {
+  const raw = sample('Acknowledged', 'MULTI-INCENTIVE-PO', 'MULTI-INCENTIVE-ORDER');
+  const line = raw.orderLines.orderLine[0];
+  line.orderLineQuantity.amount = '2';
+  line.charges = { charge: [{ chargeType: 'PRODUCT', chargeAmount: { amount: 165.78, currency: 'USD' } }] };
+  await persistOrder(store, raw, catalog, actor);
+  line.incentive = {
+    type: 'Walmart funded',
+    originalPrice: { amount: 90.77, currency: 'USD' },
+    walmartFundedIncentive: { amount: -7.88, currency: 'USD' },
+  };
+  const [result] = await repairOrderIncentives(store, raw, { apply: true });
+  assert.equal(Number(result.after), 181.54);
+  assert.equal(result.status, 'updated');
+  await persistOrder(store, raw, catalog, actor);
+  const item = await OrderItem.findByPk(result.itemId);
+  assert.equal(Number(item.orderAmount), 181.54);
+  assert.equal((await repairOrderIncentives(store, raw, { apply: true }))[0].status, 'unchanged');
 });

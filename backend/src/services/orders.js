@@ -14,6 +14,7 @@ import { orderScope, assertItemAccess, requirePermission } from '../permissions.
 import { procurementStatePatch } from '../lib/procurement-state.js';
 import { sameFieldValue } from '../lib/order-concurrency.js';
 import { purchaseAssignmentSummary } from './purchase-assignment-summary.js';
+import { DERIVED_PURCHASE_FIELDS, derivePurchaseFields } from '../lib/purchase-derived.js';
 import {
   purchaseTimerPatch,
   PURCHASE_SUCCESS_PATTERN,
@@ -95,9 +96,18 @@ export async function upsertImported(patch, transaction, actor, target = undefin
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
+    const mergedItem = { ...existing.toJSON(), ...parts.item };
+    const mergedPurchase = { ...(procurement?.toJSON() || {}), ...parts.purchase };
     const purchasePatch = procurementStatePatch(
       procurement,
-      purchaseTimerPatch(procurement, parts.purchase),
+      purchaseTimerPatch(procurement, {
+        ...parts.purchase,
+        ...derivePurchaseFields({
+          orderAmount: mergedItem.orderAmount,
+          tax: mergedItem.tax,
+          purchaseLinkAmount: mergedPurchase.purchaseLinkAmount,
+        }),
+      }),
     );
     if (procurement) await procurement.update(purchasePatch, { transaction });
     else await Purchase.create({ itemId: existing.id, ...purchasePatch }, { transaction });
@@ -107,13 +117,21 @@ export async function upsertImported(patch, transaction, actor, target = undefin
     { ...parts.item, orderId: order.id, purchaseChannelKey, orderIdentityKey: identityKey },
     { transaction },
   );
+  const derivedPurchase = derivePurchaseFields({
+    orderAmount: parts.item.orderAmount,
+    tax: parts.item.tax,
+    purchaseLinkAmount: parts.purchase.purchaseLinkAmount,
+  });
   // 采购人员只取已认证的当前账号，不能由上传文件或客户端指定。
   await Purchase.create(
     {
       itemId: item.id,
       // 只在首次创建订单时初始化；历史空值、人工修改或清空均不由后续同步覆盖。
       purchaseQuantity: item.quantity ?? null,
-      ...procurementStatePatch(null, purchaseTimerPatch(null, parts.purchase)),
+      ...procurementStatePatch(
+        null,
+        purchaseTimerPatch(null, { ...parts.purchase, ...derivedPurchase }),
+      ),
       assignedTo: actor.id,
       assignedAt: new Date(),
     },
@@ -507,6 +525,7 @@ export async function editItem(id, input, user) {
       // 兼容旧表单携带未改变的字段，不让只读字段参与覆盖或冲突检查。
       else if (user.role === 'operations') delete patch[key];
     }
+    for (const key of DERIVED_PURCHASE_FIELDS) delete patch[key];
     const currentOrder = await Order.findByPk(item.orderId, { transaction: t });
     if (hasBase) {
       const conflicts = [];
@@ -578,11 +597,33 @@ export async function editItem(id, input, user) {
     );
     const [purchase] = await Purchase.findOrCreate({
       where: { itemId: item.id },
-      defaults: parts.purchase,
+      defaults: {
+        ...parts.purchase,
+        ...derivePurchaseFields({
+          orderAmount: { ...item.toJSON(), ...parts.item }.orderAmount,
+          tax: { ...item.toJSON(), ...parts.item }.tax,
+          purchaseLinkAmount: {
+            ...(currentPurchase?.toJSON() || {}),
+            ...parts.purchase,
+          }.purchaseLinkAmount,
+        }),
+      },
       transaction: t,
     });
+    const mergedItem = { ...item.toJSON(), ...parts.item };
+    const mergedPurchase = { ...(currentPurchase?.toJSON() || {}), ...parts.purchase };
     await purchase.update(
-      procurementStatePatch(currentPurchase, purchaseTimerPatch(currentPurchase, parts.purchase)),
+      procurementStatePatch(
+        currentPurchase,
+        purchaseTimerPatch(currentPurchase, {
+          ...parts.purchase,
+          ...derivePurchaseFields({
+            orderAmount: mergedItem.orderAmount,
+            tax: mergedItem.tax,
+            purchaseLinkAmount: mergedPurchase.purchaseLinkAmount,
+          }),
+        }),
+      ),
       { transaction: t },
     );
     await AuditLog.create(

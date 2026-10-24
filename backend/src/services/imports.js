@@ -26,6 +26,7 @@ import {
   isWfsOrder,
   WFS_READ_ONLY_REASON,
 } from '../lib/order-write-policy.js';
+import { DERIVED_PURCHASE_FIELDS } from '../lib/purchase-derived.js';
 
 const importRowOrder = (a, b) =>
   a.patch.orderNumber.localeCompare(b.patch.orderNumber) ||
@@ -106,19 +107,25 @@ export async function prepareImport(input, user, kind = 'legacy') {
     assert(typeof entry.sheetName === 'string' && entry.sheetName.trim(), '请选择本次导入的工作表');
     template.sheetName = entry.sheetName;
     validateImportMappings(template, kind);
-    firstTemplate ||= template;
     const ignoreStatus =
       user.role === 'operations' &&
       template.mappings.some((mapping) => mapping.field === 'purchaseStatus');
     if (ignoreStatus) ignoredStatusSources.add(upload.id);
+    const ignoredDerivedMappings = template.mappings.filter((mapping) =>
+      DERIVED_PURCHASE_FIELDS.has(mapping.field),
+    );
+    const effectiveTemplate = {
+      ...template,
+      mappings: template.mappings.filter(
+        (mapping) =>
+          !DERIVED_PURCHASE_FIELDS.has(mapping.field) &&
+          (!ignoreStatus || mapping.field !== 'purchaseStatus'),
+      ),
+    };
+    firstTemplate ||= effectiveTemplate;
     const extracted = await extractRows(
       await loadWorkbook(uploadPath(upload)),
-      ignoreStatus
-        ? {
-            ...template,
-            mappings: template.mappings.filter((mapping) => mapping.field !== 'purchaseStatus'),
-          }
-        : template,
+      effectiveTemplate,
       (buffer) => saveImage(buffer, user.id, upload.originalName),
       fieldDefinitions,
       { allowedStoreNames: allowed, retainInvalidIdentity: kind === 'purchase' },
@@ -129,6 +136,12 @@ export async function prepareImport(input, user, kind = 'legacy') {
         field: 'purchaseStatus',
         message: '运营账号无权修改采购状态，已跳过该字段并保留原值',
       });
+    for (const mapping of ignoredDerivedMappings)
+      extracted.warnings.push({
+        row: template.headerRow,
+        field: mapping.field,
+        message: '采购限价和价格系数由系统自动计算，已跳过该字段并保留系统计算值',
+      });
     for (const key of ['rows', 'errors', 'warnings'])
       data[key].push(
         ...extracted[key].map((row) => ({
@@ -137,7 +150,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
           sourceName: upload.originalName,
           ...(key === 'rows'
             ? {
-                purchaseSkuMapped: template.mappings.some(
+                purchaseSkuMapped: effectiveTemplate.mappings.some(
                   (mapping) => mapping.field === 'purchaseSku',
                 ),
               }
@@ -330,6 +343,17 @@ export async function commitImport(id, user, kind = 'legacy') {
     // 角色可能在预览后变化，旧预览提交时也不能绕过字段权限。
     for (const row of job.rows) {
       delete row.patch.purchaseChannel;
+      for (const key of DERIVED_PURCHASE_FIELDS) {
+        if (!Object.hasOwn(row.patch, key)) continue;
+        delete row.patch[key];
+        job.warnings.push({
+          row: row.rowNumber,
+          sourceId: row.sourceId,
+          sourceName: row.sourceName,
+          field: key,
+          message: '采购限价和价格系数由系统自动计算，已跳过该字段并保留系统计算值',
+        });
+      }
       if (user.role !== 'operations' || !Object.hasOwn(row.patch, 'purchaseStatus')) continue;
       delete row.patch.purchaseStatus;
       job.warnings.push({
