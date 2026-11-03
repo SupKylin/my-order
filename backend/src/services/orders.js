@@ -17,7 +17,7 @@ import { purchaseAssignmentSummary } from './purchase-assignment-summary.js';
 import { DERIVED_PURCHASE_FIELDS, derivePurchaseFields } from '../lib/purchase-derived.js';
 import {
   purchaseTimerPatch,
-  PURCHASE_SUCCESS_PATTERN,
+  PURCHASE_TRACKING_PATTERN,
   PURCHASE_UNTRACKED_PATTERN,
 } from '../lib/purchase-timer.js';
 /** 返回前端使用的商品明细快照，不向前端泄露模型关联结构。 */
@@ -182,6 +182,17 @@ export function buildFilters(query, now = Date.now(), user) {
   ]) {
     const values = filterValues(query[key], `${label}筛选格式无效`);
     if (values.length) target[key] = values.length === 1 ? values[0] : { [Op.in]: values };
+  }
+  if (query.purchaseStatusEmpty === 'true' || query.purchaseStatusEmpty === true) {
+    const conditions = [
+      { purchaseStatus: null },
+      sqlWhere(col('purchase.purchaseStatus'), { [Op.regexp]: '^[[:space:]]*$' }),
+    ];
+    if (purchaseWhere.purchaseStatus)
+      conditions.push({ purchaseStatus: purchaseWhere.purchaseStatus });
+    delete purchaseWhere.purchaseStatus;
+    // 与渠道的 OR 独立，空值和已选状态取并集，再与其他筛选取交集。
+    purchaseWhere[Op.and] = [{ [Op.or]: conditions }];
   }
   if (query.platformOrderStatus) where.platformOrderStatus = String(query.platformOrderStatus);
   if (query.fulfillmentParty) {
@@ -404,7 +415,7 @@ export function buildFilters(query, now = Date.now(), user) {
   ]);
   if (trackingLevels.length) {
     const conditions = [
-      sqlWhere(col('purchase.purchaseStatus'), { [Op.regexp]: PURCHASE_SUCCESS_PATTERN }),
+      sqlWhere(col('purchase.purchaseStatus'), { [Op.regexp]: PURCHASE_TRACKING_PATTERN }),
       {
         [Op.or]: [
           { '$purchase.purchaseConfirmedAt$': { [Op.ne]: null } },
@@ -706,6 +717,58 @@ export async function updateOrderStatus(input, user) {
 export async function updatePurchaseStatus(input, user) {
   requirePermission(user, 'purchaseStatus');
   return updateBatchStatus(input, user, 'purchaseStatus', '采购状态');
+}
+
+/** 跟单备注仅覆盖或明确清空；沿用跨页批量操作的权限、版本与事务边界。 */
+export async function updateFollowupNote(input, user) {
+  requirePermission(user, 'orders');
+  const entries = input?.items;
+  assert(
+    Array.isArray(entries) && entries.length > 0 && entries.length <= 500,
+    '请选择 1 至 500 条商品明细',
+  );
+  assert(
+    entries.every((entry) => Number.isInteger(entry?.id) && Number.isInteger(entry?.version)),
+    '商品明细参数错误',
+  );
+  assert(new Set(entries.map((entry) => entry.id)).size === entries.length, '商品明细不能重复');
+  assert(['replace', 'clear'].includes(input.mode), '请选择覆盖或清空备注');
+  assert(
+    input.mode === 'clear'
+      ? input.followupNote == null || input.followupNote === ''
+      : typeof input.followupNote === 'string' && input.followupNote.trim(),
+    '请输入跟单备注；需要清空时请明确选择清空备注',
+  );
+  const patch = validatePatch({ followupNote: input.mode === 'clear' ? null : input.followupNote });
+  await db.transaction(async (transaction) => {
+    for (const entry of [...entries].sort((a, b) => a.id - b.id)) {
+      const item = await OrderItem.findByPk(entry.id, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      assert(item, '部分商品已不存在，请刷新', 404);
+      await assertItemAccess(item, user, transaction);
+      assertOrderEditable(item);
+      assert(item.version === entry.version, '部分商品已更新，请刷新后重试', 409);
+      const purchase = await Purchase.findOne({
+        where: { itemId: item.id },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      assert(purchase, '采购记录不存在', 404);
+      await purchase.update(patch, { transaction });
+      await item.update({ version: item.version + 1 }, { transaction });
+    }
+    await AuditLog.create(
+      {
+        userId: user.id,
+        action: 'batch_update_followup_note',
+        details: { itemIds: entries.map((entry) => entry.id), mode: input.mode, ...patch },
+      },
+      { transaction },
+    );
+  });
+  return { updated: entries.length };
 }
 
 async function updateBatchStatus(input, user, key, label) {

@@ -1,7 +1,7 @@
 import { DataTypes, Op, col } from 'sequelize';
 import { db, DictionaryOption, ImportTemplate, OrderItem, Store } from './models.js';
 import { dictionaryKinds } from './dictionaries.js';
-import { fields } from './fields.js';
+import { fields, PURCHASE_SHIPPED_NO_TRACKING_STATUS } from './fields.js';
 import { migrateOrderIdentity } from './migrations/order-identity.js';
 import { migratePurchaseConfirmation } from './migrations/purchase-confirmation.js';
 import { migrateProcurementFields } from './migrations/procurement-fields.js';
@@ -25,6 +25,25 @@ export async function migrateDictionaries() {
       await DictionaryOption.bulkCreate(
         definition.defaults.map((value, sortOrder) => ({ kind, value, sortOrder })),
       );
+  }
+  const normalizePurchaseStatus = (value) => String(value || '').replace(/[\s（）()]/g, '');
+  const purchaseStatuses = await DictionaryOption.findAll({
+    where: { kind: 'purchaseStatus' },
+    attributes: ['value'],
+  });
+  const shippedNoTracking = purchaseStatuses.some(
+    ({ value }) =>
+      normalizePurchaseStatus(value) === normalizePurchaseStatus(PURCHASE_SHIPPED_NO_TRACKING_STATUS),
+  );
+  if (!shippedNoTracking) {
+    const maxSortOrder = await DictionaryOption.max('sortOrder', {
+      where: { kind: 'purchaseStatus' },
+    });
+    await DictionaryOption.create({
+      kind: 'purchaseStatus',
+      value: PURCHASE_SHIPPED_NO_TRACKING_STATUS,
+      sortOrder: Number(maxSortOrder ?? -1) + 1,
+    });
   }
 }
 

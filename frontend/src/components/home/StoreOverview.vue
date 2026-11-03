@@ -30,7 +30,15 @@ const incomplete = computed(
   () => filtered.value.filter((row) => row.snapshotDate !== today.value).length,
 );
 const settlement = computed(() => settlementSummary(filtered.value, today.value));
+const paid = computed(() => settlementSummary(filtered.value, today.value, 'previousPayment'));
+const refunds = computed(() => settlementSummary(filtered.value, today.value, 'monthlyRefund'));
 const cards = computed(() => [
+  {
+    label: '当月退款额汇总（USD）',
+    value: refunds.value.value,
+    note: `PST 本月1日至今 · 已获取 ${refunds.value.available} 家 · 未获取 ${refunds.value.missing} 家 · 非完整或历史数据 ${refunds.value.historical} 家`,
+    persistentNote: true,
+  },
   { label: '店铺', value: filtered.value.length, note: `已统计 ${ready.value.length} 家` },
   { label: '累计订单', value: sum('totalOrders'), note: '客户订单号去重' },
   {
@@ -44,6 +52,12 @@ const cards = computed(() => [
     label: '待结算金额汇总（USD）',
     value: settlement.value.value,
     note: `已获取 ${settlement.value.available} 家 · 未获取 ${settlement.value.missing} 家 · 历史金额 ${settlement.value.historical} 家`,
+    persistentNote: true,
+  },
+  {
+    label: '上期平台已支付金额汇总（USD）',
+    value: paid.value.value,
+    note: `已获取 ${paid.value.available} 家 · 未获取 ${paid.value.missing} 家 · 历史金额 ${paid.value.historical} 家；以各店铺报表账期为准，非银行到账`,
     persistentNote: true,
   },
 ]);
@@ -162,7 +176,7 @@ onMounted(load);
         <el-button type="primary" plain :icon="Search" @click="query">查询</el-button>
         <el-button @click="reset">重置</el-button>
         <span class="muted"
-          >在线 SKU、绩效与待结算金额仍每日 PST 00:00 更新；悬停指标可查看数据时间。</span
+          >在线 SKU、绩效、付款报表与退款数据每日 PST 00:00 更新；悬停指标可查看数据时间。</span
         >
       </div>
       <div class="management-table-region">
@@ -182,6 +196,14 @@ onMounted(load);
           ></el-table-column>
           <el-table-column label="待结算金额（USD）" width="205"
             ><template #default="{ row }"><RemoteMetric :metric="row.remote.settlement" /></template
+          ></el-table-column>
+          <el-table-column label="上期平台已支付金额（USD）" width="230"
+            ><template #default="{ row }"
+              ><RemoteMetric :metric="row.remote.previousPayment" /></template
+          ></el-table-column>
+          <el-table-column label="当月退款额（USD）" width="235"
+            ><template #default="{ row }"
+              ><RemoteMetric :metric="row.remote.monthlyRefund" /></template
           ></el-table-column>
           <el-table-column label="店铺绩效 · 卖家责任口径">
             <el-table-column
@@ -224,7 +246,7 @@ onMounted(load);
       </div>
       <div class="management-footer">
         <span class="muted"
-          >未发货：待确认或已确认；待采购：未审核明细。绩效均按卖家责任口径，统计周期见列名；待结算金额以平台报表时间为准。</span
+          >未发货：待确认或已确认；待采购：未审核明细。绩效按卖家责任口径；当月退款按退款完成时间统计，含税；付款金额以各店铺报表时间为准，非银行到账。</span
         >
         <el-pagination
           v-model:current-page="page"
@@ -240,8 +262,7 @@ onMounted(load);
 </template>
 <style scoped>
 .home-page {
-  height: 100%;
-  min-height: 0;
+  min-height: max(680px, calc(100vh - 180px));
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -263,7 +284,7 @@ onMounted(load);
 }
 .home-cards {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 12px;
 }
 .home-cards article {
@@ -285,8 +306,8 @@ onMounted(load);
   overflow-wrap: anywhere;
 }
 .home-table-panel {
-  flex: 1;
-  height: auto;
+  flex: 1 0 480px;
+  height: 480px;
 }
 .home-store {
   display: flex;

@@ -31,4 +31,7 @@ import StoreOverview from '../components/home/StoreOverview.vue';
   height: max(680px, calc(100vh - 180px));
   min-width: 0;
 }
+.summary-section:first-child {
+  height: auto;
+}
 </style>

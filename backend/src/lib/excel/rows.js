@@ -73,14 +73,26 @@ export async function extractRows(
     let present = false;
     for (const mapping of effectiveMappings) {
       const field = fieldMap[mapping.field],
-        image = images.get(`${rowNumber}:${mapping.column}`);
+        embedded = images.get(`${rowNumber}:${mapping.column}`),
+        imageBuffers = Array.isArray(embedded) ? embedded : embedded ? [embedded] : [];
       try {
-        if (field.type === 'image' && image) {
-          // 同一图片可能对应合并行；相同的二进制只落盘一次。
-          const digest = createHash('sha256').update(image).digest('hex');
-          if (!savedPictures.has(digest))
-            savedPictures.set(digest, (await savePicture(image)).path);
-          raw[field.key] = savedPictures.get(digest);
+        if (field.type === 'image' && imageBuffers.length) {
+          // 同一图片可能对应合并行；相同的二进制只落盘一次，并合并同一字段的多张图片。
+          const imagePaths = [];
+          for (const image of imageBuffers) {
+            const digest = createHash('sha256').update(image).digest('hex');
+            if (!savedPictures.has(digest))
+              savedPictures.set(digest, (await savePicture(image)).path);
+            imagePaths.push(savedPictures.get(digest));
+          }
+          const existing = raw[field.key];
+          const merged = [
+            ...new Set([
+              ...(Array.isArray(existing) ? existing : existing ? [existing] : []),
+              ...imagePaths,
+            ]),
+          ];
+          raw[field.key] = merged.length === 1 ? merged[0] : merged;
           present = true;
         } else {
           const value = cellValue(row.getCell(mapping.column), field);

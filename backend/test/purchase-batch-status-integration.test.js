@@ -20,6 +20,7 @@ import {
   listOrders,
   updatePurchaseStatus,
   updateOrderStatus,
+  updateFollowupNote,
 } from '../src/services/orders.js';
 import { exportOrders } from '../src/services/order-export.js';
 import { installAuditHooks } from '../src/services/audit.js';
@@ -333,4 +334,127 @@ test('多渠道与未分配取并集，兼容旧值，并与其他筛选、权�
     });
     assert.deepEqual(numbers.sort(), expected);
   }
+});
+
+test('跟单备注批量覆盖和明确清空，保留采购字段、成功时间并记录前后值', async () => {
+  const rows = await Promise.all(
+    [1, 2].map(() =>
+      makeItem({
+        followupNote: '原跟单备注',
+        purchaseStatus: success,
+        purchaseConfirmedAt: previousTime,
+      }),
+    ),
+  );
+  const result = await auditContext.run(
+    {
+      actor: { id: operator.id },
+      id: 'followup-test',
+      method: 'POST',
+      path: '/orders/batch-followup-note',
+    },
+    () =>
+      updateFollowupNote(
+        { items: entries(rows), mode: 'replace', followupNote: ' 新备注\n第二行 ' },
+        operator,
+      ),
+  );
+  assert.equal(result.updated, 2);
+  const saved = [];
+  for (const row of rows) {
+    const current = await getItem(row.id);
+    saved.push(current);
+    assert.equal(current.followupNote, '新备注\n第二行');
+    assert.equal(current.purchaseNote, '原备注');
+    assert.equal(current.purchaseStatus, success);
+    assert.equal(current.purchaseQuantity, 3);
+    assert.equal(new Date(current.purchaseConfirmedAt).getTime(), previousTime.getTime());
+    assert.equal(current.version, row.version + 1);
+  }
+  const logs = await AuditLog.findAll({ where: { action: 'update_record', userId: operator.id } });
+  assert.ok(
+    logs.some(
+      (log) =>
+        log.details.changes?.followupNote?.before === '原跟单备注' &&
+        log.details.changes?.followupNote?.after === '新备注\n第二行',
+    ),
+  );
+  assert.equal(await AuditLog.count({ where: { action: 'batch_update_followup_note' } }), 1);
+  await updateFollowupNote({ items: entries(saved), mode: 'clear', followupNote: null }, actor);
+  for (const row of saved) assert.equal((await getItem(row.id)).followupNote, null);
+});
+
+test('跟单备注空白不能隐式清空；WFS、越权、旧版本、非法参数等全部回滚', async () => {
+  const first = await makeItem({ followupNote: '保留' });
+  const other = await makeItem({}, { shopName: 'OTHER' });
+  const wfs = await makeItem({}, { fulfillmentParty: 'WFSFulfilled' });
+  const noPurchase = await makeItem();
+  await Purchase.destroy({ where: { itemId: noPurchase.id } });
+  const base = { items: entries([first]), mode: 'replace', followupNote: '新值' };
+  const logCount = await AuditLog.count();
+  const cases = [
+    [{ ...base, items: entries([first, other]) }, operator, 403],
+    [{ ...base, items: entries([first, wfs]) }, actor, 403],
+    [{ ...base, items: entries([first, { ...other, version: 0 }]) }, actor, 409],
+    [{ ...base, items: entries([first, noPurchase]) }, actor, 404],
+    [{ ...base, items: [...entries([first]), { id: 999999, version: 1 }] }, actor, 404],
+    ...['', '  \n', null, {}, 'x'.repeat(12001)].map((followupNote) => [
+      { ...base, followupNote },
+      actor,
+      400,
+    ]),
+    [{ ...base, mode: 'clear' }, actor, 400],
+    [{ ...base, mode: 'append' }, actor, 400],
+    [{ ...base, items: [] }, actor, 400],
+    [{ ...base, items: entries([first, first]) }, actor, 400],
+    [{ ...base, items: [{ id: '1', version: 1 }] }, actor, 400],
+    [{ ...base, items: Array(501).fill(entries([first])[0]) }, actor, 400],
+    [base, { id: actor.id, role: 'unknown' }, 403],
+  ];
+  for (const [input, user, status] of cases) {
+    await assert.rejects(updateFollowupNote(input, user), { status });
+    const saved = await getItem(first.id);
+    assert.equal(saved.followupNote, '保留');
+    assert.equal(saved.version, first.version);
+    assert.equal(await AuditLog.count(), logCount);
+  }
+  // 采购角色沿用全店铺访问权限。
+  await updateFollowupNote(
+    { ...base, items: entries([other]) },
+    { id: actor.id, role: 'purchasing' },
+  );
+  assert.equal((await getItem(other.id)).followupNote, '新值');
+});
+
+test('批量跟单备注HTTP入口允许运营修改本人店铺，不能越权或夹带采购状态', async () => {
+  const row = await makeItem({ purchaseStatus: '采购中' });
+  const response = await fetch(
+    `http://127.0.0.1:${server.address().port}/orders/batch-followup-note`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: entries([row]),
+        mode: 'replace',
+        followupNote: '接口备注',
+        purchaseStatus: '采购失败',
+      }),
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { updated: 1 });
+  const saved = await getItem(row.id);
+  assert.equal(saved.followupNote, '接口备注');
+  assert.equal(saved.purchaseStatus, '采购中');
+  const other = await makeItem({}, { shopName: 'OTHER' });
+  const denied = await fetch(
+    `http://127.0.0.1:${server.address().port}/orders/batch-followup-note`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: entries([other]), mode: 'clear' }),
+    },
+  );
+  assert.equal(denied.status, 403);
+  await denied.json();
 });

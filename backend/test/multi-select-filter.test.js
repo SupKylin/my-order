@@ -44,3 +44,28 @@ test('多选拒绝非法格式和等级，不将全部提醒误作不限订单',
     buildFilters({ trackingWarning: 'all' }),
   );
 });
+
+test('采购状态空值与已选状态取并集，与渠道筛选取交集', () => {
+  const empty = buildFilters({ purchaseStatusEmpty: true }).include[1].where;
+  const conditions = empty[Op.and][0][Op.or];
+  assert.equal(conditions.length, 2);
+  assert.deepEqual(conditions[0], { purchaseStatus: null });
+  assert.equal(conditions[1].attribute.col, 'purchase.purchaseStatus');
+  assert.deepEqual(conditions[1].logic, { [Op.regexp]: '^[[:space:]]*$' });
+  assert.equal(empty.purchaseStatus, undefined);
+  const combined = buildFilters({
+    purchaseStatus: JSON.stringify(['采购中', '采购失败']),
+    purchaseStatusEmpty: 'true',
+    purchaseChannel: ['渠道甲'],
+    purchaseChannelEmpty: true,
+  }).include[1].where;
+  assert.deepEqual(combined[Op.and][0][Op.or][2], {
+    purchaseStatus: { [Op.in]: ['采购中', '采购失败'] },
+  });
+  assert.equal(combined[Op.or].length, 3);
+  assert.deepEqual(
+    buildFilters({ purchaseStatus: '采购中', purchaseStatusEmpty: false }).include[1].where,
+    { purchaseStatus: '采购中' },
+  );
+  assert.deepEqual(buildFilters({ purchaseStatusEmpty: 'false' }).include[1].where, {});
+});

@@ -1,11 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  createDailyStatistics,
-  dailyDates,
-  dailyReport,
-  refundAmount,
-} from '../src/services/home/daily.js';
+import { createDailyStatistics, dailyDates, dailyReport } from '../src/services/home/daily.js';
 
 const now = Date.parse('2026-11-01T00:00:00-08:00');
 function item(order, time, amount, extra = {}) {
@@ -16,21 +11,11 @@ function item(order, time, amount, extra = {}) {
     ...extra,
   };
 }
-function refunded(amount = '0.10', tax = '0.02') {
+function reconciliation(refunds = [], end = '2026-10-31') {
   return {
-    refund: {
-      refundId: 'refund-id',
-      refundCharges: {
-        refundCharge: [
-          {
-            charge: {
-              chargeAmount: { amount, currency: 'USD' },
-              tax: { taxAmount: { amount: tax, currency: 'USD' } },
-            },
-          },
-        ],
-      },
-    },
+    version: 2,
+    status: 'ok',
+    reports: { 11032026: { start: '2026-10-01', end, refunds } },
   };
 }
 test('最近30个PST自然日含今天，跨月跨年和午夜边界正确', () => {
@@ -92,7 +77,13 @@ test('店铺日报先日期倒序再按金额数值倒序，缺失数据排后�
   );
 });
 test('订单和WFS跨SKU去重，状态计明细；销售额排除取消行，按接口日期归组', () => {
-  const stats = createDailyStatistics(now);
+  const stats = createDailyStatistics(
+    now,
+    reconciliation([
+      ['A', '0.24'],
+      ['B', '0.12'],
+    ]),
+  );
   const time = '2026-10-31T23:59:59.999-08:00';
   stats.add(
     item('A', time, '0.10', {
@@ -100,14 +91,12 @@ test('订单和WFS跨SKU去重，状态计明细；销售额排除取消行，�
       purchase: { reviewStatus: '已审核', purchaseStatus: '采购中' },
       orderStatus: '已发货，虚拟单号发货',
     }),
-    refunded(),
   );
   stats.add(
     item('A', time, '0.20', {
       fulfillmentParty: 'WFS',
       purchase: { reviewStatus: '已审核', purchaseStatus: '采购中' },
     }),
-    refunded(),
   );
   stats.add(
     item('B', time, '100', {
@@ -115,16 +104,21 @@ test('订单和WFS跨SKU去重，状态计明细；销售额排除取消行，�
       purchase: { allocatable: '否', purchaseStatus: '采购失败' },
       orderStatus: '采购失败虚拟单号发货',
     }),
-    refunded(),
   );
-  stats.add(item('TODAY', '2026-11-01T00:00:00-08:00', '999'), refunded());
-  stats.add(item('TOO-OLD', '2026-10-01T23:59:59-08:00', '999'), refunded());
-  stats.add(item('NO-DATE', 'invalid', '999'), refunded());
-  stats.add(item('FUTURE', '2026-11-01T00:00:00.001-08:00', '1000'), refunded());
+  stats.add(item('TODAY', '2026-11-01T00:00:00-08:00', '999'));
+  stats.add(item('TOO-OLD', '2026-10-01T23:59:59-08:00', '999'));
+  stats.add(item('NO-DATE', 'invalid', '999'));
+  stats.add(item('FUTURE', '2026-11-01T00:00:00.001-08:00', '1000'));
   const [today, day, empty] = stats.result();
   assert.equal(today.totalOrders, 1);
   assert.equal(today.totalSales, '999.00');
-  assert.deepEqual(day, {
+  assert.equal(today.refundStatus, 'partial');
+  assert.equal(today.refundAmount, '0.00');
+  const { refundStatus, refundMessage, refundAsOf, ...values } = day;
+  assert.equal(refundStatus, 'ok');
+  assert.equal(refundAsOf, '2026-10-31');
+  assert.match(refundMessage, /含税/);
+  assert.deepEqual(values, {
     date: '2026-10-31',
     totalSales: '0.30',
     totalOrders: 2,
@@ -139,23 +133,24 @@ test('订单和WFS跨SKU去重，状态计明细；销售额排除取消行，�
   assert.equal(empty.totalOrders, 0);
   assert.equal(empty.refundAmount, '0.00');
 });
-test('退款只读取官方退款记录；缺失或非法数据不视为零，不由取消状态推断', () => {
-  assert.equal(refundAmount(refunded('-1.20', '-0.08')), '1.28');
-  assert.equal(refundAmount(refunded('0', '0')), '0.00');
-  assert.equal(refundAmount({}), null);
-  assert.equal(refundAmount({ refund: {} }), null);
-  assert.equal(refundAmount(refunded('invalid')), null);
-  const foreign = refunded();
-  foreign.refund.refundCharges.refundCharge[0].charge.chargeAmount.currency = 'CAD';
-  assert.equal(refundAmount(foreign), null);
-  const stats = createDailyStatistics(now);
-  stats.add(item('A', '2026-10-30T16:00:00Z', '1'), refunded());
-  stats.add(item('B', '2026-10-31T12:00:00-08:00', '1'));
-  assert.equal(stats.result()[1].refundAmount, null);
+test('普通订单缺少退款字段不影响结果；报表未完整获取不视为零，不从取消推断退款', () => {
+  const stats = createDailyStatistics(now, reconciliation());
+  stats.add(
+    item('A', '2026-10-31T12:00:00-08:00', '1', {
+      walmart: { orderDate: Date.parse('2026-10-31T12:00:00-08:00'), statuses: ['Cancelled'] },
+    }),
+  );
+  assert.equal(stats.result()[1].refundAmount, '0.00');
+  assert.equal(createDailyStatistics(now).result()[1].refundAmount, null);
+  const failed = reconciliation();
+  failed.status = 'error';
+  failed.error = '接口未授权';
+  assert.match(createDailyStatistics(now, failed).result()[1].refundMessage, /未授权/);
+  assert.equal(createDailyStatistics(now, failed).result()[1].refundStatus, 'partial');
 });
 test('不同店铺同一订单号各计一次；汇总只包含传入的授权店铺，实时统计不依赖平台快照', () => {
-  const stats = createDailyStatistics(now);
-  stats.add(item('SAME', '2026-10-31T12:00:00-08:00', '0.10'), refunded());
+  const stats = createDailyStatistics(now, reconciliation([['SAME', '0.12']]));
+  stats.add(item('SAME', '2026-10-31T12:00:00-08:00', '0.10'));
   const stores = [1, 2].map((id) => ({
     id,
     name: `store-${id}`,
@@ -177,4 +172,31 @@ test('不同店铺同一订单号各计一次；汇总只包含传入的授权�
   assert.equal(report.dailyStores[2].totalOrders, 1);
   assert.equal(report.dailyStores[3].totalOrders, null);
   assert.equal(dailyReport([], now).daily[1].totalOrders, 0);
+});
+
+test('历史退款仍归原订单日期，未出账期与无报表店铺仅作部分汇总', () => {
+  const cached = reconciliation([['A', '12.34']], '2026-10-17');
+  cached.status = 'error';
+  cached.error = '最新账期暂不可用';
+  const stats = createDailyStatistics(now, cached);
+  stats.add(item('A', '2026-10-10T12:00:00-08:00', '20'));
+  stats.add(item('B', '2026-10-31T12:00:00-08:00', '30'));
+  const rows = stats.result();
+  assert.equal(rows.find((r) => r.date === '2026-10-10').refundAmount, '12.34');
+  assert.equal(rows.find((r) => r.date === '2026-10-31').refundAmount, '0.00');
+  assert.equal(rows[0].refundStatus, 'partial');
+  assert.equal(rows[0].refundAsOf, '2026-10-17');
+  assert.match(rows[0].refundMessage, /并非最终退款为零/);
+  const report = dailyReport(
+    [
+      { id: 1, name: 'A', metrics: { daily: rows } },
+      { id: 2, name: 'B', metrics: { daily: createDailyStatistics(now).result() } },
+    ],
+    now,
+  );
+  const total = report.daily.find((r) => r.date === '2026-10-10');
+  assert.equal(total.refundAmount, '12.34');
+  assert.equal(total.refundStatus, 'partial');
+  assert.match(total.refundMessage, /1\/2 家/);
+  assert.equal(report.dailyStores.find((r) => r.storeId === 2).refundAmount, null);
 });

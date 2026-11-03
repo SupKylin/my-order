@@ -1,8 +1,11 @@
 import { WalmartClient } from '../walmart/client.js';
+import { fetchReconciliation, RECON_VERSION } from './reconciliation.js';
+import { fetchMonthlyReturns, RETURNS_VERSION, refundMonth } from './returns.js';
 
 export const REMOTE_METRICS = {
   publishedSku: '/v3/items/count?status=PUBLISHED',
   settlement: '/v3/report/payment/statement',
+  paidToYou: '/v3/report/payment/statement',
   otd: '/v3/insights/performance/otd/summary?reportDuration=30&shippingMethod=ALL_METHODS',
   vtr: '/v3/insights/performance/vtr/summary?reportDuration=30&shippingMethod=ALL_METHODS',
   cancellations: '/v3/insights/performance/cancellations/summary?reportDuration=30',
@@ -40,12 +43,15 @@ export function parseRemoteMetric(key, body) {
       throw new Error('Walmart 未返回有效的已发布 SKU 数量');
     return { value: Number(count) };
   }
-  if (key === 'settlement') {
+  if (key === 'settlement' || key === 'paidToYou') {
     const summary = body.payload?.accountSummary;
-    if (summary?.closingBalance == null || !/^-?\d+(\.\d+)?$/.test(String(summary.closingBalance)))
-      throw new Error('Walmart 未返回待结算金额');
+    const amount = summary?.[key === 'settlement' ? 'closingBalance' : 'paidToYou'];
+    if (amount == null || !/^-?\d+(\.\d+)?$/.test(String(amount)))
+      throw new Error(
+        key === 'settlement' ? 'Walmart 未返回待结算金额' : 'Walmart 未返回本期平台已支付金额',
+      );
     return {
-      value: String(summary.closingBalance),
+      value: String(amount),
       reportUpdatedAt: summary.lastUpdatedDate || null,
       scheduledSettlementDate: summary.scheduledSettlementDate || null,
     };
@@ -67,7 +73,8 @@ export async function fetchRemoteMetrics(
   previous = {},
   { client = new WalmartClient(store), now = new Date(), retryOnly = false } = {},
 ) {
-  const result = {};
+  const result = { financeFormat: 2, returnsVersion: RETURNS_VERSION };
+  const requests = new Map();
   // 同一店铺串行复用 token；外层限制同时更新的店铺数量，避免突发请求。
   for (const [key, path] of Object.entries(REMOTE_METRICS)) {
     if (retryOnly && previous[key]?.status === 'ok') {
@@ -76,7 +83,13 @@ export async function fetchRemoteMetrics(
     }
     try {
       result[key] = {
-        ...parseRemoteMetric(key, await client.request(path)),
+        ...parseRemoteMetric(
+          key,
+          await (() => {
+            if (!requests.has(path)) requests.set(path, client.request(path));
+            return requests.get(path);
+          })(),
+        ),
         status: 'ok',
         fetchedAt: now.toISOString(),
       };
@@ -84,6 +97,9 @@ export async function fetchRemoteMetrics(
       result[key] = {
         ...previous[key],
         status: 'error',
+        ...((key === 'settlement' || key === 'paidToYou') && previous[key]?.value != null
+          ? { fallback: true }
+          : {}),
         attemptedAt: now.toISOString(),
         error:
           error.apiStatus === 401 || error.apiStatus === 403
@@ -92,5 +108,19 @@ export async function fetchRemoteMetrics(
       };
     }
   }
+  result.monthlyReturns =
+    retryOnly &&
+    previous.monthlyReturns?.version === RETURNS_VERSION &&
+    previous.monthlyReturns?.periodStart === refundMonth(now).periodStart &&
+    previous.monthlyReturns.status === 'ok'
+      ? previous.monthlyReturns
+      : await fetchMonthlyReturns(client, previous.monthlyReturns, now);
+  result.reconciliation =
+    retryOnly &&
+    previous.reconciliation?.version === RECON_VERSION &&
+    previous.reconciliation.status === 'ok' &&
+    Object.values(previous.reconciliation.reports || {}).every((r) => r.financeFormat === 2)
+      ? previous.reconciliation
+      : await fetchReconciliation(client, previous.reconciliation, now);
   return result;
 }

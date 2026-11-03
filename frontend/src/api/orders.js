@@ -11,25 +11,35 @@ const queryFilters = (filters) => {
     ...filters,
     purchaseChannel: channels.filter((value) => value !== true),
     purchaseChannelEmpty: channels.includes(true),
+    purchaseStatus: (Array.isArray(filters.purchaseStatus)
+      ? filters.purchaseStatus
+      : filters.purchaseStatus
+        ? [filters.purchaseStatus]
+        : []
+    ).filter((value) => value !== true),
+    purchaseStatusEmpty:
+      Array.isArray(filters.purchaseStatus) && filters.purchaseStatus.includes(true),
   };
 };
 
 export const orderApi = {
-  list: (filters) =>
-    api.get('/orders', {
+  list: (filters) => {
+    const query = queryFilters(filters);
+    return api.get('/orders', {
       params: {
-        ...queryFilters(filters),
-        purchaseChannel: JSON.stringify(queryFilters(filters).purchaseChannel),
+        ...query,
+        purchaseChannel: JSON.stringify(query.purchaseChannel),
         ...Object.fromEntries(
           ['purchaseStatus', 'orderStatus', 'trackingWarning', 'priceFactorLevel'].map((key) => [
             key,
-            Array.isArray(filters[key]) ? JSON.stringify(filters[key]) : filters[key],
+            Array.isArray(query[key]) ? JSON.stringify(query[key]) : query[key],
           ]),
         ),
         shopNames: JSON.stringify(filters.shopNames || []),
         purchasePlatforms: JSON.stringify(filters.purchasePlatforms || []),
       },
-    }),
+    });
+  },
   exportProgress: (id) => api.get(`/orders/export-progress/${id}`, { silent: true, timeout: 5000 }),
   export: (filters, purchaseTemplate = false, exportId) =>
     api.post(
@@ -48,6 +58,8 @@ export const orderApi = {
   remove: (id, version) => api.delete(`/orders/${id}`, { data: { version } }),
   removeMany: (items) => api.post('/orders/batch-delete', { items }),
   updateStatus: (items, orderStatus) => api.post('/orders/batch-status', { items, orderStatus }),
+  updateFollowupNote: (items, mode, followupNote) =>
+    api.post('/orders/batch-followup-note', { items, mode, followupNote }),
   updatePurchaseStatus: (items, purchaseStatus) =>
     api.post('/orders/batch-purchase-status', { items, purchaseStatus }),
   // 版本随明细一起提交，服务器拒绝覆盖其他人员刚刚做出的分配。

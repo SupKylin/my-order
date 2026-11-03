@@ -135,7 +135,11 @@ async function preview(rows, sourceKeys = keys) {
 }
 
 test('采购 Excel 提交时记录成功时间，重复成功保留，重新采购更新时间且预览不改库', async () => {
-  const successStates = ['采购成功（未出跟踪号）', '采购成功（已出跟踪号）'];
+  const successStates = [
+    '采购成功（未出跟踪号）',
+    '采购成功（已出跟踪号）',
+    '采购成功（已发货无单号）',
+  ];
   const nonSuccessStates = [null, '采购中', '采购失败', '取消订单', '采购成功（砍单）'];
   await DictionaryOption.bulkCreate(
     [...successStates, ...nonSuccessStates.filter(Boolean)].map((value) => ({
@@ -553,7 +557,7 @@ test('旧模板解绑渠道与工作表，用户所选工作表生效，旧预�
 
 test('四项多选按框内并集、框间交集查询，分页、统计及两种导出一致', async () => {
   const prefix = 'MULTI-FILTER-';
-  const success = ['采购成功未出跟踪号', '采购成功已出跟踪号'];
+  const success = ['采购成功未出跟踪号', '采购成功已出跟踪号', '采购成功已发货无单号'];
   const fixtures = [
     [success[0], '运营A', '0.7', 12, null],
     [success[1], '运营B', '0.85', 60, null],

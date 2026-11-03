@@ -9,10 +9,12 @@ export const ORDER_STATUSES = [
   '物流异常',
   '投递失败',
 ];
+export const PURCHASE_SHIPPED_NO_TRACKING_STATUS = '采购成功已发货无单号';
 export const PURCHASE_STATUSES = [
   '采购中',
   '采购成功未出跟踪号',
   '采购成功已出跟踪号',
+  PURCHASE_SHIPPED_NO_TRACKING_STATUS,
   '砍单',
   '采购失败',
 ];
@@ -73,8 +75,7 @@ export const fields = [
   f('purchaseStatus', '采购状态', 'purchase', 'select', { options: PURCHASE_STATUSES }),
   f('purchaseScreenshot', '采购订单截图', 'purchase', 'image'),
   f('trackingNumber', '物流单号', 'purchase'),
-  f('trackingScreenshot1', '物流截图1', 'purchase', 'image'),
-  f('trackingScreenshot2', '物流截图2', 'purchase', 'image'),
+  f('trackingScreenshot', '物流截图', 'purchase', 'image'),
   f('purchaseNote', '采购备注', 'purchase', 'textarea'),
   f('followupNote', '跟单备注', 'purchase', 'textarea'),
   f('afterSales', '是否售后', 'purchase', 'select', { options: ['是', '否'] }),
@@ -84,6 +85,9 @@ export const fields = [
   f('settlement', '结算情况', 'purchase', 'select', { options: ['已结算', '未结算'] }),
 ];
 export const fieldMap = Object.fromEntries(fields.map((f) => [f.key, f]));
+// 旧模板和历史导入记录仍可能引用拆分前的两个物流截图字段。
+fieldMap.trackingScreenshot1 = fieldMap.trackingScreenshot;
+fieldMap.trackingScreenshot2 = fieldMap.trackingScreenshot;
 export const aliases = {
   数量: 'quantity',
   店铺: 'shopName',
@@ -115,6 +119,12 @@ export const aliases = {
   邮政编码: 'postalCode',
   联系电话: 'phone',
   运单号: 'trackingNumber',
+  物流截图: 'trackingScreenshot',
+  物流截图1: 'trackingScreenshot',
+  物流截图2: 'trackingScreenshot',
   purchaseprice: 'purchaseAmount',
 };
+// 图片字段允许通过“字段名+序号”拆成多列导入，并在服务端合并为同一字段。
+for (const field of fields.filter((item) => item.type === 'image'))
+  for (let index = 1; index <= 20; index++) aliases[`${field.label}${index}`] = field.key;
 export const imageFields = fields.filter((f) => f.type === 'image').map((f) => f.key);

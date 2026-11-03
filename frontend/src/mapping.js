@@ -24,6 +24,14 @@ export function alignMappings(mappings, columns) {
 
 /** 同一系统字段被多个列建议时，不自动选边，由用户明确指定来源。 */
 export function ambiguousSuggestions(columns = []) {
+  const repeatableImageFields = new Set([
+    'productImage',
+    'purchaseImage',
+    'purchaseScreenshot',
+    'trackingScreenshot',
+    'afterSalesScreenshot',
+    'afterSalesResultScreenshot',
+  ]);
   const byField = new Map();
   for (const column of columns) {
     if (!column.suggestedField) continue;
@@ -32,7 +40,7 @@ export function ambiguousSuggestions(columns = []) {
     byField.set(column.suggestedField, sources);
   }
   return [...byField.entries()]
-    .filter(([, sources]) => sources.length > 1)
+    .filter(([field, sources]) => sources.length > 1 && !repeatableImageFields.has(field))
     .map(([field, sources]) => ({ field, sources }));
 }
 
@@ -69,7 +77,7 @@ export function mappingIssues(mappings = [], fields = []) {
     else headers.set(header, index);
     if (!fieldMap.has(mapping.field))
       issues.push({ index, message: `${label}：请选择有效的系统字段` });
-    else if (targets.has(mapping.field))
+    else if (targets.has(mapping.field) && fieldMap.get(mapping.field)?.type !== 'image')
       issues.push({
         index,
         message: `${label}：系统字段“${fieldMap.get(mapping.field).label}”已被第 ${targets.get(mapping.field) + 1} 条使用，请修改或删除重复关系`,

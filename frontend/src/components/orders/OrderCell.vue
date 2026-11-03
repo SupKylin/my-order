@@ -5,6 +5,7 @@ import { fmtDate, fmtBeijingDate, money } from '../../utils/format';
 import { CHINA_UTC_OFFSET } from '../../utils/businessTime';
 import { shippingRemainingHours, shippingWarningLabels } from '../../utils/shippingWarning';
 import { purchaseWarning, confirmationTime } from '../../utils/purchaseWarning';
+import { imageValues as parseImageValues } from '../../utils/image-values';
 const props = defineProps({
   row: { type: Object, required: true },
   field: { type: Object, required: true },
@@ -17,6 +18,8 @@ const showCancellationIntent = computed(
 );
 const meta = useMeta();
 const value = computed(() => props.row[props.field.key]);
+const imageList = computed(() => parseImageValues(value.value));
+const imagePreviewUrls = computed(() => imageList.value.map((path) => meta.imageUrl(path)));
 const shippingHours = computed(() => shippingRemainingHours(value.value, props.warningNow));
 const factorLabels = { low: '低', medium: '平', high: '高' };
 const purchaseTag = computed(() => {
@@ -61,16 +64,24 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
     >
   </div>
   <template v-else-if="field.type === 'image'">
-    <el-image
-      v-if="value"
-      :src="meta.imageUrl(value, true)"
-      :preview-src-list="[meta.imageUrl(value)]"
-      fit="contain"
-      preview-teleported
-      lazy
-      class="order-cell-image"
-      ><template #error><span class="muted">加载失败</span></template></el-image
-    >
+    <div v-if="imageList.length" class="order-cell-images">
+      <el-image
+        :src="meta.imageUrl(imageList[0], true)"
+        :preview-src-list="imagePreviewUrls"
+        fit="contain"
+        preview-teleported
+        lazy
+        class="order-cell-image"
+        ><template #error><span class="muted">加载失败</span></template></el-image
+      >
+      <el-tag
+        v-if="imageList.length > 1"
+        class="order-cell-image-count"
+        size="small"
+        type="info"
+        >+{{ imageList.length - 1 }}</el-tag
+      >
+    </div>
     <span v-else class="muted">—</span>
   </template>
   <template v-else-if="field.key === 'platformShipDate'">

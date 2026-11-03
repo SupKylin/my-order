@@ -30,6 +30,9 @@ const OrderEditor = defineAsyncComponent(() => import('../components/OrderEditor
 const AssignmentDialog = defineAsyncComponent(
   () => import('../components/orders/AssignmentDialog.vue'),
 );
+const BatchFollowupNoteDialog = defineAsyncComponent(
+  () => import('../components/orders/BatchFollowupNoteDialog.vue'),
+);
 const {
   router,
   meta,
@@ -82,6 +85,19 @@ const statusLabel = computed(() =>
 );
 const statusDraft = ref('');
 const statusItems = ref([]);
+const followupItems = ref(null);
+function openFollowupDialog() {
+  if (!selected.value.length) return ElMessage.warning('请先勾选商品明细');
+  if (selected.value.length > 500) return ElMessage.warning('单次最多修改 500 条商品明细');
+  if (selected.value.some((item) => !canEditOrder(item)))
+    return ElMessage.warning('WFS 订单不能修改跟单备注，请重新选择');
+  followupItems.value = selected.value.map(({ id, version }) => ({ id, version }));
+}
+async function followupSaved() {
+  followupItems.value = null;
+  table.value?.clearSelection();
+  await refresh();
+}
 const advancedFiltersOpen = ref(false);
 const operationsOpen = ref(true);
 const activeAdvancedFilters = computed(
@@ -355,6 +371,12 @@ async function submitStatus() {
           <!-- 保留 Excel 订单导入代码，暂不开放入口。
           <el-button type="primary" :icon="Upload" @click="router.push('/imports/new')">导入订单</el-button>
           -->
+          <el-button
+            :icon="EditPen"
+            :disabled="!selected.length || loading"
+            @click="openFollowupDialog"
+            >批量修改跟单备注</el-button
+          >
           <el-button :icon="Download" :loading="exportBusy" @click="exportOrderRows()"
             >导出订单</el-button
           >
@@ -395,7 +417,7 @@ async function submitStatus() {
             collapse-tags-tooltip
             placeholder="采购状态"
             clearable
-            ><el-option
+            ><el-option label="未填写（空值）" :value="true" /><el-option
               v-for="status in meta.fieldMap.purchaseStatus?.options"
               :key="status"
               :label="status"
@@ -656,6 +678,8 @@ async function submitStatus() {
           >批量更改运营订单状态</el-button
         ><el-button size="small" :icon="CopyDocument" @click="copyTrackingNumbers"
           >复制物流单号</el-button
+        ><el-button size="small" :icon="EditPen" :disabled="loading" @click="openFollowupDialog"
+          >批量修改跟单备注</el-button
         ><el-button text size="small" @click="table.clearSelection()">取消选择</el-button>
       </div>
       <div class="order-table-region">
@@ -688,6 +712,12 @@ async function submitStatus() {
     </section>
   </div>
   <OrderEditor v-if="editor" v-model="editor" :item="editing" @saved="refresh" />
+  <BatchFollowupNoteDialog
+    v-if="followupItems"
+    :items="followupItems"
+    @close="followupItems = null"
+    @saved="followupSaved"
+  />
   <AssignmentDialog
     v-if="assignDialog && procurementAllowed"
     v-model="assignDialog"

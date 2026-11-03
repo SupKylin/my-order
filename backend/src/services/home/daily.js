@@ -1,5 +1,6 @@
 import { amountText, amountUnits, pstDay, yesterdayRange } from './statistics.js';
 import { WALMART_ORDER_START_MS } from '../walmart/order-range.js';
+import { reconciliationTotals } from './reconciliation.js';
 
 export const DAILY_COUNTS = [
   'totalOrders',
@@ -17,31 +18,9 @@ export function dailyDates(now = Date.now()) {
   return Array.from({ length: 30 }, (_, i) => pstDay(end - i * 86400000));
 }
 
-/** 只读取已保存的官方退款记录，不从取消状态、退货数量或订单金额推算退款。 */
-export function refundAmount(line) {
-  const refund = line?.refund;
-  const charges = refund?.refundCharges?.refundCharge;
-  if (!refund?.refundId || !Array.isArray(charges) || !charges.length) return null;
-  try {
-    let total = 0n;
-    for (const entry of charges) {
-      const charge = entry.charge;
-      const amounts = [charge?.chargeAmount];
-      if (charge?.tax != null) amounts.push(charge.tax.taxAmount);
-      for (const amount of amounts) {
-        if (amount?.currency !== 'USD' || amount.amount == null) return null;
-        // 官方退款费用可能为负数；报表展示已退款金额的正数绝对值。
-        total += amountUnits(String(amount.amount).replace(/^-/, ''));
-      }
-    }
-    return amountText(total);
-  } catch {
-    return null;
-  }
-}
-
 /** 每家店铺一次扫描同时生成 30 天报表；同店铺订单跨 SKU 去重。 */
-export function createDailyStatistics(now = Date.now()) {
+export function createDailyStatistics(now = Date.now(), reconciliation) {
+  const refunds = reconciliationTotals(reconciliation);
   const days = new Map(
     dailyDates(now).map((date) => [
       date,
@@ -51,7 +30,6 @@ export function createDailyStatistics(now = Date.now()) {
         wfs: new Set(),
         sales: 0n,
         refund: 0n,
-        refundUnavailable: false,
         reviewed: 0,
         unallocatable: 0,
         purchasing: 0,
@@ -61,11 +39,13 @@ export function createDailyStatistics(now = Date.now()) {
     ]),
   );
   return {
-    add(row, rawLine) {
+    add(row) {
       const time = Number(row.walmart?.orderDate);
       if (!Number.isFinite(time) || time < WALMART_ORDER_START_MS || time > Number(now)) return;
       const day = days.get(pstDay(time));
       if (!day) return;
+      if (!day.orders.has(row.order.orderNumber))
+        day.refund += amountUnits(refunds.amount(row.order.orderNumber));
       day.orders.add(row.order.orderNumber);
       if (['WFS', 'WFSFulfilled'].includes(row.fulfillmentParty))
         day.wfs.add(row.order.orderNumber);
@@ -78,9 +58,6 @@ export function createDailyStatistics(now = Date.now()) {
       if (purchase.purchaseStatus === '采购中') day.purchasing++;
       if (purchase.purchaseStatus === '采购失败') day.purchaseFailed++;
       if (row.orderStatus === '已发货，虚拟单号发货') day.virtualShipped++;
-      const refund = refundAmount(rawLine);
-      if (refund == null) day.refundUnavailable = true;
-      else day.refund += amountUnits(refund);
     },
     result() {
       return [...days.values()].map((day) => ({
@@ -93,7 +70,10 @@ export function createDailyStatistics(now = Date.now()) {
         purchasing: day.purchasing,
         purchaseFailed: day.purchaseFailed,
         virtualShipped: day.virtualShipped,
-        refundAmount: day.refundUnavailable ? null : amountText(day.refund),
+        ...refunds.state(day.date),
+        refundAmount: ['ok', 'partial'].includes(refunds.state(day.date).refundStatus)
+          ? amountText(day.refund)
+          : null,
       }));
     },
   };
@@ -131,9 +111,30 @@ export function dailyReport(stores, now = Date.now()) {
     });
     dailyStores.push(...rows);
     const ready = rows.every((row) => row.ready);
+    const refundReady = ready && rows.every((row) => row.refundAmount != null);
+    const refundAvailable = ready && rows.some((row) => row.refundAmount != null);
+    const refundComplete = refundReady && rows.every((row) => row.refundStatus === 'ok');
+    const unavailable = rows.some((row) => row.refundStatus === 'unavailable');
+    const cutoffs = rows
+      .map((row) => row.refundAsOf)
+      .filter(Boolean)
+      .sort();
     return {
       date,
       ready,
+      refundStatus: refundComplete
+        ? 'ok'
+        : refundAvailable
+          ? 'partial'
+          : unavailable
+            ? 'unavailable'
+            : 'pending',
+      refundAsOf: cutoffs[0] || null,
+      refundMessage: refundComplete
+        ? `实际退款（含税），各店铺报表最早覆盖至 ${cutoffs[0] || date}，后续退款随官方报表更新`
+        : refundAvailable
+          ? `仅汇总已取得报表中的实际退款（含税）；${rows.filter((row) => row.refundAmount != null).length}/${rows.length} 家有可用报表，最新账期截止日在 ${cutoffs[0]} 至 ${cutoffs.at(-1)} 之间。缺失及未出账期未计入，0 不代表最终退款为零，请查看店铺明细。`
+          : `有 ${rows.filter((row) => row.refundAmount == null).length} 家店铺${unavailable ? '财务对账数据未完整获取' : '尚待官方财务报表覆盖该日期'}，请查看店铺明细`,
       ...Object.fromEntries(
         DAILY_COUNTS.map((key) => [
           key,
@@ -144,7 +145,7 @@ export function dailyReport(stores, now = Date.now()) {
         ? amountText(rows.reduce((sum, row) => sum + amountUnits(row.totalSales), 0n))
         : null,
       refundAmount:
-        ready && rows.every((row) => row.refundAmount != null)
+        refundReady || refundAvailable
           ? amountText(rows.reduce((sum, row) => sum + amountUnits(row.refundAmount), 0n))
           : null,
     };

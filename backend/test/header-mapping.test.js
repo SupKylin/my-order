@@ -19,15 +19,23 @@ async function loaded(headers, values, pictureColumn) {
   const sheet = workbook.addWorksheet('采购');
   sheet.addRow(headers);
   sheet.addRow(values);
-  if (pictureColumn !== undefined) {
+  const pictureColumns = Array.isArray(pictureColumn)
+    ? pictureColumn
+    : pictureColumn === undefined
+      ? []
+      : [pictureColumn];
+  for (const [index, column] of pictureColumns.entries()) {
     const imageId = workbook.addImage({
-      buffer: Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jJ1kAAAAASUVORK5CYII=',
-        'base64',
-      ),
+      buffer:
+        index === 0
+          ? Buffer.from(
+              'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jJ1kAAAAASUVORK5CYII=',
+              'base64',
+            )
+          : Buffer.from(`test-image-${index}`),
       extension: 'png',
     });
-    sheet.addImage(imageId, { tl: { col: pictureColumn, row: 1 }, ext: { width: 40, height: 40 } });
+    sheet.addImage(imageId, { tl: { col: column, row: 1 }, ext: { width: 40, height: 40 } });
   }
   const bytes = await workbook.xlsx.writeBuffer();
   const restored = new ExcelJS.Workbook();
@@ -160,6 +168,36 @@ test('图片使用按表头解析出的实际位置读取', async () => {
   assert.equal(saved, 1);
   assert.deepEqual(result.errors, []);
   assert.equal(result.rows[0].patch.purchaseScreenshot, imagePath);
+});
+
+test('图片字段支持多个源列并合并为图片数组', async () => {
+  const data = await loaded(
+    ['订单号', '采购订单截图1', '采购订单截图2'],
+    ['0001', null, null],
+    [1, 2],
+  );
+  let saved = 0;
+  const result = await extractRows(
+    data,
+    {
+      ...template,
+      mappings: [
+        { header: '订单号', field: 'orderNumber' },
+        { header: '采购订单截图1', field: 'purchaseScreenshot' },
+        { header: '采购订单截图2', field: 'purchaseScreenshot' },
+      ],
+    },
+    async () => ({ path: `/uploads/images/22222222-2222-4222-8222-22222222222${++saved}.webp` }),
+  );
+  assert.equal(saved, 2);
+  assert.deepEqual(result.errors, []);
+  assert.equal(
+    result.rows[0].patch.purchaseScreenshot,
+    JSON.stringify([
+      '/uploads/images/22222222-2222-4222-8222-222222222221.webp',
+      '/uploads/images/22222222-2222-4222-8222-222222222222.webp',
+    ]),
+  );
 });
 
 test('前端复用只按唯一名称匹配，旧列号命中重复表头也不自动选择', () => {

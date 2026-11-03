@@ -34,8 +34,7 @@ const purchaseKeys = [
   'supplierAssignmentStatus',
   'purchaseScreenshot',
   'trackingNumber',
-  'trackingScreenshot1',
-  'trackingScreenshot2',
+  'trackingScreenshot',
 ];
 const labels = { purchaseStatus: '采购状态', merchantName: '商家名' };
 const widths = {

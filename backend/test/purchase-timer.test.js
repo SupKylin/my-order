@@ -26,6 +26,8 @@ test('SQL 状态正则在 Unicode 和旧版 MySQL 字节匹配下都识别中文
   const cases = [
     ['采购成功未出跟踪号', true, true],
     ['采购成功已出跟踪号', true, false],
+    ['采购成功已发货无单号', true, false],
+    ['采购成功（已发货无单号）', true, false],
     ['采购成功（未出跟踪号）', true, true],
     ['采购成功(已出跟踪号)', true, false],
     ['采购成功 （ 未出跟踪号 ） ', true, true],
@@ -91,6 +93,7 @@ test('空值及非成功状态进入任一成功状态时记录时间，退出�
       '采购成功（已出跟踪号）',
       '采购成功未出跟踪号',
       '采购成功已出跟踪号',
+      '采购成功（已发货无单号）',
     ])
       assert.equal(
         purchaseTimerPatch(reset, { purchaseStatus: success }, { now: later }).purchaseConfirmedAt,
@@ -103,6 +106,13 @@ test('空值及非成功状态进入任一成功状态时记录时间，退出�
     start,
   );
   assert.equal(purchaseWarning({ purchaseStatus: '采购成功已出跟踪号' }, +start), null);
+  assert.equal(
+    purchaseWarning(
+      { purchaseStatus: '采购成功（已发货无单号）', purchaseConfirmedAt: start.toISOString() },
+      +start + 72 * hour,
+    ),
+    null,
+  );
 });
 test('未导入采购状态不补写时间，历史成功状态没有时间时也不伪造成功时间', () => {
   for (const purchaseStatus of [status, '采购成功（已出跟踪号）']) {

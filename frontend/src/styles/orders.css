@@ -209,6 +209,14 @@
   vertical-align: middle;
   cursor: zoom-in;
 }
+.order-cell-images {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.order-cell-image-count {
+  flex: 0 0 auto;
+}
 .order-number-cell {
   display: flex;
   align-items: center;

@@ -26,7 +26,7 @@ export const useMeta = defineStore('meta', {
     },
     imageUrl(path, thumb = false) {
       if (!path) return '';
-      if (/^https:\/\//i.test(path)) return path;
+      if (/^https?:\/\//i.test(path)) return path;
       return this.publicBase + (thumb ? path.replace('.webp', '.thumb.webp') : path);
     },
   },

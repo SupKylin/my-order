@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AppError, assert } from '../../errors.js';
+import { walmartFetch } from './transport.js';
 
 const origin = 'https://marketplace.walmartapis.com';
 
 /** 密钥和 access token 只在服务端使用，不进入任务结果或错误日志。 */
 export class WalmartClient {
-  constructor(store, { fetchImpl = fetch, sleep = delay } = {}) {
+  constructor(store, { fetchImpl = walmartFetch, sleep = delay } = {}) {
     assert(
       store.clientId?.trim() && store.clientSecret?.trim(),
       '请先配置 Client ID 和 Client Secret',
@@ -82,8 +83,9 @@ export class WalmartClient {
 
   async request(path, method = 'GET') {
     for (let attempt = 0; ; attempt += 1) {
-      const token = await this.getToken();
       try {
+        // 获取令牌也可能短暂超时；GET 与后续读取共用有限重试次数。
+        const token = await this.getToken();
         return await this.transport(path, { method, token });
       } catch (error) {
         // 写接口结果不明时绝不直接重发；下次任务先 GET 检查远端状态。
