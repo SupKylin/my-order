@@ -10,7 +10,7 @@ const note = ref('');
 const busy = ref(false);
 async function submit() {
   if (busy.value) return;
-  if (mode.value === 'replace' && !note.value.trim())
+  if (mode.value !== 'clear' && !note.value.trim())
     return ElMessage.warning('请输入跟单备注；需要清空时请选择“清空备注”');
   busy.value = true;
   try {
@@ -41,28 +41,40 @@ async function submit() {
     @update:model-value="!busy && emit('close')"
   >
     <p class="dialog-description">
-      将{{ mode === 'clear' ? '清空' : '覆盖' }}跨页选中的 {{ items.length }} 条商品明细的跟单备注。
+      将{{ { clear: '清空', replace: '覆盖', append: '追加' }[mode] }}跨页选中的
+      {{ items.length }} 条商品明细的跟单备注。
     </p>
     <el-radio-group v-model="mode" :disabled="busy" aria-label="备注修改方式">
       <el-radio value="replace">覆盖原备注</el-radio>
+      <el-radio value="append">追加备注</el-radio>
       <el-radio value="clear">清空备注</el-radio>
     </el-radio-group>
     <el-input
-      v-if="mode === 'replace'"
+      v-if="mode !== 'clear'"
       v-model="note"
       type="textarea"
       :rows="6"
       :maxlength="12000"
       show-word-limit
       :disabled="busy"
-      placeholder="填写跟单备注，将覆盖所选明细的原备注"
+      :placeholder="
+        mode === 'append'
+          ? '保留原备注，换行追加本次内容；原备注为空则直接写入'
+          : '填写跟单备注，将覆盖所选明细的原备注'
+      "
       aria-label="跟单备注"
       style="margin-top: 16px"
     />
+    <p v-if="mode === 'append'" class="dialog-description">
+      追加后总长度不得超过12000字符；任一条超限，本批次均不修改。
+    </p>
     <template #footer>
       <el-button :disabled="busy" @click="emit('close')">取消</el-button>
       <el-button type="primary" :loading="busy" @click="submit">
-        {{ mode === 'clear' ? '确认清空' : '确认修改' }}（{{ items.length }} 条）
+        {{ { clear: '确认清空', replace: '确认修改', append: '确认追加' }[mode] }}（{{
+          items.length
+        }}
+        条）
       </el-button>
     </template>
   </el-dialog>

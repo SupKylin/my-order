@@ -404,7 +404,7 @@ test('跟单备注空白不能隐式清空；WFS、越权、旧版本、非法�
       400,
     ]),
     [{ ...base, mode: 'clear' }, actor, 400],
-    [{ ...base, mode: 'append' }, actor, 400],
+    [{ ...base, mode: 'invalid' }, actor, 400],
     [{ ...base, items: [] }, actor, 400],
     [{ ...base, items: entries([first, first]) }, actor, 400],
     [{ ...base, items: [{ id: '1', version: 1 }] }, actor, 400],
@@ -457,4 +457,62 @@ test('批量跟单备注HTTP入口允许运营修改本人店铺，不能越权�
   );
   assert.equal(denied.status, 403);
   await denied.json();
+});
+test('追加按每条原备注换行拼接，空值直接写入，精确长度边界及日志正确', async () => {
+  const originals = ['原备注甲', '原备注乙\n第二行 ', null, '', '  \n', 'x'.repeat(11996)];
+  const rows = [];
+  for (const followupNote of originals) rows.push(await makeItem({ followupNote }));
+  const result = await auditContext.run(
+    {
+      actor: { id: operator.id },
+      id: 'append-test',
+      method: 'POST',
+      path: '/orders/batch-followup-note',
+    },
+    () =>
+      updateFollowupNote(
+        { items: entries(rows), mode: 'append', followupNote: ' 新内容 ' },
+        operator,
+      ),
+  );
+  assert.equal(result.updated, rows.length);
+  for (const [i, row] of rows.entries()) {
+    const saved = await getItem(row.id);
+    assert.equal(saved.followupNote, originals[i]?.trim() ? `${originals[i]}\n新内容` : '新内容');
+    assert.equal(saved.version, row.version + 1);
+    assert.equal(saved.purchaseNote, '原备注');
+  }
+  assert.equal((await getItem(rows.at(-1).id)).followupNote.length, 12000);
+  const logs = await AuditLog.findAll({ where: { action: 'update_record', userId: operator.id } });
+  assert.ok(
+    logs.some(
+      (log) =>
+        log.details.changes?.followupNote?.before === '原备注甲' &&
+        log.details.changes?.followupNote?.after === '原备注甲\n新内容',
+    ),
+  );
+});
+
+test('追加超长、空白、WFS、越权和版本冲突时整批回滚，重复提交不重复追加', async () => {
+  const first = await makeItem({ followupNote: '不变' });
+  const long = await makeItem({ followupNote: 'x'.repeat(11997) });
+  const wfs = await makeItem({}, { fulfillmentParty: 'WFS' });
+  const other = await makeItem({}, { shopName: 'OTHER' });
+  const base = { items: entries([first]), mode: 'append', followupNote: '新内容' };
+  const count = await AuditLog.count();
+  for (const [input, user, status] of [
+    [{ ...base, items: entries([first, long]) }, actor, 400],
+    [{ ...base, items: entries([first, wfs]) }, actor, 403],
+    [{ ...base, items: entries([first, other]) }, operator, 403],
+    [{ ...base, items: entries([first, { ...other, version: 0 }]) }, actor, 409],
+    [{ ...base, followupNote: '  \n' }, actor, 400],
+  ]) {
+    await assert.rejects(updateFollowupNote(input, user), { status });
+    assert.equal((await getItem(first.id)).followupNote, '不变');
+    assert.equal((await getItem(first.id)).version, first.version);
+    assert.equal(await AuditLog.count(), count);
+  }
+  await updateFollowupNote(base, actor);
+  await assert.rejects(updateFollowupNote(base, actor), { status: 409 });
+  assert.equal((await getItem(first.id)).followupNote, '不变\n新内容');
 });

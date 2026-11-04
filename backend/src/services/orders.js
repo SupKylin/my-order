@@ -719,7 +719,7 @@ export async function updatePurchaseStatus(input, user) {
   return updateBatchStatus(input, user, 'purchaseStatus', '采购状态');
 }
 
-/** 跟单备注仅覆盖或明确清空；沿用跨页批量操作的权限、版本与事务边界。 */
+/** 跟单备注支持覆盖、追加或明确清空；沿用权限、版本与事务边界。 */
 export async function updateFollowupNote(input, user) {
   requirePermission(user, 'orders');
   const entries = input?.items;
@@ -732,7 +732,7 @@ export async function updateFollowupNote(input, user) {
     '商品明细参数错误',
   );
   assert(new Set(entries.map((entry) => entry.id)).size === entries.length, '商品明细不能重复');
-  assert(['replace', 'clear'].includes(input.mode), '请选择覆盖或清空备注');
+  assert(['replace', 'append', 'clear'].includes(input.mode), '请选择覆盖、追加或清空备注');
   assert(
     input.mode === 'clear'
       ? input.followupNote == null || input.followupNote === ''
@@ -756,7 +756,17 @@ export async function updateFollowupNote(input, user) {
         lock: transaction.LOCK.UPDATE,
       });
       assert(purchase, '采购记录不存在', 404);
-      await purchase.update(patch, { transaction });
+      let followupNote = patch.followupNote;
+      if (input.mode === 'append') {
+        const original = purchase.followupNote;
+        // 在锁定后的现值上追加，每条明细保留自己的原备注。
+        followupNote = original?.trim() ? `${original}\n${followupNote}` : followupNote;
+        assert(
+          followupNote.length <= 12000,
+          `商品明细 ${item.id}（${item.shopName} / ${item.walmartSku}）追加后跟单备注超过 12000 个字符，本批次未修改`,
+        );
+      }
+      await purchase.update({ followupNote }, { transaction });
       await item.update({ version: item.version + 1 }, { transaction });
     }
     await AuditLog.create(
