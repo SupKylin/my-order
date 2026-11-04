@@ -10,6 +10,44 @@ import { acknowledgePersistedOrder } from '../src/services/walmart/acknowledgeme
 import { WalmartClient } from '../src/services/walmart/client.js';
 import { validatePatch } from '../src/validation.js';
 
+test('读取请求获取令牌超时有限重试，持续失败最多3次，写请求不自动重发', async () => {
+  let tokens = 0,
+    reads = 0;
+  const client = new WalmartClient(
+    { clientId: 'test', clientSecret: 'secret' },
+    {
+      sleep: async () => {},
+      fetchImpl: async (url) => {
+        if (url.pathname === '/v3/token') {
+          if (++tokens === 1) throw new Error('network timeout');
+          return new Response(JSON.stringify({ access_token: 'token', expires_in: 900 }));
+        }
+        reads++;
+        return new Response(JSON.stringify({ ok: true }));
+      },
+    },
+  );
+  assert.deepEqual(await client.request('/v3/returns'), { ok: true });
+  assert.equal(tokens, 2);
+  assert.equal(reads, 1);
+  let calls = 0;
+  const fail = new WalmartClient(
+    { clientId: 'test', clientSecret: 'secret' },
+    {
+      sleep: async () => {},
+      fetchImpl: async () => {
+        calls++;
+        throw new Error('network');
+      },
+    },
+  );
+  await assert.rejects(fail.request('/v3/returns'), /网络/);
+  assert.equal(calls, 3);
+  calls = 0;
+  await assert.rejects(fail.request('/v3/orders/test/acknowledge', 'POST'), /网络/);
+  assert.equal(calls, 1);
+});
+
 function order(status = 'Created') {
   return {
     purchaseOrderId: 'PO-1',
@@ -98,7 +136,9 @@ test('多件资助订单以原单价乘商品数量，运费与普通费用不�
   const mapped = () => mapOrderLine({ id: 1, systemStoreName: '测试' }, raw, line);
   assert.equal(Number(mapped().fields.orderAmount), 191.54);
   line.incentive.originalPrice.amount = '31.50';
-  line.charges.charge = [{ chargeType: 'PRODUCT', chargeAmount: { amount: '57.94', currency: 'USD' } }];
+  line.charges.charge = [
+    { chargeType: 'PRODUCT', chargeAmount: { amount: '57.94', currency: 'USD' } },
+  ];
   assert.equal(Number(mapped().fields.orderAmount), 63);
   for (const quantity of ['', '0', '-1', '1.5']) {
     line.orderLineQuantity.amount = quantity;

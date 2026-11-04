@@ -1,5 +1,5 @@
 import { DataTypes, Op } from 'sequelize';
-import { db, OrderItem, RiskAddress } from '../models.js';
+import { db, ImportTemplate, OrderItem, RiskAddress } from '../models.js';
 import { addressFields, addressKey } from '../lib/address-key.js';
 
 /** 可重复执行的增量迁移；只添加字段和风险地址表，不清空业务数据。 */
@@ -11,12 +11,60 @@ export async function migrateProcurementFields() {
       shippingMode: DataTypes.STRING(255),
       afterSalesResult: DataTypes.STRING(255),
       afterSalesResultScreenshot: DataTypes.TEXT,
+      trackingScreenshot: DataTypes.TEXT,
     },
     order_items: { fulfillmentParty: DataTypes.STRING(255), addressKey: DataTypes.STRING(64) },
   })) {
     const columns = await query.describeTable(table);
     for (const [key, type] of Object.entries(definitions))
       if (!columns[key]) await query.addColumn(table, key, { type, allowNull: true });
+  }
+  const purchaseColumns = await query.describeTable('purchases');
+  if (purchaseColumns.trackingScreenshot1 || purchaseColumns.trackingScreenshot2) {
+    const columns = [
+      'id',
+      purchaseColumns.trackingScreenshot1 ? 'trackingScreenshot1' : null,
+      purchaseColumns.trackingScreenshot2 ? 'trackingScreenshot2' : null,
+    ].filter(Boolean);
+    const [rows] = await db.query(
+      `SELECT ${columns.map((column) => `\`${column}\``).join(', ')} FROM \`purchases\` WHERE \`trackingScreenshot\` IS NULL OR TRIM(\`trackingScreenshot\`) = ''`,
+    );
+    const parseImages = (value) => {
+      if (!value) return [];
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) return parsed;
+        } catch {}
+        return [value];
+      }
+      return [String(value)];
+    };
+    for (const row of rows) {
+      const images = [...new Set(
+        columns
+          .slice(1)
+          .flatMap((column) => parseImages(row[column]))
+          .map((value) => String(value).trim())
+          .filter(Boolean),
+      )];
+      if (images.length)
+        await db.query('UPDATE `purchases` SET `trackingScreenshot` = ? WHERE `id` = ?', {
+          replacements: [JSON.stringify(images), row.id],
+        });
+    }
+  }
+  // 已保存模板中的旧字段统一指向新的合并字段，避免编辑后再次写回拆分字段。
+  for (const template of await ImportTemplate.findAll()) {
+    if (!Array.isArray(template.mappings)) continue;
+    const mappings = template.mappings.map((mapping) =>
+      ['trackingScreenshot1', 'trackingScreenshot2'].includes(mapping.field)
+        ? { ...mapping, field: 'trackingScreenshot' }
+        : mapping,
+    );
+    if (JSON.stringify(mappings) !== JSON.stringify(template.mappings))
+      await template.update({ mappings });
   }
   await RiskAddress.sync();
   const indexes = await query.showIndex('order_items');

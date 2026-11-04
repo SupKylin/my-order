@@ -4,6 +4,17 @@ import { decimalText, expandNumericValue } from './lib/decimal.js';
 import { normalizeChannels } from './lib/channels.js';
 import { walmartImage } from './lib/product-image.js';
 export const isBlank = (v) => v === null || v === undefined || (typeof v === 'string' && !v.trim());
+const localImagePath = /^\/uploads\/images\/[0-9a-f-]{36}\.webp$/;
+const imageValues = (value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
+  }
+  return [value];
+};
 const localDate = (v) => {
   if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.toISOString().slice(0, 10);
   const str = String(v)
@@ -21,6 +32,20 @@ const localDate = (v) => {
 };
 export function normalizeValue(f, value) {
   if (isBlank(value)) return null;
+  if (f.type === 'image') {
+    const paths = imageValues(value)
+      .filter((path) => !isBlank(path))
+      .map((path) => String(path).trim());
+    if (!paths.length) return null;
+    for (const path of paths)
+      if (!localImagePath.test(path) && !(f.key === 'productImage' && walmartImage(path)))
+        throw new Error('请上传图片，或使用 Excel 嵌入图片');
+    const unique = [...new Set(paths)];
+    const serialized = Array.isArray(value) || (typeof value === 'string' && value.trim().startsWith('['));
+    const result = serialized ? JSON.stringify(unique) : unique[0];
+    if (result.length > 12000) throw new Error('内容不能超过 12000 个字符');
+    return result;
+  }
   if (f.type === 'multiselect') return normalizeChannels(value, f.options);
   if (f.type === 'date') {
     const result = localDate(value);
@@ -71,12 +96,6 @@ export function normalizeValue(f, value) {
   }
   if (f.type === 'url' && !/^https?:\/\/[^\s]+$/i.test(text))
     throw new Error('链接必须以 http:// 或 https:// 开头');
-  if (
-    f.type === 'image' &&
-    !/^\/uploads\/images\/[0-9a-f-]{36}\.webp$/.test(text) &&
-    !(f.key === 'productImage' && walmartImage(text))
-  )
-    throw new Error('请上传图片，或使用 Excel 嵌入图片');
   const max = ['textarea', 'url', 'image'].includes(f.type)
     ? 12000
     : ['orderNumber', 'walmartSku', 'purchaseSku'].includes(f.key)
@@ -140,8 +159,9 @@ export function validateTemplate(input) {
   if (input.mappings.length > 500) throw new AppError(400, '最多支持 500 个 Excel 源列');
   // 未选目标的源列仍需保存，只有未填写任何内容的新增草稿可以丢弃。
   const selected = input.mappings.filter((mapping) => !isBlank(mapping.field));
-  if (selected.length > fields.length)
-    throw new AppError(400, `最多支持 ${fields.length} 条映射，请删除重复或多余的关系`);
+  const uniqueSelectedFields = new Set(selected.map((mapping) => mapping.field));
+  if (uniqueSelectedFields.size > fields.length)
+    throw new AppError(400, `最多支持 ${fields.length} 个系统字段，请删除重复或多余的关系`);
   const mappings = input.mappings
     .filter((m) => !isBlank(m.header) || !isBlank(m.field))
     .map((m) => ({
@@ -161,13 +181,14 @@ export function validateTemplate(input) {
         400,
         `${label}：Excel 表头“${m.header}”已被第 ${headers.get(m.header)} 条使用，请修改或删除重复关系`,
       );
-    if (targets.has(m.field))
+    const canonicalField = fieldMap[m.field].key;
+    if (targets.has(canonicalField) && fieldMap[m.field].type !== 'image')
       throw new AppError(
         400,
-        `${label}：系统字段“${fieldMap[m.field].label}”已被第 ${targets.get(m.field)} 条使用，请修改或删除重复关系`,
+        `${label}：系统字段“${fieldMap[m.field].label}”已被第 ${targets.get(canonicalField)} 条使用，请修改或删除重复关系`,
       );
     headers.set(m.header, index + 1);
-    targets.set(m.field, index + 1);
+    if (!targets.has(canonicalField)) targets.set(canonicalField, index + 1);
   }
   if (!targets.has('orderNumber')) throw new AppError(400, '必须映射订单号');
   return { name, sheetName, headerRow, mappings };

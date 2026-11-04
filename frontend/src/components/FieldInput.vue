@@ -3,10 +3,13 @@ import { computed, ref } from 'vue';
 import { Plus, Delete } from '@element-plus/icons-vue';
 import { uploadApi } from '../api/uploads';
 import { useMeta } from '../stores/meta';
+import { imageValues as parseImageValues } from '../utils/image-values';
 const props = defineProps({ field: Object, modelValue: [String, Number, Boolean, Date, Array] });
 const emit = defineEmits(['update:modelValue', 'uploading']);
 const meta = useMeta(),
-  busy = ref(false);
+  uploadingCount = ref(0),
+  pendingImagePaths = ref([]);
+const busy = computed(() => uploadingCount.value > 0);
 // 手工清空要发出 null，后端才能区分“清空”与“未提供”。
 const value = computed({
   get: () => props.modelValue ?? '',
@@ -17,23 +20,36 @@ const multipleValue = computed({
     Array.isArray(props.modelValue) ? props.modelValue : props.modelValue ? [props.modelValue] : [],
   set: (values) => emit('update:modelValue', values.length ? values : null),
 });
+const imageList = computed(() => parseImageValues(props.modelValue));
+const imagePreviewUrls = computed(() => imageList.value.map((path) => meta.imageUrl(path)));
 const historicalOptions = computed(() =>
   multipleValue.value.filter((option) => !props.field.options.includes(option)),
 );
 async function upload(options) {
-  if (busy.value) return;
-  busy.value = true;
+  uploadingCount.value += 1;
   emit('uploading', true);
+  let uploadedPath = '';
   try {
     const result = await uploadApi.image(options.file);
-    emit('update:modelValue', result.path);
+    uploadedPath = result.path;
+    pendingImagePaths.value.push(uploadedPath);
+    const next = [...new Set([...imageList.value, ...pendingImagePaths.value])];
+    emit('update:modelValue', next);
     options.onSuccess(result);
   } catch (e) {
     options.onError(e);
   } finally {
-    busy.value = false;
-    emit('uploading', false);
+    if (uploadedPath) {
+      const index = pendingImagePaths.value.indexOf(uploadedPath);
+      if (index >= 0) pendingImagePaths.value.splice(index, 1);
+    }
+    uploadingCount.value -= 1;
+    if (!uploadingCount.value) emit('uploading', false);
   }
+}
+function removeImage(index) {
+  const next = imageList.value.filter((_, imageIndex) => imageIndex !== index);
+  emit('update:modelValue', next.length ? next : null);
 }
 </script>
 <template>
@@ -76,10 +92,12 @@ async function upload(options) {
     clearable
   />
   <div v-else-if="field.type === 'image'" class="image-field">
-    <div v-if="value" class="image-preview">
+    <div v-if="imageList.length" class="image-preview-list">
+      <div v-for="(path, index) in imageList" :key="path" class="image-preview">
       <el-image
-        :src="meta.imageUrl(value, true)"
-        :preview-src-list="[meta.imageUrl(value)]"
+        :src="meta.imageUrl(path, true)"
+        :preview-src-list="imagePreviewUrls"
+        :initial-index="index"
         fit="contain"
         preview-teleported
       /><el-button
@@ -89,16 +107,18 @@ async function upload(options) {
         size="small"
         aria-label="清除图片"
         :disabled="busy"
-        @click="value = null"
+        @click="removeImage(index)"
       />
+      </div>
     </div>
     <el-upload
       :show-file-list="false"
+      multiple
       accept="image/png,image/jpeg,image/webp,image/gif"
       :http-request="upload"
       :disabled="busy"
       ><el-button :icon="Plus" :loading="busy">{{
-        value ? '替换图片' : '上传图片'
+        imageList.length ? '继续上传' : '上传图片'
       }}</el-button></el-upload
     >
   </div>

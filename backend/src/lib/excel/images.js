@@ -6,9 +6,9 @@ export async function embeddedImages({ workbook, zip }, sheet) {
     warnings = [];
   const add = (row, col, buffer) => {
     const key = `${row}:${col}`;
-    if (images.has(key))
-      warnings.push({ row, message: `第 ${col} 列有多张图片，当前图片字段只保存第一张` });
-    else images.set(key, buffer);
+    const current = images.get(key) || [];
+    current.push(buffer);
+    images.set(key, current);
   };
   for (const entry of sheet.getImages()) {
     const picture = workbook.getImage(entry.imageId);

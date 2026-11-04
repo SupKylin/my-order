@@ -167,6 +167,7 @@ function samples(header) {
               :value="field.key"
               :label="field.label + (field.required ? ' *' : '')"
               :disabled="
+                field.type !== 'image' &&
                 modelValue.some((mapping, index) => index !== $index && mapping.field === field.key)
               "
             />
@@ -207,7 +208,7 @@ function samples(header) {
   </p>
   <p class="mapping-footnote">
     未选择系统字段的 Excel
-    表头仍会保存在模板中，可稍后配置；导入时跳过这些列。仅按表头名称匹配，列顺序可以变化，忽略表头首尾空格。采购导入需映射店铺名、订单号、WalmartSku及至少一个可更新的采购字段；采购渠道不参与导入。每个表头名称和系统字段只能使用一次；同名表头无法区分，请先修改
+    表头仍会保存在模板中，可稍后配置；导入时跳过这些列。仅按表头名称匹配，列顺序可以变化，忽略表头首尾空格。采购导入需映射店铺名、订单号、WalmartSku及至少一个可更新的采购字段；采购渠道不参与导入。普通系统字段每个只能映射一次，图片字段可使用“字段名1、字段名2”等多个表头并自动合并；同名表头无法区分，请先修改
     Excel。删除映射只影响后续导入，已有订单字段保留原值。
   </p>
 </template>

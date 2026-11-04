@@ -108,6 +108,21 @@ test('远端数据按真实结构解析，零值有效，缺字段不伪装为�
   });
   assert.equal(balance.value, '-10.25');
   assert.equal(balance.scheduledSettlementDate, '2026-10-20');
+  const paid = parseRemoteMetric('paidToYou', {
+    payload: {
+      accountSummary: {
+        paidToYou: 0,
+        lastUpdatedDate: '2026-10-18',
+        scheduledSettlementDate: '2026-10-20',
+      },
+    },
+  });
+  assert.equal(paid.value, '0');
+  assert.equal(paid.reportUpdatedAt, '2026-10-18');
+  assert.equal(paid.scheduledSettlementDate, '2026-10-20');
+  assert.throws(() =>
+    parseRemoteMetric('paidToYou', { payload: { accountSummary: { closingBalance: 5 } } }),
+  );
 });
 test('新增绩效只取卖家责任率，不混入非卖家责任；小于 1 的百分数不放大', () => {
   for (const key of ['negativeFeedback', 'returns', 'itemNotReceived']) {
@@ -131,12 +146,18 @@ test('新增绩效只取卖家责任率，不混入非卖家责任；小于 1 �
 test('单指标失败保留历史值及时间，其他接口正常采集，重试不重复请求成功指标', async () => {
   const previous = { publishedSku: { value: 9, status: 'ok', fetchedAt: 'old' } };
   let calls = 0;
+  let paymentCalls = 0;
   const client = {
     async request(path) {
       calls++;
       if (path.includes('items/count'))
         throw Object.assign(new Error('forbidden'), { apiStatus: 403 });
-      if (path.includes('payment')) return { payload: { accountSummary: { closingBalance: 5 } } };
+      if (path.includes('payment')) {
+        paymentCalls++;
+        return { payload: { accountSummary: { closingBalance: 5, paidToYou: 0 } } };
+      }
+      if (path.includes('availableReconFiles')) return { availableApReportDates: [] };
+      if (path.startsWith('/v3/returns?')) return { meta: { totalCount: 0 }, returnOrders: [] };
       return { payload: { cumulativeRate: 0.95, sellerAccountableRate: 0.95, overallRate: 0.9 } };
     },
   };
@@ -145,8 +166,10 @@ test('单指标失败保留历史值及时间，其他接口正常采集，重�
   assert.equal(result.publishedSku.fetchedAt, 'old');
   assert.match(result.publishedSku.error, /未授权/);
   assert.equal(result.srr.status, 'ok');
+  assert.equal(result.paidToYou.value, '0');
+  assert.equal(paymentCalls, 1);
   calls = 0;
-  await fetchRemoteMetrics({}, result, { client, retryOnly: true });
+  await fetchRemoteMetrics({}, result, { client, retryOnly: true, now: new Date(now) });
   assert.equal(calls, 1);
 });
 test('每日更新及重启补做、失败有限重试、更换密钥失效', () => {
@@ -154,6 +177,10 @@ test('每日更新及重启补做、失败有限重试、更换密钥失效', ()
   const remote = Object.fromEntries(
     Object.keys(REMOTE_METRICS).map((key) => [key, { status: 'ok' }]),
   );
+  remote.financeFormat = 2;
+  remote.returnsVersion = 2;
+  remote.monthlyReturns = { version: 2, status: 'ok' };
+  remote.reconciliation = { version: 2, status: 'ok', reports: {} };
   const snapshot = {
     sourceKey: snapshotSource(store),
     snapshotDate: pstDay(now),
@@ -167,9 +194,49 @@ test('每日更新及重启补做、失败有限重试、更换密钥失效', ()
   assert.equal(snapshotDue(snapshot, store, now + 86400000 - 1), false);
   assert.equal(snapshotDue(snapshot, store, now + 86400000), true);
   assert.equal(snapshotDue(snapshot, { ...store, clientSecret: 'changed' }, now), true);
+  delete snapshot.remote.returnsVersion;
+  assert.equal(snapshotDue(snapshot, store, now), true);
+  snapshot.remote.returnsVersion = 2;
+  snapshot.remote.monthlyReturns.status = 'error';
+  assert.equal(snapshotDue(snapshot, store, now + 1000), false);
+  assert.equal(snapshotDue(snapshot, store, now + 15 * 60000), true);
+  snapshot.remote.monthlyReturns.status = 'ok';
   snapshot.remote.srr.status = 'error';
   assert.equal(snapshotDue(snapshot, store, now + 1000), false);
   assert.equal(snapshotDue(snapshot, store, now + 15 * 60000), true);
   snapshot.attempts = 3;
   assert.equal(snapshotDue(snapshot, store, now + 60 * 60000), false);
+});
+
+test('付款缺失回退最近成功报表及实际日期，官方零值不回退，恢复后移除回退标志', async () => {
+  let summary = {};
+  const client = {
+    request: async (path) => {
+      if (path.includes('payment/statement')) return { payload: { accountSummary: summary } };
+      if (path.includes('availableReconFiles')) return { availableApReportDates: [] };
+      return {};
+    },
+  };
+  const previous = {
+    paidToYou: {
+      status: 'ok',
+      value: '25.50',
+      reportUpdatedAt: '2026-10-10',
+      fetchedAt: '2026-10-11',
+    },
+    settlement: { status: 'ok', value: '100', reportUpdatedAt: '2026-10-10' },
+  };
+  const fallback = await fetchRemoteMetrics({}, previous, { client });
+  assert.equal(fallback.paidToYou.value, '25.50');
+  assert.equal(fallback.paidToYou.reportUpdatedAt, '2026-10-10');
+  assert.equal(fallback.paidToYou.fallback, true);
+  assert.equal(fallback.settlement.fallback, true);
+  summary = { paidToYou: 0, closingBalance: 0, lastUpdatedDate: '2026-10-28' };
+  const restored = await fetchRemoteMetrics({}, fallback, { client });
+  assert.equal(restored.paidToYou.value, '0');
+  assert.equal(restored.paidToYou.fallback, undefined);
+  assert.equal(restored.paidToYou.reportUpdatedAt, '2026-10-28');
+  const empty = await fetchRemoteMetrics({}, {}, { client: { request: async () => ({}) } });
+  assert.equal(empty.paidToYou.value, undefined);
+  assert.equal(empty.paidToYou.fallback, undefined);
 });

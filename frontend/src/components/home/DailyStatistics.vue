@@ -22,7 +22,6 @@ const columns = [
   ['purchasing', '采购中', 100],
   ['purchaseFailed', '采购失败', 110],
   ['virtualShipped', '虚拟单号发货', 145],
-  ['refundAmount', '退款额（USD）', 150],
 ];
 const filtered = computed(() => {
   const source = (props.byStore ? report.value?.dailyStores : report.value?.daily) || [];
@@ -164,11 +163,24 @@ onMounted(load);
                 :content="
                   !row.ready
                     ? '当前店铺订单统计暂不可用，请刷新重试'
-                    : '未取得完整的官方实际退款记录，不以取消金额或零替代'
+                    : row.refundMessage || '未取得完整的官方财务对账记录'
                 "
                 placement="top"
               >
-                <span class="muted">{{ !row.ready ? '等待更新' : '暂不可用' }}</span>
+                <span class="muted">{{
+                  !row.ready ? '等待更新' : row.refundStatus === 'pending' ? '待出报表' : '暂不可用'
+                }}</span>
+              </el-tooltip>
+              <el-tooltip
+                v-else-if="key === 'refundAmount'"
+                :content="row.refundMessage"
+                placement="top"
+              >
+                <span class="refund-value">
+                  {{ row[key] }}
+                  <small v-if="row.refundStatus === 'partial'">已出报表 · 非最终</small>
+                  <small v-if="row.refundAsOf">账期截至 {{ row.refundAsOf }}</small>
+                </span>
               </el-tooltip>
               <span v-else>{{ row[key] }}</span>
             </template>
@@ -179,7 +191,7 @@ onMounted(load);
     <div class="management-footer daily-footer">
       <span class="muted"
         >订单 / WFS
-        按店铺＋客户订单号去重；状态按商品明细计数。销售额排除取消行，退款归原下单日。数据自
+        按店铺＋客户订单号去重；状态按商品明细计数。销售额排除取消行；当月退款见店铺概况与绩效。数据自
         2026-10-01 接入起。</span
       >
       <el-pagination
@@ -195,6 +207,15 @@ onMounted(load);
 </template>
 
 <style scoped>
+.refund-value {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.6;
+}
+.refund-value small {
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+}
 .daily-statistics {
   height: 100%;
   min-height: 0;

@@ -8,6 +8,7 @@ import { canManageProcurement } from '../utils/permissions';
 import { orderApi } from '../api/orders';
 import { canEditOrder } from '../utils/orderWritePolicy';
 import { fmtBeijingDate } from '../utils/format';
+import { imageValues as parseImageValues } from '../utils/image-values';
 const platformReadOnly = (field) =>
   field.group === 'product' || ['orderNumber', 'shopName', 'fulfillmentParty'].includes(field.key);
 const derivedPurchaseFields = new Set(['purchaseLimit', 'priceFactor']);
@@ -34,6 +35,8 @@ function trackUpload(key, uploading) {
   if (uploading) uploadingFields.add(key);
   else uploadingFields.delete(key);
 }
+const imageListFor = (value) => parseImageValues(value);
+const imageUrlsFor = (value) => imageListFor(value).map((path) => meta.imageUrl(path));
 const sections = [
   { key: 'order', label: '订单信息', note: '订单身份、平台时间与状态' },
   { key: 'product', label: '商品与收件信息', note: '由 Walmart 同步 · 只读' },
@@ -150,14 +153,21 @@ async function save() {
               :required="field.required"
               :class="{ 'full-width': ['textarea', 'url'].includes(field.type) }"
               ><template v-if="fieldReadOnly(field)">
-                <el-image
-                  v-if="field.type === 'image' && form[field.key]"
-                  :src="meta.imageUrl(form[field.key], true)"
-                  :preview-src-list="[meta.imageUrl(form[field.key])]"
-                  fit="contain"
-                  preview-teleported
-                  style="width: 100px; height: 100px"
-                />
+                <div
+                  v-if="field.type === 'image' && imageListFor(form[field.key]).length"
+                  class="image-preview-list"
+                >
+                  <el-image
+                    v-for="(path, index) in imageListFor(form[field.key])"
+                    :key="path"
+                    :src="meta.imageUrl(path, true)"
+                    :preview-src-list="imageUrlsFor(form[field.key])"
+                    :initial-index="index"
+                    fit="contain"
+                    preview-teleported
+                    style="width: 100px; height: 100px"
+                  />
+                </div>
                 <span v-else style="overflow-wrap: anywhere">{{
                   Array.isArray(form[field.key])
                     ? form[field.key].join(' / ') || '—'

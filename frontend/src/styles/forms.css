@@ -74,7 +74,13 @@
 .image-field {
   display: flex;
   gap: 13px;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.image-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
 }
 .image-preview {
   position: relative;

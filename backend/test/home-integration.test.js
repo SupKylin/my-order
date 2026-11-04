@@ -30,6 +30,16 @@ const remote = Object.fromEntries(
     { status: 'ok', value: 10, fetchedAt: new Date(now).toISOString() },
   ]),
 );
+remote.financeFormat = 2;
+remote.returnsVersion = 2;
+remote.monthlyReturns = {
+  version: 2,
+  source: 'returns',
+  status: 'ok',
+  periodStart: '2026-10-01',
+  value: '0.00',
+};
+remote.reconciliation = { version: 2, status: 'ok', reports: {} };
 before(async () => {
   if (!isolated) return;
   connection = await mysql.createConnection({
@@ -104,7 +114,7 @@ before(async () => {
                 refundCharge: [
                   {
                     charge: {
-                      chargeAmount: { amount: name === 'A' ? '0.10' : '0.20', currency: 'USD' },
+                      chargeAmount: { amount: '9.99', currency: 'USD' },
                     },
                   },
                 ],
@@ -116,7 +126,20 @@ before(async () => {
     });
     await updateStoreSnapshot(stores[name], {
       now,
-      remoteLoader: async () => structuredClone(remote),
+      remoteLoader: async () => {
+        const result = structuredClone(remote);
+        result.monthlyReturns.value = name === 'A' ? '0.20' : '0.40';
+        result.reconciliation.reports['10202026'] = {
+          start: '2026-10-01',
+          end: '2026-10-18',
+          financeFormat: 2,
+          datesComplete: true,
+          postedRefunds: [['2026-10-18', name === 'A' ? '0.20' : '0.40']],
+          paidAmount: '12.34',
+          refunds: [['SAME-CUSTOMER-ORDER', name === 'A' ? '0.20' : '0.40']],
+        };
+        return result;
+      },
     });
   }
   server = createApp().listen(0, '127.0.0.1');
@@ -170,7 +193,7 @@ test('首页需登录，运营只读取所属店铺，采购和管理员读取�
     assert.equal(data.stores.length, count);
     assert.doesNotMatch(
       JSON.stringify(data),
-      /test-secret|test-client|clientSecret|passwordHash|sourceKey/,
+      /test-secret|test-client|clientSecret|passwordHash|sourceKey|reconciliation|SAME-CUSTOMER-ORDER/,
     );
     for (const store of data.stores) {
       const owner = store.name === 'A' ? users.operations : users.admin;
@@ -181,7 +204,7 @@ test('首页需登录，运营只读取所属店铺，采购和管理员读取�
   }
   assert.equal(await AuditLog.count(), logs);
 });
-test('每日报表按店铺隔离原始退款记录，跨 SKU 去重并遵循账号权限', async () => {
+test('每日报表按店铺隔离财务对账退款，忽略旧回执、跨 SKU 去重并遵循账号权限', async () => {
   const home = await readHome(users.operations, now);
   assert.equal(home.daily.length, 30);
   assert.equal(home.dailyStores.length, 30);
@@ -195,6 +218,7 @@ test('每日报表按店铺隔离原始退款记录，跨 SKU 去重并遵循账
   assert.equal(day.reviewed, 1);
   assert.equal(day.unallocatable, 1);
   assert.equal(day.virtualShipped, 2);
+  assert.equal(home.stores[0].remote.monthlyRefund.value, '0.20');
   assert.ok(home.dailyStores.every((row) => row.name === 'A'));
   const all = await readHome(users.admin, now);
   assert.equal(all.dailyStores.length, 60);

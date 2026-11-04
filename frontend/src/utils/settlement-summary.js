@@ -1,10 +1,10 @@
 /** 汇总已授权且符合查询条件的店铺快照；缺失值不能视为零。 */
-export function settlementSummary(stores, today) {
+export function settlementSummary(stores, today, key = 'settlement') {
   let cents = 0n;
   let available = 0;
   let historical = 0;
   for (const store of stores) {
-    const metric = store.remote?.settlement;
+    const metric = store.remote?.[key];
     const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(metric?.value ?? ''));
     if (!match) continue;
     const fraction = (match[3] || '').padEnd(3, '0');

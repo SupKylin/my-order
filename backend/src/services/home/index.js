@@ -4,8 +4,9 @@ import { db, Store, Order, OrderItem, Purchase, storeOwnerInclude } from '../../
 import { StoreSnapshot } from './model.js';
 import { pstDay, createStatistics } from './statistics.js';
 import { fetchRemoteMetrics, REMOTE_METRICS } from './remote.js';
-import { createDailyStatistics, dailyReport, dailyDates } from './daily.js';
-import { WalmartReceipt } from '../walmart/models.js';
+import { createDailyStatistics, dailyReport } from './daily.js';
+import { RECON_VERSION, storeFinance } from './reconciliation.js';
+import { RETURNS_VERSION, monthlyReturnsMetric } from './returns.js';
 
 export function snapshotSource(store) {
   return (
@@ -13,7 +14,7 @@ export function snapshotSource(store) {
       // 区分只存平台指标的新快照，回退旧版时可自动重建其所需的订单快照。
       .update(
         JSON.stringify([
-          'seller-performance-realtime-pst-v5',
+          'seller-performance-finance-pst-v6',
           store.systemStoreName,
           store.clientId,
           store.clientSecret,
@@ -26,30 +27,42 @@ export function snapshotDue(snapshot, store, now = Date.now()) {
   if (
     !snapshot ||
     snapshot.sourceKey !== snapshotSource(store) ||
-    snapshot.snapshotDate !== pstDay(now)
+    snapshot.snapshotDate !== pstDay(now) ||
+    snapshot.remote?.financeFormat !== 2 ||
+    snapshot.remote?.returnsVersion !== RETURNS_VERSION
   )
     return true;
   return (
     snapshot.attempts < 3 &&
     Number(now) - new Date(snapshot.attemptedAt).getTime() >= 15 * 60000 &&
-    Object.keys(REMOTE_METRICS).some((key) => snapshot.remote?.[key]?.status !== 'ok')
+    (Object.keys(REMOTE_METRICS).some((key) => snapshot.remote?.[key]?.status !== 'ok') ||
+      snapshot.remote?.monthlyReturns?.status !== 'ok' ||
+      snapshot.remote?.reconciliation?.version !== RECON_VERSION ||
+      snapshot.remote?.reconciliation?.status !== 'ok' ||
+      Object.values(snapshot.remote?.reconciliation?.reports || {}).some(
+        (r) => r.financeFormat !== 2,
+      ))
   );
 }
 
 /** 一次一致性读批量汇总有权限的店铺；分页控制内存，不逐店扫描订单。 */
-async function collectStoresStatistics(stores, now, transaction) {
+async function collectStoresStatistics(stores, now, transaction, snapshots = new Map()) {
   const groups = new Map(
     stores.map((store) => [
       store.systemStoreName,
       {
         id: store.id,
         statistics: createStatistics(now),
-        daily: createDailyStatistics(now),
+        daily: createDailyStatistics(
+          now,
+          snapshots.get(store.id)?.sourceKey === snapshotSource(store)
+            ? snapshots.get(store.id).remote?.reconciliation
+            : null,
+        ),
       },
     ]),
   );
   if (!groups.size) return new Map();
-  const firstDay = Date.parse(`${dailyDates(now).at(-1)}T00:00:00-08:00`);
   let cursor = 0;
   for (;;) {
     const rows = await OrderItem.findAll({
@@ -67,56 +80,11 @@ async function collectStoresStatistics(stores, now, transaction) {
       limit: 500,
       transaction,
     });
-    // 仅最近 30 天需要读取退款；按店铺和 PO 成对关联，防止跨店铺串单。
-    const receiptIds = new Map();
-    for (const row of rows) {
-      const time = Number(row.walmart?.orderDate);
-      if (
-        !Number.isFinite(time) ||
-        time < firstDay ||
-        time > Number(now) ||
-        !row.walmart?.purchaseOrderId
-      )
-        continue;
-      const storeId = groups.get(row.shopName).id;
-      if (!receiptIds.has(storeId)) receiptIds.set(storeId, new Set());
-      receiptIds.get(storeId).add(row.walmart.purchaseOrderId);
-    }
-    const receipts = receiptIds.size
-      ? await WalmartReceipt.findAll({
-          attributes: ['storeId', 'purchaseOrderId', 'raw'],
-          where: {
-            [Op.or]: [...receiptIds].map(([storeId, ids]) => ({
-              storeId,
-              purchaseOrderId: { [Op.in]: [...ids] },
-            })),
-          },
-          transaction,
-        })
-      : [];
-    const rawLines = new Map();
-    for (const receipt of receipts) {
-      for (const line of receipt.raw?.orderLines?.orderLine || []) {
-        rawLines.set(
-          JSON.stringify([receipt.storeId, receipt.purchaseOrderId, String(line.lineNumber)]),
-          line,
-        );
-      }
-    }
     for (const row of rows) {
       const item = row.toJSON();
       const group = groups.get(item.shopName);
       group.statistics.add(item);
-      group.daily.add(
-        item,
-        rawLines.get(
-          JSON.stringify([
-            group.id,
-            item.walmart?.purchaseOrderId,
-            String(item.walmart?.lineNumber),
-          ]),
-        ),
-      );
+      group.daily.add(item);
     }
     if (rows.length < 500) break;
     cursor = rows.at(-1).id;
@@ -132,7 +100,12 @@ async function collectStoresStatistics(stores, now, transaction) {
 export async function collectStoreStatistics(store, now = Date.now()) {
   return db.transaction(
     { isolationLevel: Transaction.ISOLATION_LEVELS.REPEATABLE_READ },
-    async (transaction) => (await collectStoresStatistics([store], now, transaction)).get(store.id),
+    async (transaction) => {
+      const snapshot = await StoreSnapshot.findByPk(store.id, { transaction });
+      return (
+        await collectStoresStatistics([store], now, transaction, new Map([[store.id, snapshot]]))
+      ).get(store.id);
+    },
   );
 }
 
@@ -153,7 +126,8 @@ export async function updateStoreSnapshot(
     measuredAt: retryOnly ? previous.measuredAt : attemptedAt,
     // 保留原表结构；订单统计由 readHome 实时计算，不再写入每日快照。
     metrics: {},
-    attempts: retryOnly ? previous.attempts + 1 : 1,
+    attempts:
+      retryOnly && previous.remote?.returnsVersion === RETURNS_VERSION ? previous.attempts + 1 : 1,
     attemptedAt,
   };
   let remote;
@@ -174,6 +148,22 @@ export async function updateStoreSnapshot(
       ]),
     );
   }
+  remote.financeFormat = 2;
+  remote.returnsVersion = RETURNS_VERSION;
+  if (!remote.monthlyReturns)
+    remote.monthlyReturns = {
+      ...monthlyReturnsMetric(sameSource ? previous.remote?.monthlyReturns : null, now),
+      version: RETURNS_VERSION,
+      status: 'error',
+      statusText: '退款采集失败',
+      error: '请检查店铺密钥配置和退货退款接口权限',
+    };
+  if (!remote.reconciliation)
+    remote.reconciliation = {
+      ...(sameSource ? previous.remote?.reconciliation : {}),
+      status: 'error',
+      error: '官方财务对账数据采集失败，请检查店铺密钥和接口权限',
+    };
   // 查询期间店铺可能被删除或更换密钥；不把旧店铺数据写回新配置。
   await db.transaction(async (transaction) => {
     const current = await Store.findByPk(store.id, { transaction, lock: transaction.LOCK.UPDATE });
@@ -200,7 +190,7 @@ export async function readHome(user, now = Date.now()) {
           })
         : [];
       const byId = new Map(snapshots.map((row) => [row.storeId, row]));
-      const metrics = await collectStoresStatistics(stores, now, transaction);
+      const metrics = await collectStoresStatistics(stores, now, transaction, byId);
       const measuredAt = new Date(now);
       const visibleStores = stores.map((store) => {
         const row = byId.get(store.id);
@@ -216,7 +206,20 @@ export async function readHome(user, now = Date.now()) {
           remoteMeasuredAt: snapshot?.measuredAt || null,
           measuredAt,
           metrics: metrics.get(store.id),
-          remote: snapshot?.remote || {},
+          remote: {
+            ...(snapshot
+              ? {
+                  previousPayment: storeFinance(snapshot.remote?.reconciliation, now)
+                    .previousPayment,
+                  monthlyRefund: monthlyReturnsMetric(snapshot.remote?.monthlyReturns, now),
+                }
+              : {}),
+            ...Object.fromEntries(
+              Object.keys(REMOTE_METRICS)
+                .filter((key) => snapshot?.remote?.[key])
+                .map((key) => [key, snapshot.remote[key]]),
+            ),
+          },
         };
       });
       return {
