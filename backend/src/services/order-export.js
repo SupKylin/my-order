@@ -12,6 +12,7 @@ const maxRows = 1_048_575;
 const columns = [
   ...fields.flatMap(({ key, label }) => [
     { key, header: label },
+    ...(key === 'platformOrderStatus' ? [{ key: 'returnStatuses', header: '退货退款状态' }] : []),
     ...(key === 'purchaseStatus' ? [{ key: 'purchaseConfirmedAt', header: '采购成功时间' }] : []),
     ...(key === 'allocatable' ? [{ key: 'reviewStatus', header: '审核状态' }] : []),
     ...(key === 'purchaseChannel'

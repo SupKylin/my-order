@@ -15,6 +15,7 @@ export const auditActions = {
   batch_update_order_status: '批量更新运营状态',
   batch_update_purchase_status: '批量更新采购状态',
   batch_update_followup_note: '批量修改跟单备注',
+  purchase_after_sale: '采购售后记录',
   walmart_sync_order: 'Walmart同步',
   walmart_sync_config: '调整同步配置',
   create_store: '新增店铺',
@@ -29,6 +30,7 @@ export const auditActions = {
 const resources = {
   orders: '订单管理',
   purchases: '采购信息',
+  'purchase-after-sales': '采购售后',
   assignments: '采购渠道分配',
   users: '账号管理',
   stores: '店铺管理',

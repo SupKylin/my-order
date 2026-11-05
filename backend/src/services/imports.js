@@ -27,6 +27,8 @@ import {
   WFS_READ_ONLY_REASON,
 } from '../lib/order-write-policy.js';
 import { DERIVED_PURCHASE_FIELDS } from '../lib/purchase-derived.js';
+import { purchaseCostPatch } from './purchase-cost.js';
+import { listDictionary } from './dictionaries.js';
 
 const importRowOrder = (a, b) =>
   a.patch.orderNumber.localeCompare(b.patch.orderNumber) ||
@@ -140,7 +142,7 @@ export async function prepareImport(input, user, kind = 'legacy') {
       extracted.warnings.push({
         row: template.headerRow,
         field: mapping.field,
-        message: '采购限价和价格系数由系统自动计算，已跳过该字段并保留系统计算值',
+        message: `${fieldMap[mapping.field].label}由系统自动计算，已跳过该字段并保留系统计算值`,
       });
     for (const key of ['rows', 'errors', 'warnings'])
       data[key].push(
@@ -209,6 +211,9 @@ export async function prepareImport(input, user, kind = 'legacy') {
     kind === 'purchase'
       ? purchaseMatches.map((match) => match.target)
       : matchImportRows(sortedRows, existingRows, kind);
+  const costSnapshots = new Map(existing.map((item) => [item.id, item.purchase?.toJSON() || {}]));
+  let costChannels;
+  const readCostChannels = async () => (costChannels ||= await listDictionary('purchaseChannel'));
   for (const [index, row] of sortedRows.entries()) {
     if (allowed && !allowed.has(row.patch.shopName)) {
       row.action = 'missing';
@@ -246,6 +251,23 @@ export async function prepareImport(input, user, kind = 'legacy') {
           label: '采购字段',
           message: '本行没有可更新的采购字段',
         });
+    }
+  }
+  // 与正式提交相同顺序模拟同一明细的多行更新，提前指出结算缺配置/金额/渠道问题。
+  for (const row of sortedRows.filter((entry) => entry.action === 'update')) {
+    const previous = costSnapshots.get(row.expectedId) || {};
+    try {
+      const cost = await purchaseCostPatch(previous, row.patch, undefined, readCostChannels);
+      costSnapshots.set(row.expectedId, { ...previous, ...row.patch, ...cost });
+    } catch (error) {
+      data.errors.push({
+        row: row.rowNumber,
+        sourceId: row.sourceId,
+        sourceName: row.sourceName,
+        field: 'settlement',
+        label: '采购成本',
+        message: error.message,
+      });
     }
   }
   const job = await ImportJob.create({
@@ -351,7 +373,7 @@ export async function commitImport(id, user, kind = 'legacy') {
           sourceId: row.sourceId,
           sourceName: row.sourceName,
           field: key,
-          message: '采购限价和价格系数由系统自动计算，已跳过该字段并保留系统计算值',
+          message: `${fieldMap[key].label}由系统自动计算，已跳过该字段并保留系统计算值`,
         });
       }
       if (user.role !== 'operations' || !Object.hasOwn(row.patch, 'purchaseStatus')) continue;
@@ -460,7 +482,18 @@ export async function commitImport(id, user, kind = 'legacy') {
         throw new AppError(409, `第 ${row.rowNumber} 行的下拉选项已变化，请重新预览`);
       }
       const item = targets.get(row);
-      const result = await upsertImported(row.patch, t, user, item);
+      let result;
+      try {
+        result = await upsertImported(row.patch, t, user, item);
+      } catch (error) {
+        if (error instanceof AppError)
+          throw new AppError(
+            error.status,
+            `第 ${row.rowNumber} 行：${error.message}`,
+            error.details,
+          );
+        throw error;
+      }
       result.created ? added++ : updated++;
     }
     // JSON 内部属性变更需显式标记，保证提交阶段新增的跳过原因保存到历史记录。

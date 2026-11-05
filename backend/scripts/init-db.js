@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { migrateHome } from '../src/services/home/model.js';
+import { migratePurchaseAfterSales } from '../src/migrations/purchase-after-sales.js';
 import { migrateOrderTablePreferences } from '../src/migrations/order-table-preferences.js';
 import { migratePermissionsAudit } from '../src/migrations/permissions-audit.js';
 import { migrateWalmart } from '../src/migrations/walmart.js';
@@ -63,6 +64,7 @@ try {
   await migrateWalmart();
   await migratePermissionsAudit();
   await migrateHome();
+  await migratePurchaseAfterSales();
   const username = process.env.ADMIN_USERNAME || 'admin';
   if (!(await User.findOne({ where: { username } })))
     await User.create({

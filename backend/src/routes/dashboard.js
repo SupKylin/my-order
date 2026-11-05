@@ -11,7 +11,7 @@ export function createDashboardRouter() {
   const router = Router();
   router.get('/home', async (req, res) => {
     res.set('Cache-Control', 'no-store');
-    res.json(await readHome(req.user));
+    res.json(await readHome(req.user, Date.now(), req.query));
   });
   router.get('/meta', async (req, res) =>
     res.json({
@@ -21,7 +21,7 @@ export function createDashboardRouter() {
       currentRole: req.user.role,
       purchaseChannels: await DictionaryOption.findAll({
         where: { kind: 'purchaseChannel', active: true },
-        attributes: ['id', 'value'],
+        attributes: ['id', 'value', 'purchaseDiscount'],
         order: [
           ['sortOrder', 'ASC'],
           ['id', 'ASC'],
@@ -50,14 +50,16 @@ export function createDashboardRouter() {
     const inProgress = await count({ '$purchase.purchaseStatus$': '采购中' });
     const afterSales = await count({ '$purchase.afterSales$': '是' });
     // 筛选选项以店铺管理为准，使用系统店铺名与订单字段匹配。
-    const shops = (
-      await Store.findAll({
-        ...(names ? { where: { ownerId: req.user.id } } : {}),
-        attributes: ['systemStoreName'],
-        order: [['systemStoreName', 'ASC']],
-      })
-    ).map((store) => store.systemStoreName);
-    res.json({ total, unassigned, inProgress, afterSales, shops });
+    const storeOptions = await Store.findAll({
+      ...(names ? { where: { ownerId: req.user.id } } : {}),
+      attributes: ['systemStoreName', 'isThirdParty'],
+      order: [['systemStoreName', 'ASC']],
+    });
+    const shops = storeOptions.map((store) => store.systemStoreName);
+    const thirdPartyShops = storeOptions
+      .filter((store) => store.isThirdParty)
+      .map((store) => store.systemStoreName);
+    res.json({ total, unassigned, inProgress, afterSales, shops, thirdPartyShops });
   });
   return router;
 }

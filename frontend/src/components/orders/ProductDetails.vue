@@ -2,6 +2,7 @@
 import { Box } from '@element-plus/icons-vue';
 import { useMeta } from '../../stores/meta';
 import WalmartDetails from './WalmartDetails.vue';
+import ReturnDetails from './ReturnDetails.vue';
 defineProps({ row: { type: Object, required: true } });
 const meta = useMeta();
 </script>
@@ -55,6 +56,7 @@ const meta = useMeta();
         </div>
       </div>
       <WalmartDetails v-if="row.walmart" :value="row.walmart" />
+      <ReturnDetails v-if="row.returnInfo?.lines?.length" :value="row.returnInfo" />
     </div>
   </div>
 </template>

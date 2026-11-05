@@ -9,6 +9,7 @@ import { orderApi } from '../api/orders';
 import { canEditOrder } from '../utils/orderWritePolicy';
 import { fmtBeijingDate } from '../utils/format';
 import { imageValues as parseImageValues } from '../utils/image-values';
+import { costPreview, fixedDecimal } from '../utils/purchaseCost';
 const platformReadOnly = (field) =>
   field.group === 'product' || ['orderNumber', 'shopName', 'fulfillmentParty'].includes(field.key);
 const derivedPurchaseFields = new Set(['purchaseLimit', 'priceFactor']);
@@ -24,11 +25,45 @@ const meta = useMeta(),
   uploadingFields = reactive(new Set()),
   openGroups = ref(['order', 'purchase']);
 const fieldReadOnly = (field) =>
+  field.readOnly ||
   platformReadOnly(field) ||
   derivedPurchaseFields.has(field.key) ||
   (!canManageProcurement(auth.user?.role) &&
     ['purchaseStatus', 'purchaseChannel'].includes(field.key));
 const visible = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) });
+const costChannels = computed(() => form.purchaseChannel || []);
+const costChanged = computed(
+  () => (form.purchaseCostChannel || null) !== (original.value.purchaseCostChannel || null),
+);
+const newCostSnapshot = computed(
+  () =>
+    form.settlement === '已结算' && (original.value.settlement !== '已结算' || costChanged.value),
+);
+const costChannel = computed(() =>
+  costChanged.value
+    ? form.purchaseCostChannel
+    : newCostSnapshot.value && costChannels.value.length === 1
+      ? costChannels.value[0]
+      : form.purchaseCostChannel,
+);
+const costDiscount = computed(() =>
+  form.settlement !== '已结算'
+    ? null
+    : newCostSnapshot.value
+      ? meta.purchaseChannels.find((channel) => channel.value === costChannel.value)
+          ?.purchaseDiscount
+      : original.value.purchaseDiscount,
+);
+const displayedDiscount = computed(() =>
+  costDiscount.value == null ? '—' : fixedDecimal(costDiscount.value, 4),
+);
+const displayedCost = computed(() =>
+  form.settlement !== '已结算'
+    ? '—'
+    : newCostSnapshot.value || form.purchaseAmount !== original.value.purchaseAmount
+      ? (costPreview(costDiscount.value, form.purchaseAmount) ?? '—')
+      : (original.value.purchaseCost ?? '—'),
+);
 // 多个图片字段可分别上传；全部结束后才能保存，避免丢失尚未返回的图片地址。
 const blocked = computed(() => busy.value || initializing.value || uploadingFields.size > 0);
 function trackUpload(key, uploading) {
@@ -85,6 +120,19 @@ async function save() {
     const baseFields = Object.fromEntries(
       Object.keys(fields).map((key) => [key, original.value[key]]),
     );
+    if (
+      ['settlement', 'purchaseAmount', 'purchaseCostChannel'].some((key) =>
+        Object.hasOwn(fields, key),
+      )
+    )
+      for (const key of [
+        'settlement',
+        'purchaseAmount',
+        'purchaseCostChannel',
+        'purchaseChannel',
+        'purchaseDiscount',
+      ])
+        baseFields[key] = original.value[key];
     if (props.item?.id)
       await orderApi.update(props.item.id, fields, props.item.version, baseFields);
     else await orderApi.create(fields);
@@ -152,7 +200,47 @@ async function save() {
               :label="field.label"
               :required="field.required"
               :class="{ 'full-width': ['textarea', 'url'].includes(field.type) }"
-              ><template v-if="fieldReadOnly(field)">
+              ><template v-if="field.key === 'purchaseCostChannel'">
+                <el-select
+                  :model-value="costChannel"
+                  clearable
+                  placeholder="选择成本计算渠道"
+                  @update:model-value="form.purchaseCostChannel = $event || null"
+                >
+                  <el-option
+                    v-for="channel in costChannels"
+                    :key="channel"
+                    :label="channel"
+                    :value="channel"
+                  />
+                  <el-option
+                    v-if="costChannel && !costChannels.includes(costChannel)"
+                    :label="`${costChannel}（历史结算渠道）`"
+                    :value="costChannel"
+                    disabled
+                  />
+                </el-select>
+                <span class="muted"
+                  >单渠道结算时自动使用；多渠道请选择一个。更改此项并保存会使用新渠道当前折扣。</span
+                >
+              </template>
+              <template v-else-if="['purchaseDiscount', 'purchaseCost'].includes(field.key)">
+                <span>{{
+                  field.key === 'purchaseDiscount' ? displayedDiscount : displayedCost
+                }}</span>
+                <span class="muted">{{
+                  field.key === 'purchaseDiscount'
+                    ? '采购渠道汇率 ÷ 当前实时汇率 × 税金；结算时保存折扣'
+                    : '采购成本 = 已保存的采购折扣 × 采购金额；保存后生效'
+                }}</span>
+              </template>
+              <template v-else-if="fieldReadOnly(field)">
+                <el-tag
+                  v-if="field.key === 'shopName' && item?.storeIsThirdParty"
+                  size="small"
+                  type="warning"
+                  >三方</el-tag
+                >
                 <div
                   v-if="field.type === 'image' && imageListFor(form[field.key]).length"
                   class="image-preview-list"

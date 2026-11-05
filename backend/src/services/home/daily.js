@@ -13,16 +13,20 @@ export const DAILY_COUNTS = [
 ];
 export const DAILY_METRICS = ['totalSales', ...DAILY_COUNTS, 'refundAmount'];
 
-export function dailyDates(now = Date.now()) {
+export function dailyDates(now = Date.now(), range = null) {
+  if (range)
+    return Array.from({ length: Math.round((range.end - range.start) / 86400000) }, (_, i) =>
+      pstDay(range.end - (i + 1) * 86400000),
+    );
   const end = yesterdayRange(now).end;
   return Array.from({ length: 30 }, (_, i) => pstDay(end - i * 86400000));
 }
 
 /** 每家店铺一次扫描同时生成 30 天报表；同店铺订单跨 SKU 去重。 */
-export function createDailyStatistics(now = Date.now(), reconciliation) {
+export function createDailyStatistics(now = Date.now(), reconciliation, range = null) {
   const refunds = reconciliationTotals(reconciliation);
   const days = new Map(
-    dailyDates(now).map((date) => [
+    dailyDates(now, range).map((date) => [
       date,
       {
         date,
@@ -80,12 +84,18 @@ export function createDailyStatistics(now = Date.now(), reconciliation) {
 }
 
 /** 仅合并本次请求实时计算的授权店铺订单数据，不受平台指标快照时间影响。 */
-export function dailyReport(stores, now = Date.now()) {
-  const dates = dailyDates(now);
+export function dailyReport(stores, now = Date.now(), range = null) {
+  const dates = dailyDates(now, range);
+  const metricsByStore = new Map(
+    stores.map((store) => [
+      store.id,
+      new Map((store.metrics?.daily || []).map((row) => [row.date, row])),
+    ]),
+  );
   const dailyStores = [];
   const daily = dates.map((date) => {
     const rows = stores.map((store) => {
-      const metric = store.metrics?.daily?.find((row) => row.date === date);
+      const metric = metricsByStore.get(store.id).get(date);
       const row = {
         ...Object.fromEntries(DAILY_METRICS.map((key) => [key, null])),
         ...metric,
@@ -93,6 +103,7 @@ export function dailyReport(stores, now = Date.now()) {
         storeId: store.id,
         name: store.name,
         owner: store.owner,
+        isThirdParty: Boolean(store.isThirdParty),
         ready: Boolean(metric),
         measuredAt: store.measuredAt,
       };

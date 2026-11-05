@@ -34,6 +34,7 @@ const menus = [
   { path: '/home', label: '首页', icon: House },
   { path: '/store-summary', label: '店铺汇总', icon: House },
   { path: '/orders', label: '订单管理', icon: Box },
+  { path: '/purchase-after-sales', label: '采购售后', icon: Document },
   // 订单统一由 Walmart API 接入，保留 Excel 导入入口代码。
   // { path: '/imports/new', label: '导入订单', icon: Upload },
   { path: '/imports/purchases/new', label: '导入采购', icon: Upload },
@@ -61,9 +62,15 @@ const signingOut = ref(false);
 const sidebarOpen = ref(true);
 const managementPage = computed(
   () =>
-    ['/home', '/store-summary', '/templates', '/imports', '/users', '/stores'].includes(
-      route.path,
-    ) || route.path.startsWith('/settings/'),
+    [
+      '/home',
+      '/store-summary',
+      '/templates',
+      '/imports',
+      '/users',
+      '/stores',
+      '/purchase-after-sales',
+    ].includes(route.path) || route.path.startsWith('/settings/'),
 );
 async function signOut() {
   if (signingOut.value) return;

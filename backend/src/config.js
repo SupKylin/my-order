@@ -22,4 +22,8 @@ export const config = {
   trustProxy: process.env.TRUST_PROXY === 'true',
   storage: path.join(backendRoot, 'storage'),
   sessionMs: 7 * 24 * 60 * 60 * 1000,
+  wecom: {
+    webhook: process.env.WECOM_AFTER_SALES_WEBHOOK || '',
+    appUrl: process.env.WECOM_AFTER_SALES_APP_URL || '',
+  },
 };

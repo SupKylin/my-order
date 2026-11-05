@@ -6,6 +6,7 @@ import { Plus } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { dictionaryApi } from '../api/dictionaries';
 import { useMeta } from '../stores/meta';
+import { discountPreview, fixedDecimal } from '../utils/purchaseCost';
 
 const list = ref(null);
 const route = useRoute();
@@ -15,6 +16,12 @@ const saving = ref(false);
 const dialog = ref(false);
 const editing = ref(null);
 const form = reactive({ value: '', sortOrder: 0, active: true });
+const discountFields = [
+  ['channelExchangeRate', '采购渠道汇率'],
+  ['currentExchangeRate', '当前实时汇率'],
+  ['taxMultiplier', '税金'],
+];
+const discount = computed(() => discountPreview(form));
 
 async function load() {
   await list.value?.refresh();
@@ -27,6 +34,7 @@ function edit(row) {
       ? { value: row.value, sortOrder: row.sortOrder, active: row.active }
       : { value: '', sortOrder: list.value?.total || 0, active: true },
   );
+  for (const [key] of discountFields) form[key] = row?.[key] == null ? undefined : Number(row[key]);
   dialog.value = true;
 }
 async function save() {
@@ -35,6 +43,8 @@ async function save() {
   saving.value = true;
   try {
     const payload = { ...form, version: editing.value?.version };
+    if (kind.value === 'purchaseChannel')
+      for (const [key] of discountFields) payload[key] = form[key] ?? null;
     if (editing.value) await dictionaryApi.update(kind.value, editing.value.id, payload);
     else await dictionaryApi.create(kind.value, payload);
     // 同页下拉立即刷新，其他已打开页面通过元数据同步订阅更新。
@@ -69,6 +79,11 @@ watch(
     >
 
     <el-table-column label="选项名称" prop="value" min-width="260" />
+    <el-table-column v-if="kind === 'purchaseChannel'" label="采购折扣" width="140">
+      <template #default="{ row }">{{
+        row.purchaseDiscount == null ? '未配置' : fixedDecimal(row.purchaseDiscount, 4)
+      }}</template>
+    </el-table-column>
     <el-table-column label="排序" prop="sortOrder" width="100" />
     <el-table-column label="使用状态" width="130"
       ><template #default="{ row }">
@@ -93,6 +108,29 @@ watch(
       <el-form-item label="选项名称" required
         ><el-input v-model="form.value" maxlength="255" placeholder="填写下拉选项名称"
       /></el-form-item>
+      <template v-if="kind === 'purchaseChannel'">
+        <el-alert
+          title="采购折扣 = 采购渠道汇率 ÷ 当前实时汇率 × 税金"
+          description="税金直接作为乘数，例如1.08表示乘以1.08。最多2位小数，实时汇率须大于0；折扣保留4位小数。修改配置不改变已结算的历史成本。"
+          type="info"
+          :closable="false"
+          style="margin-bottom: 18px"
+        />
+        <el-form-item v-for="[key, label] in discountFields" :key="key" :label="label">
+          <el-input-number
+            v-model="form[key]"
+            :min="0"
+            :max="999999999999.99"
+            :precision="2"
+            :step="0.01"
+            controls-position="right"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="采购折扣（自动计算）"
+          ><strong>{{ discount ?? '请完整填写三个数字' }}</strong></el-form-item
+        >
+      </template>
       <el-form-item label="排序"
         ><el-input-number v-model="form.sortOrder" :min="0" :max="100000" :precision="0"
       /></el-form-item>

@@ -27,7 +27,9 @@ export const useMeta = defineStore('meta', {
     imageUrl(path, thumb = false) {
       if (!path) return '';
       if (/^https?:\/\//i.test(path)) return path;
-      return this.publicBase + (thumb ? path.replace('.webp', '.thumb.webp') : path);
+      const imagePath = thumb ? path.replace('.webp', '.thumb.webp') : path;
+      // 上传文件由当前站点提供，开发环境也有 /uploads 代理，避免依赖旧局域网 IP。
+      return path.startsWith('/uploads/images/') ? imagePath : this.publicBase + imagePath;
     },
   },
 });

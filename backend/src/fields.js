@@ -83,6 +83,9 @@ export const fields = [
   f('afterSalesResult', '售后结果', 'purchase', 'select', { options: ['已结束'] }),
   f('afterSalesResultScreenshot', '售后结果截图', 'purchase', 'image'),
   f('settlement', '结算情况', 'purchase', 'select', { options: ['已结算', '未结算'] }),
+  f('purchaseCostChannel', '成本计算渠道', 'purchase'),
+  f('purchaseDiscount', '采购折扣', 'purchase', 'decimal', { readOnly: true }),
+  f('purchaseCost', '采购成本', 'purchase', 'money', { readOnly: true }),
 ];
 export const fieldMap = Object.fromEntries(fields.map((f) => [f.key, f]));
 // 旧模板和历史导入记录仍可能引用拆分前的两个物流截图字段。

@@ -11,6 +11,7 @@ const columnKeys = new Set([
   'reviewStatus',
   'supplierAssignmentStatus',
   'storeOwner',
+  'returnStatuses',
 ]);
 const fixedKeys = ['shopName', 'orderNumber'];
 

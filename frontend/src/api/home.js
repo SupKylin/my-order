@@ -3,7 +3,11 @@ import { useAuth } from '../stores/auth';
 
 const pending = new WeakMap();
 // 店铺汇总的两个列表同时挂载时共用在途请求；完成后不缓存，下一次刷新重新统计。
-export function loadHomeReport() {
+export function loadHomeReport(filters) {
+  if (filters)
+    return api.get('/home', {
+      params: { ...filters, storeIds: JSON.stringify(filters.storeIds || []) },
+    });
   const user = useAuth().user;
   if (!user) return api.get('/home');
   if (!pending.has(user)) {

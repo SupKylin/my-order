@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { Upload } from '@element-plus/icons-vue';
 import { orderShippingWarning } from '../../utils/shippingWarning';
 import OrderCell from './OrderCell.vue';
@@ -13,8 +13,20 @@ const props = defineProps({
   canAssign: Boolean,
   warningNow: { type: Number, required: true },
 });
-const emit = defineEmits(['selection-change', 'edit', 'assign', 'import']);
+const emit = defineEmits(['selection-change', 'edit', 'assign', 'import', 'after-sale']);
 const table = ref();
+const compactOperations = ref(false);
+const operationWidth = computed(() => (props.canAssign && !compactOperations.value ? 210 : 144));
+let compactMedia;
+const updateCompactOperations = () => {
+  compactOperations.value = compactMedia.matches;
+};
+onMounted(() => {
+  compactMedia = window.matchMedia('(max-width: 1280px)');
+  updateCompactOperations();
+  compactMedia.addEventListener('change', updateCompactOperations);
+});
+onBeforeUnmount(() => compactMedia?.removeEventListener('change', updateCompactOperations));
 const warnings = computed(() =>
   Object.fromEntries(
     props.rows.map((row) => [row.id, orderShippingWarning(row, props.warningNow)]),
@@ -67,21 +79,22 @@ defineExpose({
       :align="field.type === 'money' ? 'right' : 'left'"
       :show-overflow-tooltip="
         !['image', 'storeOwner'].includes(field.type) &&
-        !['orderNumber', 'platformShipDate', 'purchaseStatus'].includes(field.key)
+        !['shopName', 'orderNumber', 'platformShipDate', 'purchaseStatus'].includes(field.key)
       "
     >
       <template #default="{ row }"
         ><OrderCell :row="row" :field="field" :warning="warnings[row.id]" :warning-now="warningNow"
       /></template>
     </el-table-column>
-    <el-table-column v-if="showOperations" label="操作" fixed="right" width="180"
+    <el-table-column v-if="showOperations" label="操作" fixed="right" :width="operationWidth"
       ><template #default="{ row }">
-        <template v-if="canEditOrder(row)">
+        <div v-if="canEditOrder(row)" class="order-row-actions">
           <el-button link type="primary" @click="emit('edit', row)">编辑</el-button>
           <el-button v-if="canAssign" link type="primary" @click="emit('assign', row)"
             >分配渠道</el-button
           >
-        </template>
+          <el-button link type="primary" @click="emit('after-sale', row)">采购售后</el-button>
+        </div>
         <span v-else class="muted" title="由 Walmart 同步维护">WFS 只读</span>
       </template></el-table-column
     >
@@ -94,3 +107,16 @@ defineExpose({
     >
   </el-table>
 </template>
+
+<style scoped>
+.order-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.order-row-actions :deep(.el-button) {
+  margin: 0;
+  flex: 0 0 auto;
+}
+</style>

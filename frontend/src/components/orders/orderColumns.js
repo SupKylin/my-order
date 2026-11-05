@@ -10,6 +10,7 @@ const orderKeys = [
   'actualDeliveryDate',
   'orderStatus',
   'platformOrderStatus',
+  'returnStatuses',
   'fulfillmentParty',
   'orderAmount',
   'tax',
@@ -24,6 +25,9 @@ const purchaseKeys = [
   'merchantName',
   'purchaseLinkAmount',
   'purchaseAmount',
+  'purchaseCost',
+  'purchaseDiscount',
+  'purchaseCostChannel',
   'purchaseLimit',
   'priceFactor',
   'allocatable',
@@ -38,7 +42,7 @@ const purchaseKeys = [
 ];
 const labels = { purchaseStatus: '采购状态', merchantName: '商家名' };
 const widths = {
-  shopName: 125,
+  shopName: 180,
   orderNumber: 220,
   quantity: 90,
   purchaseQuantity: 100,
@@ -46,6 +50,7 @@ const widths = {
   platformTrackingNumber: 200,
   orderStatus: 210,
   platformOrderStatus: 145,
+  returnStatuses: 200,
   purchaseStatus: 200,
   purchaseChannel: 190,
   trackingNumber: 200,
@@ -53,6 +58,12 @@ const widths = {
 };
 export function orderColumns(fields) {
   const byKey = new Map(fields.map((field) => [field.key, field]));
+  byKey.set('returnStatuses', {
+    key: 'returnStatuses',
+    label: '退货退款状态',
+    group: 'order',
+    type: 'multiselect',
+  });
   // 服务端自动维护的只读列，不加入可编辑/可导入字段元数据。
   byKey.set('purchaseConfirmedAt', {
     key: 'purchaseConfirmedAt',

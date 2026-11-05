@@ -1,12 +1,19 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { Refresh, Search } from '@element-plus/icons-vue';
 import { loadHomeReport } from '../../api/home';
 import StoreOwnerSelect from './StoreOwnerSelect.vue';
 
-const props = defineProps({ byStore: Boolean });
+const props = defineProps({ byStore: Boolean, managed: Boolean, sharedReport: Object });
 const loading = ref(false),
-  report = ref(null);
+  localReport = ref(null);
+const report = computed(() => (props.managed ? props.sharedReport : localReport.value));
+watch(
+  () => props.sharedReport,
+  () => {
+    page.value = 1;
+  },
+);
 const storeIds = ref([]),
   ownerId = ref(null),
   dates = ref([]);
@@ -62,7 +69,7 @@ async function load() {
   if (loading.value) return;
   loading.value = true;
   try {
-    report.value = await loadHomeReport();
+    localReport.value = await loadHomeReport();
     page.value = Math.min(
       page.value,
       Math.max(1, Math.ceil(filtered.value.length / pageSize.value)),
@@ -73,7 +80,9 @@ async function load() {
     loading.value = false;
   }
 }
-onMounted(load);
+onMounted(() => {
+  if (!props.managed) load();
+});
 </script>
 
 <template>
@@ -82,13 +91,17 @@ onMounted(load);
       <div>
         <h2>{{ byStore ? '每日店铺订单统计' : '每日订单汇总' }}</h2>
         <p class="daily-description">
-          最近 30 天（含今天） · 按美西标准时间 PST（UTC−8）统计 · 进入页面或刷新时实时计算
+          <template v-if="managed">{{ report?.startDate }} 至 {{ report?.endDate }}</template
+          ><template v-else>最近 30 天（含今天）</template> · 按美西标准时间 PST（UTC−8）统计 ·
+          进入页面或刷新时实时计算
           <span v-if="byStore"> · 同日按销售额从高到低排列</span>
         </p>
       </div>
-      <el-button :icon="Refresh" :loading="loading" @click="load">刷新统计</el-button>
+      <el-button v-if="!managed" :icon="Refresh" :loading="loading" @click="load"
+        >刷新统计</el-button
+      >
     </div>
-    <div class="management-filters">
+    <div v-if="!managed" class="management-filters">
       <StoreOwnerSelect v-if="byStore" v-model="ownerId" :stores="report?.stores || []" />
       <el-select
         v-if="byStore"
@@ -106,7 +119,7 @@ onMounted(load);
           v-for="store in report?.stores || []"
           :key="store.id"
           :value="store.id"
-          :label="store.name"
+          :label="`${store.name}${store.isThirdParty ? '（三方）' : ''}`"
         />
       </el-select>
       <el-date-picker
@@ -145,10 +158,14 @@ onMounted(load);
           v-if="byStore"
           prop="name"
           label="店铺名"
-          width="150"
+          width="190"
           fixed="left"
           show-overflow-tooltip
-        />
+          ><template #default="{ row }"
+            >{{ row.name }}
+            <el-tag v-if="row.isThirdParty" size="small" type="warning">三方</el-tag></template
+          ></el-table-column
+        >
         <el-table-column label="按订单日期统计" align="center">
           <el-table-column
             v-for="[key, label, width] in columns"

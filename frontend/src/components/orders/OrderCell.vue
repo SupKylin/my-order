@@ -54,7 +54,18 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
       :aria-label="`价格系数${factorLabels[row.priceFactorLevel]}`"
       >{{ factorLabels[row.priceFactorLevel] }}</span
     >
-    <span v-if="row.afterSales === '是'" class="after-sales-badge">售后</span>
+    <router-link
+      v-if="row.purchaseAfterSale"
+      :to="{ path: '/purchase-after-sales', query: { ticket: row.purchaseAfterSale.id } }"
+      @click.stop
+    >
+      <el-tag
+        :type="row.purchaseAfterSale.status === 'completed' ? 'success' : 'warning'"
+        size="small"
+        >{{ row.purchaseAfterSale.status === 'completed' ? '售后完毕' : '采购售后' }}</el-tag
+      >
+    </router-link>
+    <span v-else-if="row.afterSales === '是'" class="after-sales-badge">售后</span>
     <el-tag
       v-if="row.addressRisk"
       type="danger"
@@ -63,6 +74,24 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
       >风险地址</el-tag
     >
   </div>
+  <template v-else-if="field.key === 'shopName'">
+    <span>{{ value ?? '—' }}</span>
+    <el-tag v-if="row.storeIsThirdParty" size="small" type="warning" style="margin-left: 4px"
+      >三方</el-tag
+    >
+  </template>
+  <template v-else-if="field.key === 'returnStatuses'">
+    <span v-if="!value?.length" class="muted">—</span>
+    <el-tag
+      v-for="status in value || []"
+      :key="status"
+      size="small"
+      :type="status === '已退款' ? 'danger' : status === '已取消' ? 'info' : 'warning'"
+      style="margin: 2px 4px 2px 0"
+      title="展开商品明细查看退货退款详情"
+      >{{ status }}</el-tag
+    >
+  </template>
   <template v-else-if="field.type === 'image'">
     <div v-if="imageList.length" class="order-cell-images">
       <el-image
@@ -74,11 +103,7 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
         class="order-cell-image"
         ><template #error><span class="muted">加载失败</span></template></el-image
       >
-      <el-tag
-        v-if="imageList.length > 1"
-        class="order-cell-image-count"
-        size="small"
-        type="info"
+      <el-tag v-if="imageList.length > 1" class="order-cell-image-count" size="small" type="info"
         >+{{ imageList.length - 1 }}</el-tag
       >
     </div>

@@ -2,6 +2,7 @@ const common = [
   '/home',
   '/store-summary',
   '/orders',
+  '/purchase-after-sales',
   '/imports/purchases/new',
   '/templates',
   '/imports',

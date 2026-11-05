@@ -27,6 +27,9 @@ const OrderColumnSettings = defineAsyncComponent(
   () => import('../components/orders/OrderColumnSettings.vue'),
 );
 const OrderEditor = defineAsyncComponent(() => import('../components/OrderEditor.vue'));
+const CreateAfterSaleDialog = defineAsyncComponent(
+  () => import('../components/orders/CreateAfterSaleDialog.vue'),
+);
 const AssignmentDialog = defineAsyncComponent(
   () => import('../components/orders/AssignmentDialog.vue'),
 );
@@ -70,6 +73,20 @@ const {
   assign,
 } = useOrders();
 const procurementAllowed = computed(() => canManageProcurement(auth.user?.role));
+const afterSaleItem = ref(null);
+function openAfterSale(row) {
+  if (row.purchaseAfterSale)
+    return router.push({
+      path: '/purchase-after-sales',
+      query: { ticket: row.purchaseAfterSale.id },
+    });
+  if (!canEditOrder(row)) return ElMessage.warning('WFS订单不允许创建采购售后工单');
+  afterSaleItem.value = row;
+}
+function afterSaleCreated(result) {
+  afterSaleItem.value = null;
+  router.push({ path: '/purchase-after-sales', query: { ticket: result.id } });
+}
 const columnDialog = ref(false);
 const columnsOpening = ref(false);
 const batchOrderDialog = ref(false);
@@ -109,6 +126,7 @@ const activeAdvancedFilters = computed(
       'purchaseChannel',
       'orderStatus',
       'platformOrderStatus',
+      'returnStatuses',
       'cancellationIntent',
       'fulfillmentParty',
       'shippingMode',
@@ -407,7 +425,7 @@ async function submitStatus() {
             ><el-option
               v-for="shop in stats.shops"
               :key="shop"
-              :label="shop"
+              :label="`${shop}${stats.thirdPartyShops?.includes(shop) ? '（三方）' : ''}`"
               :value="shop" /></el-select
           ><el-select
             v-model="filters.purchaseStatus"
@@ -559,6 +577,22 @@ async function submitStatus() {
             />
           </el-select>
           <el-select
+            v-model="filters.returnStatuses"
+            placeholder="退货退款状态"
+            aria-label="退货退款状态筛选"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            clearable
+          >
+            <el-option
+              v-for="status in ['申请中', '退款处理中', '已退款', '已取消', '状态待核实']"
+              :key="status"
+              :label="status"
+              :value="status"
+            />
+          </el-select>
+          <el-select
             v-model="filters.cancellationIntent"
             placeholder="客户取消申请"
             aria-label="客户取消申请筛选"
@@ -694,6 +728,7 @@ async function submitStatus() {
           @selection-change="selected = $event"
           @edit="edit"
           @assign="openAssign"
+          @after-sale="openAfterSale"
         />
       </div>
       <div class="table-footer">
@@ -712,6 +747,12 @@ async function submitStatus() {
     </section>
   </div>
   <OrderEditor v-if="editor" v-model="editor" :item="editing" @saved="refresh" />
+  <CreateAfterSaleDialog
+    v-if="afterSaleItem"
+    :item="afterSaleItem"
+    @close="afterSaleItem = null"
+    @created="afterSaleCreated"
+  />
   <BatchFollowupNoteDialog
     v-if="followupItems"
     :items="followupItems"

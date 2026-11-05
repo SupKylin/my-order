@@ -104,7 +104,7 @@ onUnmounted(() => clearInterval(timer));
 <template>
   <el-dialog
     :model-value="true"
-    :title="`${store.systemStoreName} · Walmart 订单同步`"
+    :title="`${store.systemStoreName}${store.isThirdParty ? '（三方）' : ''} · Walmart 订单同步`"
     width="1000px"
     @close="emit('close')"
     :close-on-click-modal="false"
@@ -161,6 +161,26 @@ onUnmounted(() => clearInterval(timer));
         {{ status.state.result.acknowledged }} 个 · 失败 {{ status.state.result.failed }} 个 ·
         待核对 {{ status.state.result.review }} 个 · 变体查询失败
         {{ status.state.result.variantErrors }} 个
+      </p>
+      <p v-if="status.state?.result?.returns">
+        退货退款：取得 {{ status.state.result.returns.fetched }} 个退货单 · 关联
+        {{ status.state.result.returns.linked }} 条商品明细 · 补拉
+        {{ status.state.result.returns.backfilled }} 个订单 · 接收范围外跳过
+        {{ status.state.result.returns.outsideRange || 0 }} 条 · 待关联
+        {{ status.state.result.returns.pending }} 个
+      </p>
+      <el-alert
+        v-if="status.state?.result?.returnsError"
+        type="warning"
+        :closable="false"
+        :title="`退货退款同步失败，已有数据保留：${status.state.result.returnsError}`"
+      />
+      <p
+        v-for="error in status.state?.result?.returns?.errors || []"
+        :key="error.customerOrderId"
+        class="sync-error"
+      >
+        客户订单 {{ error.customerOrderId }}：{{ error.message }}
       </p>
       <el-table v-if="status.problems.length" :data="status.problems" max-height="220">
         <el-table-column prop="customerOrderId" label="待处理订单" min-width="180" />

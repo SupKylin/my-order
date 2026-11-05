@@ -82,6 +82,7 @@ export const OrderItem = db.define(
     sku: { type: DataTypes.STRING(191), allowNull: true },
     walmartSourceKey: { type: DataTypes.STRING(64), allowNull: true, unique: true },
     walmart: { type: DataTypes.JSON, allowNull: true },
+    returnInfo: { type: DataTypes.JSON, allowNull: true },
     addressKey: { type: DataTypes.STRING(64), allowNull: true },
     ...attrs('item'),
     version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
@@ -127,6 +128,66 @@ export const ImportTemplate = db.define(
   },
   { tableName: 'import_templates' },
 );
+export const PurchaseAfterSale = db.define(
+  'PurchaseAfterSale',
+  {
+    id: id(),
+    itemId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, unique: true },
+    status: { type: DataTypes.ENUM('open', 'completed'), allowNull: false, defaultValue: 'open' },
+    version: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 1 },
+    createdBy: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+    creatorName: { type: DataTypes.STRING(100), allowNull: false },
+    supplierFeedbackAt: { type: DataTypes.DATE(3), allowNull: true },
+    supplierFeedbackBy: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+    supplierFeedbackName: { type: DataTypes.STRING(100), allowNull: true },
+    lastActivityAt: { type: DataTypes.DATE(3), allowNull: false },
+    completedAt: { type: DataTypes.DATE(3), allowNull: true },
+  },
+  {
+    tableName: 'purchase_after_sales',
+    indexes: [{ fields: ['status', 'lastActivityAt'] }, { fields: ['lastActivityAt'] }],
+  },
+);
+export const PurchaseAfterSaleRecord = db.define(
+  'PurchaseAfterSaleRecord',
+  {
+    id: id(),
+    ticketId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+    requestId: { type: DataTypes.UUID, allowNull: false },
+    kind: { type: DataTypes.ENUM('message', 'completed', 'reopened'), allowNull: false },
+    actorId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+    actorName: { type: DataTypes.STRING(100), allowNull: false },
+    actorRole: { type: DataTypes.STRING(32), allowNull: false },
+    content: { type: DataTypes.TEXT, allowNull: false },
+    images: { type: DataTypes.JSON, allowNull: false },
+  },
+  {
+    tableName: 'purchase_after_sale_records',
+    updatedAt: false,
+    indexes: [{ unique: true, fields: ['ticketId', 'requestId'] }, { fields: ['ticketId', 'id'] }],
+  },
+);
+export const AfterSaleNotification = db.define(
+  'AfterSaleNotification',
+  {
+    id: id(),
+    recordId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, unique: true },
+    ticketId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+    content: { type: DataTypes.TEXT, allowNull: false },
+    parts: { type: DataTypes.JSON, allowNull: true },
+    nextPart: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },
+    status: {
+      type: DataTypes.ENUM('pending', 'sent', 'failed'),
+      allowNull: false,
+      defaultValue: 'pending',
+    },
+    attempts: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },
+    nextAttemptAt: { type: DataTypes.DATE(3), allowNull: false, defaultValue: DataTypes.NOW },
+    sentAt: DataTypes.DATE,
+    lastError: DataTypes.STRING(100),
+  },
+  { tableName: 'after_sale_notifications', indexes: [{ fields: ['status', 'nextAttemptAt'] }] },
+);
 export const Upload = db.define(
   'Upload',
   {
@@ -149,6 +210,10 @@ export const DictionaryOption = db.define(
     active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     sortOrder: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+    channelExchangeRate: { type: DataTypes.DECIMAL(14, 2), allowNull: true },
+    currentExchangeRate: { type: DataTypes.DECIMAL(14, 2), allowNull: true },
+    taxMultiplier: { type: DataTypes.DECIMAL(14, 2), allowNull: true },
+    purchaseDiscount: { type: DataTypes.DECIMAL(36, 20), allowNull: true },
   },
   { tableName: 'dictionary_options', indexes: [{ unique: true, fields: ['kind', 'value'] }] },
 );
@@ -159,6 +224,7 @@ export const Store = db.define(
     walmartStoreName: { type: DataTypes.STRING(191), allowNull: false, unique: true },
     systemStoreName: { type: DataTypes.STRING(191), allowNull: false, unique: true },
     ownerId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+    isThirdParty: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     clientId: { type: DataTypes.STRING(255), allowNull: true },
     clientSecret: { type: DataTypes.TEXT, allowNull: true },
     version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
@@ -220,6 +286,16 @@ export const Session = db.define(
 );
 Order.hasMany(OrderItem, { as: 'items', foreignKey: 'orderId', onDelete: 'CASCADE' });
 OrderItem.belongsTo(Order, { as: 'order', foreignKey: 'orderId' });
+OrderItem.hasOne(PurchaseAfterSale, {
+  as: 'purchaseAfterSale',
+  foreignKey: 'itemId',
+  onDelete: 'RESTRICT',
+});
+PurchaseAfterSale.belongsTo(OrderItem, { as: 'item', foreignKey: 'itemId', onDelete: 'RESTRICT' });
+PurchaseAfterSaleRecord.belongsTo(PurchaseAfterSale, {
+  foreignKey: 'ticketId',
+  onDelete: 'RESTRICT',
+});
 OrderItem.hasOne(Purchase, { as: 'purchase', foreignKey: 'itemId', onDelete: 'CASCADE' });
 Purchase.belongsTo(OrderItem, { foreignKey: 'itemId' });
 Purchase.belongsTo(User, { as: 'assignee', foreignKey: 'assignedTo', onDelete: 'SET NULL' });
@@ -247,6 +323,12 @@ OrderItem.belongsTo(RiskAddress, {
 export const itemInclude = [
   { model: Order, as: 'order' },
   {
+    model: PurchaseAfterSale,
+    as: 'purchaseAfterSale',
+    attributes: ['id', 'status'],
+    required: false,
+  },
+  {
     model: Purchase,
     as: 'purchase',
     include: [
@@ -257,7 +339,7 @@ export const itemInclude = [
   {
     model: Store,
     as: 'store',
-    attributes: ['id', 'systemStoreName', 'ownerId'],
+    attributes: ['id', 'systemStoreName', 'ownerId', 'isThirdParty'],
     required: false,
     include: [storeOwnerInclude],
   },
@@ -274,6 +356,8 @@ export function serializeItem(instance) {
     assignedAt: value.purchase?.assignedAt || null,
     assignee: value.purchase?.assignee || null,
     storeOwner: value.store?.owner || null,
+    storeIsThirdParty: Boolean(value.store?.isThirdParty),
+    purchaseAfterSale: value.purchaseAfterSale || null,
     manualEditable: !isWfsOrder(value),
     priceFactorLevel: priceFactorLevel(value.purchase?.priceFactor),
     purchaseConfirmedAt: value.purchase?.purchaseConfirmedAt || null,
@@ -281,6 +365,8 @@ export function serializeItem(instance) {
     reviewStatus: value.purchase?.reviewStatus || null,
     supplierAssignmentStatus: value.purchase?.supplierAssignmentStatus || null,
     walmart: value.walmart || null,
+    returnInfo: value.returnInfo || null,
+    returnStatuses: value.returnInfo?.statuses || [],
     addressRisk: Boolean(value.riskAddress),
     addressRiskNote: value.riskAddress?.note || null,
   };

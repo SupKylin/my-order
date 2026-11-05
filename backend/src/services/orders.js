@@ -8,6 +8,7 @@ import { getFieldDefinitions } from './dictionaries.js';
 import { channelKey, orderIdentityKey } from '../lib/order-identity.js';
 import { priceFactorPatterns } from '../lib/price-factor.js';
 import { filterValues } from '../lib/filter-values.js';
+import { RETURN_STATUSES } from './walmart/returns.js';
 import { shippingWindow } from '../lib/shipping-window.js';
 import { assertOrderEditable } from '../lib/order-write-policy.js';
 import { orderScope, assertItemAccess, requirePermission } from '../permissions.js';
@@ -15,6 +16,7 @@ import { procurementStatePatch } from '../lib/procurement-state.js';
 import { sameFieldValue } from '../lib/order-concurrency.js';
 import { purchaseAssignmentSummary } from './purchase-assignment-summary.js';
 import { DERIVED_PURCHASE_FIELDS, derivePurchaseFields } from '../lib/purchase-derived.js';
+import { purchaseCostPatch } from './purchase-cost.js';
 import {
   purchaseTimerPatch,
   PURCHASE_TRACKING_PATTERN,
@@ -102,6 +104,9 @@ export async function upsertImported(patch, transaction, actor, target = undefin
       procurement,
       purchaseTimerPatch(procurement, {
         ...parts.purchase,
+        ...(!options.walmartSync
+          ? await purchaseCostPatch(procurement, parts.purchase, transaction)
+          : {}),
         ...derivePurchaseFields({
           orderAmount: mergedItem.orderAmount,
           tax: mergedItem.tax,
@@ -445,11 +450,33 @@ export function buildFilters(query, now = Date.now(), user) {
     }
     where[Op.and] = [...(where[Op.and] || []), ...conditions];
   }
-  const include = [
-    itemInclude[0],
-    { ...itemInclude[1], where: purchaseWhere, required: true },
-    ...itemInclude.slice(2),
-  ];
+  const include = itemInclude.map((association) =>
+    association.as === 'purchase'
+      ? { ...association, where: purchaseWhere, required: true }
+      : association,
+  );
+  const returnStatuses = filterValues(query.returnStatuses, '退货退款状态筛选格式无效');
+  assert(
+    returnStatuses.every((value) => RETURN_STATUSES.includes(value)),
+    '退货退款状态筛选无效',
+  );
+  if (returnStatuses.length)
+    where[Op.and] = [
+      ...(where[Op.and] || []),
+      {
+        [Op.or]: returnStatuses.map((value) =>
+          sqlWhere(
+            fn(
+              'JSON_CONTAINS',
+              col('OrderItem.returnInfo'),
+              JSON.stringify(value),
+              literal("'$.statuses'"),
+            ),
+            1,
+          ),
+        ),
+      },
+    ];
   where[Op.and] = [...(where[Op.and] || []), orderScope(user)];
   return { where, include };
 }
@@ -540,7 +567,25 @@ export async function editItem(id, input, user) {
     const currentOrder = await Order.findByPk(item.orderId, { transaction: t });
     if (hasBase) {
       const conflicts = [];
-      for (const key of Object.keys(patch)) {
+      const checkedKeys = new Set(Object.keys(patch));
+      if (
+        ['settlement', 'purchaseAmount', 'purchaseCostChannel'].some((key) =>
+          Object.hasOwn(patch, key),
+        )
+      ) {
+        for (const key of [
+          'settlement',
+          'purchaseAmount',
+          'purchaseCostChannel',
+          'purchaseChannel',
+          'purchaseDiscount',
+        ]) {
+          // 新表单核对计算依赖；旧客户端缺依赖快照时按版本保护。
+          if (Object.hasOwn(input.baseFields, key)) checkedKeys.add(key);
+          else assert(item.version === input.version, '采购结算依据已变化，请刷新后重试', 409);
+        }
+      }
+      for (const key of checkedKeys) {
         assert(Object.hasOwn(input.baseFields, key), `缺少字段原值：${key}`);
         const field = definitions.find((entry) => entry.key === key);
         const current =
@@ -628,6 +673,7 @@ export async function editItem(id, input, user) {
         currentPurchase,
         purchaseTimerPatch(currentPurchase, {
           ...parts.purchase,
+          ...(await purchaseCostPatch(currentPurchase, parts.purchase, t)),
           ...derivePurchaseFields({
             orderAmount: mergedItem.orderAmount,
             tax: mergedItem.tax,

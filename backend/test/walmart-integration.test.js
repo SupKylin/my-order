@@ -6,7 +6,7 @@ import { db, User, Store, OrderItem, Purchase, Order } from '../src/models.js';
 import { WalmartSync, WalmartReceipt } from '../src/services/walmart/models.js';
 import {
   configureSync,
-  startSync,
+  startSync as realStartSync,
   drainSyncTasks,
   previewOrders,
 } from '../src/services/walmart/sync.js';
@@ -19,6 +19,9 @@ import { backfillWalmartCancellationIntent } from '../src/migrations/walmart-can
 import { buildFilters } from '../src/services/orders.js';
 import { repairOrderIncentives } from '../src/services/walmart/incentive-repair.js';
 import { derivePurchaseFields } from '../src/lib/purchase-derived.js';
+
+const startSync = (id, options = {}) =>
+  realStartSync(id, { returnsReader: async () => [], ...options });
 
 // 必须显式指定一次性测试数据库，绝不在用户订单库执行清理。
 const isolated = /^my_order_walmart_test_[0-9]+$/.test(config.db.database);
@@ -869,7 +872,9 @@ test('多件资助商品历史修复与再次同步保持原单价乘数量', as
   const raw = sample('Acknowledged', 'MULTI-INCENTIVE-PO', 'MULTI-INCENTIVE-ORDER');
   const line = raw.orderLines.orderLine[0];
   line.orderLineQuantity.amount = '2';
-  line.charges = { charge: [{ chargeType: 'PRODUCT', chargeAmount: { amount: 165.78, currency: 'USD' } }] };
+  line.charges = {
+    charge: [{ chargeType: 'PRODUCT', chargeAmount: { amount: 165.78, currency: 'USD' } }],
+  };
   await persistOrder(store, raw, catalog, actor);
   line.incentive = {
     type: 'Walmart funded',

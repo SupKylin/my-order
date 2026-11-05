@@ -7,6 +7,7 @@ import { startWalmartScheduler } from './services/walmart/sync.js';
 import { startThumbnailWarmer } from './services/thumbnail-warmer.js';
 import { startAuditCleanup } from './services/audit.js';
 import { startHomeScheduler } from './services/home/index.js';
+import { startAfterSaleNotifications } from './services/wecom-after-sales.js';
 try {
   if (config.secret.length < 32) throw new Error('请先配置 .env 中的 SESSION_SECRET');
   await db.authenticate();
@@ -29,9 +30,11 @@ try {
   const stopThumbnails = startThumbnailWarmer();
   const stopAudit = startAuditCleanup();
   const stopHome = startHomeScheduler();
+  const stopNotifications = startAfterSaleNotifications();
   const stop = () =>
     server.close(async () => {
       clearInterval(cleanup);
+      await stopNotifications();
       await stopWalmart();
       await stopThumbnails();
       await stopAudit();

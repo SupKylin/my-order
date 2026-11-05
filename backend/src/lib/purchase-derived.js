@@ -1,8 +1,13 @@
 const DECIMAL_PATTERN = /^\d+(?:\.\d+)?$/;
 
-export const DERIVED_PURCHASE_FIELDS = new Set(['purchaseLimit', 'priceFactor']);
+export const DERIVED_PURCHASE_FIELDS = new Set([
+  'purchaseLimit',
+  'priceFactor',
+  'purchaseDiscount',
+  'purchaseCost',
+]);
 
-function parseDecimal(value) {
+export function parseDecimal(value) {
   if (value === null || value === undefined || value === '') return null;
   const text = String(value).trim();
   if (!DECIMAL_PATTERN.test(text)) return null;
@@ -27,11 +32,11 @@ function add(left, right) {
   return { integer: a + b, scale };
 }
 
-function multiply(left, right) {
+export function multiply(left, right) {
   return { integer: left.integer * right.integer, scale: left.scale + right.scale };
 }
 
-function roundedRatio(numerator, denominator, digits) {
+export function roundedRatio(numerator, denominator, digits) {
   const scaledNumerator = numerator.integer * 10n ** BigInt(denominator.scale + digits);
   const scaledDenominator = denominator.integer * 10n ** BigInt(numerator.scale);
   let quotient = scaledNumerator / scaledDenominator;
@@ -51,7 +56,8 @@ const ZERO_POINT_EIGHT_FIVE = parseDecimal('0.85');
 export function derivePurchaseFields({ orderAmount, tax, purchaseLinkAmount }) {
   const order = parseDecimal(orderAmount);
   const link = parseDecimal(purchaseLinkAmount);
-  const taxValue = tax === null || tax === undefined || tax === '' ? { integer: 0n, scale: 0 } : parseDecimal(tax);
+  const taxValue =
+    tax === null || tax === undefined || tax === '' ? { integer: 0n, scale: 0 } : parseDecimal(tax);
   if (!order || !link || !taxValue) return { purchaseLimit: null, priceFactor: null };
   const denominator = add(link, taxValue);
   if (denominator.integer <= 0n) return { purchaseLimit: null, priceFactor: null };

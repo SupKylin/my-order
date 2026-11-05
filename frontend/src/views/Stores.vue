@@ -21,6 +21,7 @@ const form = reactive({
   walmartStoreName: '',
   systemStoreName: '',
   ownerId: null,
+  isThirdParty: false,
   clientId: '',
   clientSecret: '',
 });
@@ -42,6 +43,7 @@ async function edit(row = null) {
             walmartStoreName: row.walmartStoreName,
             systemStoreName: row.systemStoreName,
             ownerId: row.ownerId ?? null,
+            isThirdParty: Boolean(row.isThirdParty),
             clientId: row.clientId,
             clientSecret: row.clientSecret,
           }
@@ -49,6 +51,7 @@ async function edit(row = null) {
             walmartStoreName: '',
             systemStoreName: '',
             ownerId: null,
+            isThirdParty: false,
             clientId: '',
             clientSecret: '',
           },
@@ -93,8 +96,18 @@ async function save() {
       ></template
     >
 
-    <el-table-column label="Walmart 店铺名" prop="walmartStoreName" min-width="220" />
-    <el-table-column label="系统店铺名" prop="systemStoreName" min-width="220" />
+    <el-table-column label="Walmart 店铺名" prop="walmartStoreName" min-width="220">
+      <template #default="{ row }"
+        >{{ row.walmartStoreName }}
+        <el-tag v-if="row.isThirdParty" size="small" type="warning">三方</el-tag></template
+      >
+    </el-table-column>
+    <el-table-column label="系统店铺名" prop="systemStoreName" min-width="220">
+      <template #default="{ row }"
+        >{{ row.systemStoreName }}
+        <el-tag v-if="row.isThirdParty" size="small" type="warning">三方</el-tag></template
+      >
+    </el-table-column>
     <el-table-column label="店铺所属账号" min-width="160">
       <template #default="{ row }">{{ row.owner?.displayName || '未绑定' }}</template>
     </el-table-column>
@@ -156,6 +169,9 @@ async function save() {
             :disabled="!user.active"
           />
         </el-select>
+      </el-form-item>
+      <el-form-item label="店铺类型">
+        <el-switch v-model="form.isThirdParty" active-text="三方店铺" inactive-text="自有店铺" />
       </el-form-item>
       <el-form-item :label="editing ? 'Client ID（留空保留原值）' : 'Client ID'" required>
         <el-input v-model="form.clientId" maxlength="255" />

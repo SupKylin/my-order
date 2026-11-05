@@ -1,26 +1,20 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
-import { Refresh, Search } from '@element-plus/icons-vue';
-import { loadHomeReport } from '../../api/home';
+import { computed, ref, watch } from 'vue';
 import RemoteMetric from './RemoteMetric.vue';
-import StoreOwnerSelect from './StoreOwnerSelect.vue';
 import { settlementSummary } from '../../utils/settlement-summary';
 import { PLATFORM_TIME_ZONE } from '../../utils/businessTime';
-const loading = ref(false),
-  stores = ref([]),
-  today = ref('');
-const storeIds = ref([]),
-  appliedStoreIds = ref([]),
-  ownerId = ref(null),
-  appliedOwnerId = ref(null),
-  page = ref(1),
+const props = defineProps({ report: Object, thirdParty: Boolean });
+const today = computed(() => props.report?.today || '');
+const page = ref(1),
   pageSize = ref(20);
 const filtered = computed(() =>
-  stores.value.filter(
-    (row) =>
-      (!appliedOwnerId.value || row.ownerId === appliedOwnerId.value) &&
-      (!appliedStoreIds.value.length || appliedStoreIds.value.includes(row.id)),
-  ),
+  (props.report?.stores || []).filter((row) => Boolean(row.isThirdParty) === props.thirdParty),
+);
+watch(
+  () => props.report,
+  () => {
+    page.value = 1;
+  },
 );
 const visible = computed(() =>
   filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value),
@@ -40,14 +34,14 @@ const cards = computed(() => [
     persistentNote: true,
   },
   { label: '店铺', value: filtered.value.length, note: `已统计 ${ready.value.length} 家` },
-  { label: '累计订单', value: sum('totalOrders'), note: '客户订单号去重' },
+  { label: '期间订单', value: sum('totalOrders'), note: '客户订单号去重' },
   {
-    label: '累计销售额（USD）',
+    label: '期间销售额（USD）',
     value: moneySum('totalSales'),
     note: '商品金额 + 运费，排除取消商品行',
   },
-  { label: '昨日订单', value: sum('yesterdayOrders'), note: '美西标准时间前一天' },
-  { label: '昨日销售额（USD）', value: moneySum('yesterdaySales'), note: '美西标准时间前一天' },
+  { label: '昨日订单', value: sum('yesterdayOrders'), note: '所选期间内的 PST 昨日' },
+  { label: '昨日销售额（USD）', value: moneySum('yesterdaySales'), note: '所选期间内的 PST 昨日' },
   {
     label: '待结算金额汇总（USD）',
     value: settlement.value.value,
@@ -63,10 +57,10 @@ const cards = computed(() => [
 ]);
 const columns = [
   ['unshippedOrders', '未发货订单', '订单'],
-  ['totalOrders', '总订单量', '订单'],
-  ['totalSales', '总销售额（USD）', '金额'],
-  ['yesterdayOrders', '昨日订单量', '订单'],
-  ['yesterdaySales', '昨日销售额（USD）', '金额'],
+  ['totalOrders', '期间订单量', '订单'],
+  ['totalSales', '期间销售额（USD）', '金额'],
+  ['yesterdayOrders', '期间内昨日订单量', '订单'],
+  ['yesterdaySales', '期间内昨日销售额（USD）', '金额'],
   ['pendingConfirmation', '待确认数', '订单'],
   ['pendingPurchase', '待采购数', '商品明细'],
   ['cancelledOrders', '取消订单数', '订单'],
@@ -93,48 +87,19 @@ function moneySum(key) {
   );
   return `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`;
 }
-function query() {
-  appliedStoreIds.value = [...(storeIds.value || [])];
-  appliedOwnerId.value = ownerId.value;
-  page.value = 1;
-}
-function reset() {
-  storeIds.value = [];
-  ownerId.value = null;
-  query();
-}
 function time(value) {
   return value
     ? new Date(value).toLocaleString('zh-CN', { timeZone: PLATFORM_TIME_ZONE, hour12: false })
     : '等待更新';
 }
-async function load() {
-  if (loading.value) return;
-  loading.value = true;
-  try {
-    const data = await loadHomeReport();
-    stores.value = data.stores;
-    today.value = data.today;
-    page.value = Math.min(
-      page.value,
-      Math.max(1, Math.ceil(filtered.value.length / pageSize.value)),
-    );
-  } catch {
-    /* 错误由请求拦截器提示，保留上次成功加载的统计。 */
-  } finally {
-    loading.value = false;
-  }
-}
-onMounted(load);
 </script>
 <template>
-  <section v-loading="loading" class="home-page">
+  <section class="home-page">
     <div class="home-intro">
       <div>
-        <h1>店铺概况与绩效</h1>
-        <p>订单数据进入页面或刷新时实时统计 · 按美西标准时间 PST（UTC−8）归组</p>
+        <h2>{{ thirdParty ? '三方店铺' : '自有店铺' }} · 概况与绩效</h2>
+        <p>订单统计期间：{{ report?.startDate }} 至 {{ report?.endDate }}（PST）</p>
       </div>
-      <el-button :icon="Refresh" :loading="loading" @click="load">刷新统计</el-button>
     </div>
     <div class="home-cards">
       <article v-for="card in cards" :key="card.label">
@@ -154,37 +119,18 @@ onMounted(load);
             : '订单实时统计 · 平台指标为今日快照'
         }}</span>
       </div>
-      <div class="management-filters">
-        <el-select
-          v-model="storeIds"
-          class="overview-store-filter"
-          multiple
-          collapse-tags
-          collapse-tags-tooltip
-          clearable
-          placeholder="全部店铺"
-          aria-label="店铺筛选"
-        >
-          <el-option
-            v-for="store in stores"
-            :key="store.id"
-            :value="store.id"
-            :label="store.name"
-          />
-        </el-select>
-        <StoreOwnerSelect v-model="ownerId" :stores="stores" />
-        <el-button type="primary" plain :icon="Search" @click="query">查询</el-button>
-        <el-button @click="reset">重置</el-button>
-        <span class="muted"
-          >在线 SKU、绩效、付款报表与退款数据每日 PST 00:00 更新；悬停指标可查看数据时间。</span
-        >
-      </div>
+      <p class="platform-period-note">
+        在线 SKU、绩效及财务指标保留各自平台周期，每日 PST 00:00
+        更新，不按订单筛选日期重算；悬停查看来源时间。
+      </p>
       <div class="management-table-region">
         <el-table :data="visible" height="100%" row-key="id" empty-text="暂无可查看的店铺">
           <el-table-column label="店铺 / 所属账号" fixed="left" width="190">
             <template #default="{ row }"
               ><div class="home-store">
-                <strong>{{ row.name }}</strong
+                <strong
+                  >{{ row.name }}
+                  <el-tag v-if="row.isThirdParty" type="warning" size="small">三方</el-tag></strong
                 ><small>{{ row.walmartName }}</small
                 ><small>{{ row.owner }}</small>
               </div></template
@@ -261,6 +207,12 @@ onMounted(load);
   </section>
 </template>
 <style scoped>
+.platform-period-note {
+  margin: 0 0 12px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
 .home-page {
   min-height: max(680px, calc(100vh - 180px));
   display: flex;
@@ -273,7 +225,7 @@ onMounted(load);
   align-items: center;
   gap: 16px;
 }
-.home-intro h1 {
+.home-intro h2 {
   font-size: 20px;
   margin: 0 0 4px;
 }
@@ -284,7 +236,7 @@ onMounted(load);
 }
 .home-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 .home-cards article {

@@ -1,5 +1,6 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, nextTick } from 'vue';
+import { ElMessage, useFormDisabled } from 'element-plus';
 import { Plus, Delete } from '@element-plus/icons-vue';
 import { uploadApi } from '../api/uploads';
 import { useMeta } from '../stores/meta';
@@ -9,7 +10,9 @@ const emit = defineEmits(['update:modelValue', 'uploading']);
 const meta = useMeta(),
   uploadingCount = ref(0),
   pendingImagePaths = ref([]);
-const busy = computed(() => uploadingCount.value > 0);
+const pasting = ref(false);
+const formDisabled = useFormDisabled();
+const busy = computed(() => uploadingCount.value > 0 || pasting.value);
 // 手工清空要发出 null，后端才能区分“清空”与“未提供”。
 const value = computed({
   get: () => props.modelValue ?? '',
@@ -35,16 +38,47 @@ async function upload(options) {
     pendingImagePaths.value.push(uploadedPath);
     const next = [...new Set([...imageList.value, ...pendingImagePaths.value])];
     emit('update:modelValue', next);
-    options.onSuccess(result);
+    options.onSuccess?.(result);
   } catch (e) {
-    options.onError(e);
+    options.onError?.(e);
   } finally {
     if (uploadedPath) {
       const index = pendingImagePaths.value.indexOf(uploadedPath);
       if (index >= 0) pendingImagePaths.value.splice(index, 1);
     }
     uploadingCount.value -= 1;
-    if (!uploadingCount.value) emit('uploading', false);
+    if (!busy.value) emit('uploading', false);
+  }
+}
+async function pasteImages(event) {
+  if (busy.value || formDisabled.value) return;
+  const files = Array.from(event.clipboardData?.files || []).filter((file) =>
+    file.type.startsWith('image/'),
+  );
+  event.preventDefault();
+  if (!files.length) {
+    ElMessage.info('请先截图或复制图片，再在此处按 Ctrl＋V 粘贴');
+    return;
+  }
+  pasting.value = true;
+  emit('uploading', true);
+  try {
+    for (const file of files) {
+      if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
+        ElMessage.warning('仅支持 PNG、JPEG、WebP、GIF 图片');
+        continue;
+      }
+      if (file.size > 15 * 1024 * 1024) {
+        ElMessage.warning('单张图片不能超过 15 MB');
+        continue;
+      }
+      await upload({ file });
+      // 等待父组件同步图片列表，连续粘贴时保留此前成功上传的图片。
+      await nextTick();
+    }
+  } finally {
+    pasting.value = false;
+    if (!busy.value) emit('uploading', false);
   }
 }
 function removeImage(index) {
@@ -94,21 +128,21 @@ function removeImage(index) {
   <div v-else-if="field.type === 'image'" class="image-field">
     <div v-if="imageList.length" class="image-preview-list">
       <div v-for="(path, index) in imageList" :key="path" class="image-preview">
-      <el-image
-        :src="meta.imageUrl(path, true)"
-        :preview-src-list="imagePreviewUrls"
-        :initial-index="index"
-        fit="contain"
-        preview-teleported
-      /><el-button
-        class="image-remove"
-        :icon="Delete"
-        circle
-        size="small"
-        aria-label="清除图片"
-        :disabled="busy"
-        @click="removeImage(index)"
-      />
+        <el-image
+          :src="meta.imageUrl(path, true)"
+          :preview-src-list="imagePreviewUrls"
+          :initial-index="index"
+          fit="contain"
+          preview-teleported
+        /><el-button
+          class="image-remove"
+          :icon="Delete"
+          circle
+          size="small"
+          aria-label="清除图片"
+          :disabled="busy"
+          @click="removeImage(index)"
+        />
       </div>
     </div>
     <el-upload
@@ -121,6 +155,14 @@ function removeImage(index) {
         imageList.length ? '继续上传' : '上传图片'
       }}</el-button></el-upload
     >
+    <button
+      type="button"
+      class="image-paste-target"
+      :disabled="busy || formDisabled"
+      @paste="pasteImages"
+    >
+      {{ busy ? '图片上传中…' : '点击此处后按 Ctrl＋V 粘贴图片' }}
+    </button>
   </div>
   <el-input
     v-else-if="field.type === 'textarea'"
@@ -146,3 +188,26 @@ function removeImage(index) {
     clearable
   />
 </template>
+
+<style scoped>
+.image-paste-target {
+  padding: 8px 12px;
+  border: 1px dashed var(--el-border-color);
+  border-radius: var(--el-border-radius-base);
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.image-paste-target:focus-visible,
+.image-paste-target:focus {
+  outline: 2px solid var(--el-color-primary-light-7);
+  outline-offset: 2px;
+  border-color: var(--el-color-primary);
+}
+.image-paste-target:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+</style>

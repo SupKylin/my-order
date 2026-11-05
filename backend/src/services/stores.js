@@ -24,6 +24,7 @@ function serializeStore(store) {
     walmartStoreName: value.walmartStoreName,
     systemStoreName: value.systemStoreName,
     ownerId: value.ownerId ?? null,
+    isThirdParty: Boolean(value.isThirdParty),
     owner: value.owner || null,
     clientId: value.clientId || '',
     clientSecret: value.clientSecret || '',
@@ -58,6 +59,10 @@ export async function saveStore(id, input, actor) {
     ...(patch.clientSecret.trim() ? { clientSecret: patch.clientSecret } : {}),
   };
   const result = await db.transaction(async (transaction) => {
+    if (Object.hasOwn(input, 'isThirdParty')) {
+      assert(typeof input.isThirdParty === 'boolean', '三方店铺标记须为是或否');
+      data.isThirdParty = input.isThirdParty;
+    }
     if (Object.hasOwn(input, 'ownerId')) {
       const ownerId = input.ownerId;
       assert(ownerId === null || (Number.isSafeInteger(ownerId) && ownerId > 0), '所属账号无效');

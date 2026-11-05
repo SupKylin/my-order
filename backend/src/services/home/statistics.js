@@ -23,7 +23,7 @@ export function amountText(value) {
 }
 
 /** 每次聚合只处理一家店铺；金额按商品行相加，订单号跨 SKU 去重。 */
-export function createStatistics(now = Date.now()) {
+export function createStatistics(now = Date.now(), range = null) {
   const yesterday = yesterdayRange(now);
   const orders = new Set(),
     previous = new Set(),
@@ -43,6 +43,7 @@ export function createStatistics(now = Date.now()) {
         return;
       }
       if (orderTime < WALMART_ORDER_START_MS || orderTime > Number(now)) return;
+      if (range && (orderTime < range.start || orderTime >= range.end)) return;
       const key = row.order.orderNumber;
       const statuses = row.walmart?.statuses || [];
       const isCancelled = statuses.length > 0 && statuses.every((s) => s === 'Cancelled');

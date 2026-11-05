@@ -30,7 +30,13 @@ export const orderApi = {
         ...query,
         purchaseChannel: JSON.stringify(query.purchaseChannel),
         ...Object.fromEntries(
-          ['purchaseStatus', 'orderStatus', 'trackingWarning', 'priceFactorLevel'].map((key) => [
+          [
+            'purchaseStatus',
+            'orderStatus',
+            'trackingWarning',
+            'priceFactorLevel',
+            'returnStatuses',
+          ].map((key) => [
             key,
             Array.isArray(query[key]) ? JSON.stringify(query[key]) : query[key],
           ]),

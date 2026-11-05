@@ -1,7 +1,7 @@
 import { DataTypes } from 'sequelize';
 import { db, OrderItem } from '../models.js';
 import { platformStatusText, specificationText } from '../services/walmart/mapping.js';
-import { WalmartSync, WalmartReceipt } from '../services/walmart/models.js';
+import { WalmartSync, WalmartReceipt, WalmartReturn } from '../services/walmart/models.js';
 import { backfillWalmartCommercialFields } from './walmart-commercial-fields.js';
 import { backfillWalmartProductImages } from './walmart-product-images.js';
 import { backfillWalmartCancellationIntent } from './walmart-cancellation-intent.js';
@@ -10,6 +10,8 @@ import { backfillWalmartCancellationIntent } from './walmart-cancellation-intent
 export async function migrateWalmart() {
   const query = db.getQueryInterface();
   const columns = await query.describeTable('order_items');
+  if (!columns.returnInfo)
+    await query.addColumn('order_items', 'returnInfo', { type: DataTypes.JSON, allowNull: true });
   const addStatus = !columns.platformOrderStatus;
   const addSpecification = !columns.productSpecification;
   if (addStatus)
@@ -44,6 +46,17 @@ export async function migrateWalmart() {
     });
   await WalmartSync.sync();
   const syncColumns = await query.describeTable('walmart_sync_states');
+  if (!syncColumns.returnsCursorAt)
+    await query.addColumn('walmart_sync_states', 'returnsCursorAt', {
+      type: DataTypes.DATE(3),
+      allowNull: true,
+    });
+  if (!syncColumns.returnsCredentialKey)
+    await query.addColumn('walmart_sync_states', 'returnsCredentialKey', {
+      type: DataTypes.STRING(64),
+      allowNull: true,
+    });
+  await WalmartReturn.sync();
   if (!syncColumns.lastReconciledAt)
     await query.addColumn('walmart_sync_states', 'lastReconciledAt', {
       type: DataTypes.DATE(3),

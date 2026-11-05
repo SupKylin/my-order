@@ -5,6 +5,7 @@ import { WalmartClient } from './client.js';
 import { WalmartSync, WalmartReceipt } from './models.js';
 import { persistOrder } from './persistence.js';
 import { acknowledgePersistedOrder } from './acknowledgement.js';
+import { syncOrderReturns, fetchReturnOrders } from './returns.js';
 import { orderLines, mapOrderLine } from './mapping.js';
 import { readCatalogCache } from './catalog-cache.js';
 import { createSyncDispatcher, syncDueAt, MAX_SYNC_CONCURRENCY } from './scheduling.js';
@@ -156,7 +157,11 @@ export async function previewOrders(
 
 async function executeSync(
   id,
-  { clientFactory = (store) => new WalmartClient(store), scheduled = false } = {},
+  {
+    clientFactory = (store) => new WalmartClient(store),
+    scheduled = false,
+    returnsReader = fetchReturnOrders,
+  } = {},
 ) {
   const release = await acquireLock(id);
   if (!release) return;
@@ -303,9 +308,39 @@ async function executeSync(
       }
     }
     complete = complete && (await stillEnabled());
+    if (complete) {
+      try {
+        result.returns = await syncOrderReturns({
+          store,
+          state,
+          client,
+          end,
+          stillEnabled,
+          reader: returnsReader,
+          saveOrder: async (order) => {
+            assert(await stillEnabled(), '同步已暂停');
+            await getCatalog(client, order, catalog, store);
+            const saved = await persistOrder(store, order, catalog, actor);
+            result.added += saved.added;
+            result.updated += saved.updated;
+            // 退款补拉仅保存，不能把有退款申请的旧订单自动确认。
+            await saved.receipt.update({ ackStatus: 'skip' });
+          },
+        });
+      } catch (error) {
+        result.returnsError = safeError(error);
+      }
+    }
     result.variantErrors = [...catalog.values()].filter((entry) => entry.error).length;
     await state.update({
-      status: result.failed || result.review || result.variantErrors ? 'partial' : 'completed',
+      status:
+        result.failed ||
+        result.review ||
+        result.variantErrors ||
+        result.returnsError ||
+        result.returns?.pending
+          ? 'partial'
+          : 'completed',
       result: structuredClone(result),
       finishedAt: new Date(),
       ...(!importFailed && complete
