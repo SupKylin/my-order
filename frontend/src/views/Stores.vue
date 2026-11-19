@@ -4,7 +4,7 @@ import { defineAsyncComponent, reactive, ref } from 'vue';
 import { Plus } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { storeApi } from '../api/stores';
-import { userApi } from '../api/users';
+import { api } from '../api/http';
 import { fmtDate } from '../utils/format';
 
 const list = ref(null);
@@ -22,6 +22,7 @@ const form = reactive({
   systemStoreName: '',
   ownerId: null,
   isThirdParty: false,
+  commissionRate: undefined,
   clientId: '',
   clientSecret: '',
 });
@@ -34,7 +35,7 @@ async function edit(row = null) {
   if (opening.value) return;
   opening.value = true;
   try {
-    users.value = await userApi.list();
+    users.value = await api.get('/order-owners');
     editing.value = row;
     Object.assign(
       form,
@@ -44,6 +45,7 @@ async function edit(row = null) {
             systemStoreName: row.systemStoreName,
             ownerId: row.ownerId ?? null,
             isThirdParty: Boolean(row.isThirdParty),
+            commissionRate: row.commissionRate == null ? undefined : Number(row.commissionRate),
             clientId: row.clientId,
             clientSecret: row.clientSecret,
           }
@@ -52,6 +54,7 @@ async function edit(row = null) {
             systemStoreName: '',
             ownerId: null,
             isThirdParty: false,
+            commissionRate: undefined,
             clientId: '',
             clientSecret: '',
           },
@@ -70,7 +73,12 @@ async function save() {
     return ElMessage.warning('请填写 Client ID 和 Client Secret');
   saving.value = true;
   try {
-    const payload = { ...form, ownerId: form.ownerId || null, version: editing.value?.version };
+    const payload = {
+      ...form,
+      commissionRate: form.commissionRate ?? null,
+      ownerId: form.ownerId || null,
+      version: editing.value?.version,
+    };
     if (editing.value) await storeApi.update(editing.value.id, payload);
     else await storeApi.create(payload);
     dialog.value = false;
@@ -110,6 +118,11 @@ async function save() {
     </el-table-column>
     <el-table-column label="店铺所属账号" min-width="160">
       <template #default="{ row }">{{ row.owner?.displayName || '未绑定' }}</template>
+    </el-table-column>
+    <el-table-column label="佣金（%）" min-width="135">
+      <template #default="{ row }">{{
+        row.commissionRate == null ? '未设置' : `${row.commissionRate}%`
+      }}</template>
     </el-table-column>
     <el-table-column label="Client ID" prop="clientId" min-width="260" show-overflow-tooltip />
     <el-table-column
@@ -172,6 +185,20 @@ async function save() {
       </el-form-item>
       <el-form-item label="店铺类型">
         <el-switch v-model="form.isThirdParty" active-text="三方店铺" inactive-text="自有店铺" />
+      </el-form-item>
+      <el-form-item label="佣金（%）">
+        <el-input-number
+          v-model="form.commissionRate"
+          :min="0"
+          :max="100"
+          :precision="2"
+          :step="0.01"
+          controls-position="right"
+          placeholder="例如15代表15%"
+        />
+        <div class="muted" style="margin-top: 8px; width: 100%">
+          输入15代表15%，可留空。订单结算时保存费率；修改只影响以后结算的订单。
+        </div>
       </el-form-item>
       <el-form-item :label="editing ? 'Client ID（留空保留原值）' : 'Client ID'" required>
         <el-input v-model="form.clientId" maxlength="255" />

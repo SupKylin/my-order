@@ -52,7 +52,9 @@ watch(
 const mappingFields = computed(() =>
   meta.fields.filter(
     (field) =>
-      !field.readOnly && !['purchaseChannel', 'purchaseLimit', 'priceFactor'].includes(field.key),
+      !field.readOnly &&
+      !field.importDisabled &&
+      !['purchaseChannel', 'purchaseLimit', 'priceFactor'].includes(field.key),
   ),
 );
 // 保留旧模板源表头，但不再提供已停用字段的映射目标。
@@ -65,6 +67,11 @@ function withoutDisabledTargets(mappings) {
       'priceFactor',
       'purchaseDiscount',
       'purchaseCost',
+      'disputeSuccessAmount',
+      'afterSales',
+      'afterSalesScreenshot',
+      'afterSalesResult',
+      'afterSalesResultScreenshot',
     ].includes(mapping.field)
       ? { ...mapping, field: '' }
       : mapping,

@@ -27,3 +27,36 @@ export function costPreview(discount, amount) {
     b = decimal(amount);
   return a && b ? ratio(a.value * b.value, a.scale * b.scale, 2) : null;
 }
+
+// 只读参考配置；不写入订单，也不替代历史结算快照。
+export function currentFinanceConfig(row, options = []) {
+  const rate = decimal(row.storeCommissionRate);
+  const commissionRate =
+    rate && Number(row.storeCommissionRate) <= 100
+      ? fixedDecimal(row.storeCommissionRate, 2)
+      : null;
+  const result = {
+    commissionRate,
+    commissionMessage: commissionRate == null ? '店铺尚未配置佣金率' : '当前配置，结算时确定',
+    purchaseDiscount: null,
+    discountMessage: '',
+  };
+  const channels = Array.isArray(row.purchaseChannel) ? row.purchaseChannel : [];
+  const channel = channels.length === 1 ? channels[0] : row.purchaseCostChannel;
+  if (!channels.length) result.discountMessage = '尚未分配采购渠道';
+  else if (!channel || !channels.includes(channel))
+    result.discountMessage = '请先选择已分配渠道中的一个成本计算渠道';
+  else if (!['FBA', 'FBM'].includes(row.shippingMode))
+    result.discountMessage = '请先选择发货模式 FBA 或 FBM';
+  else {
+    const option = options.find((entry) => entry.value === channel && entry.active !== false);
+    const discount = option?.[`${row.shippingMode.toLowerCase()}PurchaseDiscount`];
+    if (!decimal(discount))
+      result.discountMessage = `采购渠道“${channel}”未启用或尚未配置 ${row.shippingMode} 采购折扣`;
+    else {
+      result.purchaseDiscount = fixedDecimal(discount, 4);
+      result.discountMessage = `当前配置，结算时确定（${channel} · ${row.shippingMode}）`;
+    }
+  }
+  return result;
+}

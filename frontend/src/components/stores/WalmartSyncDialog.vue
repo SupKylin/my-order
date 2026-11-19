@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { storeApi } from '../../api/stores';
 import WalmartDetails from '../orders/WalmartDetails.vue';
+import BusinessDatePicker from '../BusinessDatePicker.vue';
 
 const props = defineProps({ store: { type: Object, required: true } });
 const emit = defineEmits(['close']);
@@ -13,6 +14,7 @@ const previewing = ref(false);
 const preview = ref(null);
 const now = new Date();
 const dates = ref([new Date(now.getTime() - 86400000), now]);
+const datePicker = ref(null);
 let timer;
 let loading = false;
 const labels = {
@@ -81,6 +83,7 @@ async function sync() {
 async function queryPreview() {
   if (previewing.value) return;
   if (!dates.value?.length) return ElMessage.warning('请选择预览时间范围');
+  if (datePicker.value && !datePicker.value.validate(dates.value)) return;
   previewing.value = true;
   try {
     preview.value = await storeApi.preview(props.store.id, {
@@ -197,7 +200,10 @@ onUnmounted(() => clearInterval(timer));
     </div>
     <el-divider>只读预览（不保存订单、不自动确认）</el-divider>
     <div class="sync-actions">
-      <el-date-picker
+      <BusinessDatePicker
+        ref="datePicker"
+        policy="walmartPreview"
+        required
         v-model="dates"
         type="datetimerange"
         range-separator="至"

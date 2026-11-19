@@ -33,3 +33,16 @@ test('偏好只接受主表已知列，拒绝重复、非法结构和超长输�
     { order: ['shopName', 'orderNumber', 'tax'], hidden: ['tax'] },
   );
 });
+
+test('停用售后列从可选列移除，是否采购售后只读且保留旧列数据定义', async () => {
+  const { fields } = await import('../src/fields.js');
+  const { orderColumns } = await import('../../frontend/src/components/orders/orderColumns.js');
+  const columns = orderColumns(fields);
+  const flag = columns.find((c) => c.key === 'afterSales');
+  assert.equal(flag.label, '是否采购售后');
+  assert.equal(flag.readOnly, true);
+  for (const key of ['afterSalesScreenshot', 'afterSalesResult', 'afterSalesResultScreenshot']) {
+    assert(!columns.some((c) => c.key === key));
+    assert(fields.some((f) => f.key === key && f.retired && f.readOnly));
+  }
+});

@@ -28,6 +28,39 @@ test('通知限定官方Webhook及合法站点，错误不回显密钥', () => {
   assert.throws(() => notificationSettings(webhook, 'http://example.test/path'));
 });
 
+test('新工单与回复仅展示采购渠道、不展示采购状态，兼容历史单渠道及空值', () => {
+  const base = {
+    ticketId: 1,
+    recordId: 2,
+    shopName: '测试店铺',
+    orderNumber: '123',
+    walmartSku: 'SKU',
+    actorName: '测试人员',
+    content: '售后内容',
+    imageCount: 0,
+    createdAt: '2026-11-07T00:00:00Z',
+  };
+  for (const kind of ['created', 'reply']) {
+    for (const [purchaseChannel, expected] of [
+      [['渠道A', '渠道B'], '渠道A / 渠道B'],
+      ['历史渠道', '历史渠道'],
+      ['["渠道A","渠道B"]', '渠道A / 渠道B'],
+      [null, '未分配'],
+      [[], '未分配'],
+      ['  ', '未分配'],
+    ]) {
+      for (const purchaseStatus of ['采购成功（已出跟踪号）', null, '', ' \t ']) {
+        const text = notificationContent(
+          { ...base, kind, purchaseChannel, purchaseStatus },
+          'http://example.test',
+        );
+        assert(text.includes(`采购渠道：${expected}\n`));
+        assert(!text.includes('采购状态：'));
+      }
+    }
+  }
+});
+
 test('完整中文及emoji按字节分段，重组不丢内容，多图保持顺序且保留工单链接', () => {
   const text = notificationContent(
     {
@@ -37,6 +70,8 @@ test('完整中文及emoji按字节分段，重组不丢内容，多图保持顺
       shopName: '店'.repeat(191),
       orderNumber: '1'.repeat(191),
       walmartSku: '商品'.repeat(191),
+      purchaseChannel: ['渠道A', '渠道B'],
+      purchaseStatus: '采购成功（已出跟踪号）',
       actorName: '人'.repeat(100),
       content: '售后😀'.repeat(3000),
       imageCount: 20,
@@ -54,6 +89,8 @@ test('完整中文及emoji按字节分段，重组不丢内容，多图保持顺
   );
   const joined = parts.map((p) => p.markdown_v2.content.replace(/^【[^\n]+】\n/, '')).join('');
   assert(joined.includes('售后😀'.repeat(3000)));
+  assert(joined.includes('采购渠道：渠道A / 渠道B'));
+  assert(!joined.includes('采购状态：'));
   assert(!joined.includes('\ufffd'));
   assert.deepEqual(
     parts.flatMap((p) => p.images),

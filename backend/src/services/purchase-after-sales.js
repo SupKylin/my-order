@@ -84,6 +84,7 @@ function summary(ticket) {
     createdAt: value.createdAt,
     lastActivityAt: value.lastActivityAt,
     completedAt: value.completedAt,
+    purchaseRefundAmount: value.purchaseRefundAmount ?? null,
     item: {
       id: item.id,
       shopName: item.shopName,
@@ -391,6 +392,8 @@ export async function changePurchaseAfterSaleStatus(id, input, user) {
       409,
     );
     assert(ticket.status !== input.status, '工单状态未发生变化', 409);
+    if (input.status === 'completed')
+      assert(ticket.purchaseRefundAmount != null, '请先填写并保存采购退款金额，无退款请填0');
     const now = new Date();
     await ticket.update(
       {
@@ -416,8 +419,62 @@ export async function changePurchaseAfterSaleStatus(id, input, user) {
   });
 }
 
+function refundAmount(value) {
+  assert(value === null || ['string', 'number'].includes(typeof value), '采购退款金额格式无效');
+  const text = value === null ? '' : String(value).trim();
+  if (!text) return null;
+  assert(/^\d{1,16}(?:\.\d{1,2})?$/.test(text), '采购退款金额须为非负数字，最多16位整数、2位小数');
+  const [whole, fraction = ''] = text.split('.');
+  return `${BigInt(whole)}.${fraction.padEnd(2, '0')}`;
+}
+
+export async function savePurchaseRefundAmount(id, input, user) {
+  return db.transaction(async (transaction) => {
+    const { ticket, item } = await findTicket(id, user, transaction, true);
+    assertOrderEditable(item);
+    assert(ticket.status === 'open', '工单已结束，请先重新打开再修改采购退款金额', 409);
+    assert(
+      Number.isSafeInteger(input?.version) && input.version === ticket.version,
+      '工单已有新记录或状态变化，请刷新后再操作',
+      409,
+    );
+    const amount = refundAmount(input.purchaseRefundAmount);
+    const before = ticket.purchaseRefundAmount;
+    if (amount !== before) {
+      const now = new Date();
+      await ticket.update(
+        { purchaseRefundAmount: amount, lastActivityAt: now, version: ticket.version + 1 },
+        { transaction },
+      );
+      await AuditLog.create(
+        {
+          userId: user.id,
+          action: 'purchase_after_sale',
+          entityId: String(ticket.id),
+          details: {
+            resource: 'purchase-after-sales',
+            itemId: item.id,
+            kind: 'refund_amount',
+            content: '修改采购退款金额',
+            actorName: user.displayName,
+            before: { purchaseRefundAmount: before },
+            after: { purchaseRefundAmount: amount },
+          },
+        },
+        { transaction },
+      );
+    }
+    return {
+      id: ticket.id,
+      purchaseRefundAmount: ticket.purchaseRefundAmount,
+      version: ticket.version,
+      lastActivityAt: ticket.lastActivityAt,
+    };
+  });
+}
+
 export async function markSupplierFeedback(id, user) {
-  assert(['admin', 'purchasing'].includes(user.role), '仅最高管理员和采购人员可以标记已反馈', 403);
+  requirePermission(user, 'procurement');
   return db.transaction(async (transaction) => {
     const { ticket, item } = await findTicket(id, user, transaction, true);
     assertOrderEditable(item);

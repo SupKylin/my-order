@@ -1,6 +1,7 @@
 import { validateTemplate } from '../validation.js';
 import { db, ImportTemplate } from '../models.js';
 import { assert } from '../errors.js';
+import { PURCHASE_AFTER_SALE_FIELDS, fieldMap } from '../fields.js';
 
 /** 锁定来源模板，连续/并发复制时生成独立副本，沿用当前模板校验和解绑规则。 */
 export async function copyTemplate(id) {
@@ -27,7 +28,7 @@ export async function copyTemplate(id) {
 }
 
 /** 模板仅保存映射和表头行；旧绑定列保留兼容数据库，但不再参与导入。 */
-export async function templatePayload(input) {
+export async function templatePayload(input, { forImport = false } = {}) {
   return {
     ...validateTemplate({
       ...input,
@@ -37,7 +38,11 @@ export async function templatePayload(input) {
             // 兼容旧模板：停用目标保留源表头，避免阻断其他采购字段导入。
             ['purchaseChannel', 'supervisorConfirmed', 'purchaseLimit', 'priceFactor'].includes(
               mapping?.field,
-            )
+            ) ||
+            (!forImport &&
+              (PURCHASE_AFTER_SALE_FIELDS.has(mapping?.field) ||
+                fieldMap[mapping?.field]?.importDisabled ||
+                fieldMap[mapping?.field]?.computed))
               ? { ...mapping, field: '' }
               : mapping,
           )

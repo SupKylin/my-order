@@ -30,7 +30,9 @@ const duplicateHeaders = computed(() =>
     (header) => columns.value.filter((column) => column.header.trim() === header).length > 1,
   ),
 );
-const fieldOptions = computed(() => props.allowedFields || meta.fields);
+const fieldOptions = computed(() =>
+  (props.allowedFields || meta.fields).filter((field) => !field.importDisabled),
+);
 const availableColumns = computed(() =>
   sourceHeaders.value.filter(
     (header) =>

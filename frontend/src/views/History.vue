@@ -33,7 +33,7 @@ onMounted(async () => {
     title="导入结果"
     :deletable="false"
     placeholder="搜索导入文件名"
-    description="只读查看导入结果；普通账号仅查看自己的记录。提交请在导入采购页面完成。"
+    description="只读查看导入结果；管理员、主管查看全部，采购、运营仅查看自己。提交请在导入采购页面完成。"
   >
     <el-table-column label="文件名" prop="filename" min-width="230" /><el-table-column
       label="状态"

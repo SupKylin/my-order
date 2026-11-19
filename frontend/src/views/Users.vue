@@ -60,7 +60,7 @@ onMounted(async () => {
     resource="users"
     title="账号管理"
     placeholder="搜索登录账号、成员姓名"
-    description="当前角色用于人员区分，所有启用账号均可使用全部业务功能。"
+    description="角色决定菜单和操作权限；运营仅访问本人所属店铺，主管不开放账号、采购渠道及采购状态维护。"
   >
     <template #actions
       ><el-button type="primary" :icon="Plus" @click="edit(null)">创建账号</el-button></template

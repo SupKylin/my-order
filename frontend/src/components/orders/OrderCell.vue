@@ -6,6 +6,7 @@ import { CHINA_UTC_OFFSET } from '../../utils/businessTime';
 import { shippingRemainingHours, shippingWarningLabels } from '../../utils/shippingWarning';
 import { purchaseWarning, confirmationTime } from '../../utils/purchaseWarning';
 import { imageValues as parseImageValues } from '../../utils/image-values';
+import AfterSaleLink from './AfterSaleLink.vue';
 const props = defineProps({
   row: { type: Object, required: true },
   field: { type: Object, required: true },
@@ -54,18 +55,7 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
       :aria-label="`价格系数${factorLabels[row.priceFactorLevel]}`"
       >{{ factorLabels[row.priceFactorLevel] }}</span
     >
-    <router-link
-      v-if="row.purchaseAfterSale"
-      :to="{ path: '/purchase-after-sales', query: { ticket: row.purchaseAfterSale.id } }"
-      @click.stop
-    >
-      <el-tag
-        :type="row.purchaseAfterSale.status === 'completed' ? 'success' : 'warning'"
-        size="small"
-        >{{ row.purchaseAfterSale.status === 'completed' ? '售后完毕' : '采购售后' }}</el-tag
-      >
-    </router-link>
-    <span v-else-if="row.afterSales === '是'" class="after-sales-badge">售后</span>
+    <AfterSaleLink :ticket="row.purchaseAfterSale" />
     <el-tag
       v-if="row.addressRisk"
       type="danger"
@@ -92,6 +82,29 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
       >{{ status }}</el-tag
     >
   </template>
+  <span
+    v-else-if="['walmartRefundAmount', 'purchaseRefundAmount'].includes(field.key)"
+    :title="
+      row[field.key === 'walmartRefundAmount' ? 'walmartRefundMessage' : 'purchaseRefundMessage']
+    "
+    :class="{ muted: value == null }"
+    >{{ money(value) }}</span
+  >
+  <span
+    v-else-if="['commissionRate', 'commissionAmount', 'orderProfit'].includes(field.key)"
+    :title="row.profitMessage"
+    :class="{ muted: value == null }"
+  >
+    {{
+      value == null
+        ? field.key === 'orderProfit'
+          ? '未计算'
+          : '—'
+        : field.key === 'commissionRate'
+          ? `${value}%`
+          : money(value)
+    }}
+  </span>
   <template v-else-if="field.type === 'image'">
     <div v-if="imageList.length" class="order-cell-images">
       <el-image
@@ -143,6 +156,11 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
   <template v-else-if="['reviewStatus', 'supplierAssignmentStatus'].includes(field.key)">
     <el-tag :type="value === '不可分配' ? 'danger' : value ? 'success' : 'info'" size="small">
       {{ value || (field.key === 'reviewStatus' ? '未审核' : '未分配') }}
+    </el-tag>
+  </template>
+  <template v-else-if="field.key === 'afterSales'">
+    <el-tag :type="row.purchaseAfterSale ? 'warning' : 'info'" size="small">
+      {{ row.purchaseAfterSale ? '是' : '否' }}
     </el-tag>
   </template>
   <template v-else-if="field.key === 'allocatable'">

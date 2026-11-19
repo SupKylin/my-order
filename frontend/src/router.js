@@ -9,6 +9,11 @@ const router = createRouter({
     { path: '/', redirect: '/home' },
     { path: '/home', component: () => import('./views/Home.vue'), meta: { title: '首页' } },
     {
+      path: '/purchase-statistics',
+      component: () => import('./views/PurchaseStatistics.vue'),
+      meta: { title: '采购统计汇总' },
+    },
+    {
       path: '/purchase-after-sales',
       component: () => import('./views/PurchaseAfterSales.vue'),
       meta: { title: '采购售后' },

@@ -13,6 +13,10 @@ const orderKeys = [
   'returnStatuses',
   'fulfillmentParty',
   'orderAmount',
+  'walmartRefundAmount',
+  'commissionRate',
+  'commissionAmount',
+  'orderProfit',
   'tax',
 ];
 const purchaseKeys = [
@@ -26,6 +30,8 @@ const purchaseKeys = [
   'purchaseLinkAmount',
   'purchaseAmount',
   'purchaseCost',
+  'purchaseRefundAmount',
+  'disputeSuccessAmount',
   'purchaseDiscount',
   'purchaseCostChannel',
   'purchaseLimit',
@@ -57,6 +63,7 @@ const widths = {
   purchaseLinkAmount: 160,
 };
 export function orderColumns(fields) {
+  fields = fields.filter((field) => !field.retired);
   const byKey = new Map(fields.map((field) => [field.key, field]));
   byKey.set('returnStatuses', {
     key: 'returnStatuses',

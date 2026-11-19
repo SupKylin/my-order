@@ -3,7 +3,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile, writeFile, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../config.js';
-import { db, AfterSaleNotification as Notification, Order } from '../models.js';
+import { db, AfterSaleNotification as Notification, Order, Purchase } from '../models.js';
+import { storedChannels } from '../lib/channels.js';
 
 const MAX_ATTEMPTS = 5;
 const INTERVAL_MS = 4000; // 单实例串行发送，每分钟最多15次（含重试）。
@@ -43,6 +44,7 @@ export function notificationContent(
     shopName,
     orderNumber,
     walmartSku,
+    purchaseChannel,
     actorName,
     content,
     imageCount,
@@ -63,6 +65,12 @@ export function notificationContent(
     `店铺：${shopName}`,
     `订单号：${orderNumber}`,
     `Walmart SKU：${walmartSku}`,
+    `采购渠道：${
+      (storedChannels(purchaseChannel) || [])
+        .map((channel) => channel.trim())
+        .filter(Boolean)
+        .join(' / ') || '未分配'
+    }`,
     `发送人：${actorName}`,
     `时间：${time}（北京）`,
     `内容：${content}`,
@@ -190,6 +198,13 @@ export async function queueAfterSaleNotification(ticket, item, record, kind, tra
     return;
   }
   const order = await Order.findByPk(item.orderId, { attributes: ['orderNumber'], transaction });
+  // 与工单记录同事务读取并保存快照，排队及重试不重新读取后续修改的采购信息。
+  const purchase = await Purchase.findOne({
+    where: { itemId: item.id },
+    attributes: ['purchaseChannel'],
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
   const content = notificationContent(
     {
       ticketId: ticket.id,
@@ -198,6 +213,7 @@ export async function queueAfterSaleNotification(ticket, item, record, kind, tra
       shopName: item.shopName,
       orderNumber: order.orderNumber,
       walmartSku: item.walmartSku,
+      purchaseChannel: purchase?.purchaseChannel,
       actorName: record.actorName,
       content: record.content,
       imageCount: record.images.length,

@@ -6,6 +6,19 @@ export const discountInputs = {
   currentExchangeRate: '当前实时汇率',
   taxMultiplier: '税金',
 };
+export const shippingModes = ['FBA', 'FBM'];
+export const modeDiscountKey = (mode, key) =>
+  `${mode.toLowerCase()}${key[0].toUpperCase()}${key.slice(1)}`;
+export function modeChannelDiscount(input, mode) {
+  const values = channelDiscount(
+    Object.fromEntries(
+      Object.keys(discountInputs).map((key) => [key, input[modeDiscountKey(mode, key)]]),
+    ),
+  );
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [modeDiscountKey(mode, key), value]),
+  );
+}
 const blank = (value) => value == null || String(value).trim() === '';
 const bounded = (text, label) => {
   assert(text.split('.')[0].length <= 16, `${label}计算结果超出允许范围`);

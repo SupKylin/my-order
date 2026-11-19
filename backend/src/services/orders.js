@@ -1,6 +1,7 @@
+import { enrichSellerRefunds } from './seller-refund.js';
 import { Op, fn, col, literal, where as sqlWhere } from 'sequelize';
 import { db, Order, OrderItem, Purchase, AuditLog, itemInclude, serializeItem } from '../models.js';
-import { fields } from '../fields.js';
+import { fields, PURCHASE_AFTER_SALE_FIELDS } from '../fields.js';
 import { addressKey } from '../lib/address-key.js';
 import { AppError, assert } from '../errors.js';
 import { validatePatch, normalizeValue } from '../validation.js';
@@ -16,7 +17,7 @@ import { procurementStatePatch } from '../lib/procurement-state.js';
 import { sameFieldValue } from '../lib/order-concurrency.js';
 import { purchaseAssignmentSummary } from './purchase-assignment-summary.js';
 import { DERIVED_PURCHASE_FIELDS, derivePurchaseFields } from '../lib/purchase-derived.js';
-import { purchaseCostPatch } from './purchase-cost.js';
+import { purchaseCostPatch, settlementCommissionPatch } from './purchase-cost.js';
 import {
   purchaseTimerPatch,
   PURCHASE_TRACKING_PATTERN,
@@ -27,6 +28,7 @@ export async function getItem(id, user) {
   const item = await OrderItem.findByPk(id, { include: itemInclude });
   assert(item, '商品明细不存在', 404);
   await assertItemAccess(item, user);
+  await enrichSellerRefunds([item]);
   return serializeItem(item);
 }
 
@@ -55,12 +57,14 @@ export function splitPatch(patch) {
   const item = {},
     purchase = {};
   for (const f of fields)
-    if (f.key !== 'orderNumber' && Object.hasOwn(patch, f.key))
+    if (f.key !== 'orderNumber' && !f.computed && Object.hasOwn(patch, f.key))
       (f.group === 'purchase' ? purchase : item)[f.key] = patch[f.key];
   return { item, purchase };
 }
 /** target 为预览锁定的明细，null 表示新增；未传时保留人工新增的重复检查。 */
 export async function upsertImported(patch, transaction, actor, target = undefined, options = {}) {
+  patch = { ...patch };
+  for (const field of fields) if (field.importDisabled) delete patch[field.key];
   const [order] = await Order.findOrCreate({
     where: { orderNumber: patch.orderNumber },
     transaction,
@@ -106,6 +110,14 @@ export async function upsertImported(patch, transaction, actor, target = undefin
         ...parts.purchase,
         ...(!options.walmartSync
           ? await purchaseCostPatch(procurement, parts.purchase, transaction)
+          : {}),
+        ...(!options.walmartSync
+          ? await settlementCommissionPatch(
+              procurement,
+              parts.purchase,
+              mergedItem.shopName,
+              transaction,
+            )
           : {}),
         ...derivePurchaseFields({
           orderAmount: mergedItem.orderAmount,
@@ -207,8 +219,12 @@ export function buildFilters(query, now = Date.now(), user) {
       sqlWhere(fn('UPPER', fn('TRIM', col('OrderItem.fulfillmentParty'))), { [Op.in]: values }),
     ];
   }
-  for (const key of ['settlement', 'allocatable', 'afterSales', 'shippingMode'])
+  for (const key of ['settlement', 'allocatable', 'shippingMode'])
     if (query[key]) purchaseWhere[key] = String(query[key]);
+  if (query.afterSales !== undefined && query.afterSales !== '') {
+    assert(['是', '否'].includes(query.afterSales), '是否采购售后筛选无效');
+    where['$purchaseAfterSale.id$'] = query.afterSales === '是' ? { [Op.ne]: null } : null;
+  }
   if (query.cancellationIntent !== undefined && query.cancellationIntent !== '') {
     assert(['requested', 'not_requested'].includes(query.cancellationIntent), '取消申请筛选无效');
     // 与红色提示一致：已确认且有取消意向。反向筛选包含其他状态和空状态。
@@ -381,25 +397,29 @@ export function buildFilters(query, now = Date.now(), user) {
     );
     purchaseWhere.purchaseAssignedAt = range;
   }
-  if (query.shipStartDate || query.shipEndDate) {
+  for (const [field, start, end, label] of [
+    ['platformShipDate', 'shipStartDate', 'shipEndDate', '平台发货'],
+    ['platformDeliveryDate', 'deliveryStartDate', 'deliveryEndDate', '平台到货'],
+  ]) {
+    if (!query[start] && !query[end]) continue;
     const dates = {};
-    for (const key of ['shipStartDate', 'shipEndDate']) {
+    for (const key of [start, end]) {
       if (!query[key]) continue;
       try {
         dates[key] = normalizeValue({ type: 'date' }, query[key]);
         assert(dates[key], '日期为空');
       } catch {
-        throw new AppError(400, '平台发货日期筛选格式无效');
+        throw new AppError(400, `${label}日期筛选格式无效`);
       }
     }
     assert(
-      !dates.shipStartDate || !dates.shipEndDate || dates.shipStartDate <= dates.shipEndDate,
-      '平台发货开始日期不能晚于结束日期',
+      !dates[start] || !dates[end] || dates[start] <= dates[end],
+      `${label}开始日期不能晚于结束日期`,
     );
     // DATEONLY 两端包含，无需浏览器或服务器时区转换。
-    where.platformShipDate = {};
-    if (dates.shipStartDate) where.platformShipDate[Op.gte] = dates.shipStartDate;
-    if (dates.shipEndDate) where.platformShipDate[Op.lte] = dates.shipEndDate;
+    where[field] = {};
+    if (dates[start]) where[field][Op.gte] = dates[start];
+    if (dates[end]) where[field][Op.lte] = dates[end];
   }
   if (query.shippingWarning) {
     assert(['orange', 'red'].includes(query.shippingWarning), '发货预警筛选无效');
@@ -514,7 +534,7 @@ export async function listOrders(query, user) {
   return {
     serverNow: new Date().toISOString(),
     purchaseAssignmentSummary: await purchaseAssignmentSummary(user, now),
-    rows: result.rows.map(serializeItem),
+    rows: (await enrichSellerRefunds(result.rows)).map(serializeItem),
     total: result.count,
     page,
     pageSize,
@@ -526,7 +546,17 @@ export async function listOrders(query, user) {
 }
 /** 人工编辑允许显式清空字段，与导入时跳过空白的策略不同。 */
 export async function editItem(id, input, user) {
+  assert(
+    !Object.keys(input.fields || {}).some(
+      (key) => fields.find((field) => field.key === key)?.computed,
+    ),
+    '佣金、退款及利润由系统读取或计算，不能手工修改',
+  );
   assert(Number.isInteger(input.version), '缺少数据版本，请刷新后重试');
+  assert(
+    !Object.keys(input.fields || {}).some((key) => PURCHASE_AFTER_SALE_FIELDS.has(key)),
+    '采购售后信息请在采购售后工单中维护，不能修改订单售后字段',
+  );
   await db.transaction(async (t) => {
     const item = await OrderItem.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE });
     assert(item, '记录不存在', 404);
@@ -559,7 +589,8 @@ export async function editItem(id, input, user) {
     });
     for (const key of ['purchaseStatus', 'purchaseChannel']) {
       if (!Object.hasOwn(patch, key)) continue;
-      if (!sameFieldValue(key, currentPurchase?.[key], patch[key])) requirePermission(user, key);
+      if (!sameFieldValue(key, currentPurchase?.[key], patch[key]))
+        requirePermission(user, 'procurement');
       // 兼容旧表单携带未改变的字段，不让只读字段参与覆盖或冲突检查。
       else if (user.role === 'operations') delete patch[key];
     }
@@ -569,7 +600,7 @@ export async function editItem(id, input, user) {
       const conflicts = [];
       const checkedKeys = new Set(Object.keys(patch));
       if (
-        ['settlement', 'purchaseAmount', 'purchaseCostChannel'].some((key) =>
+        ['settlement', 'purchaseAmount', 'purchaseCostChannel', 'shippingMode'].some((key) =>
           Object.hasOwn(patch, key),
         )
       ) {
@@ -579,6 +610,7 @@ export async function editItem(id, input, user) {
           'purchaseCostChannel',
           'purchaseChannel',
           'purchaseDiscount',
+          'shippingMode',
         ]) {
           // 新表单核对计算依赖；旧客户端缺依赖快照时按版本保护。
           if (Object.hasOwn(input.baseFields, key)) checkedKeys.add(key);
@@ -674,6 +706,12 @@ export async function editItem(id, input, user) {
         purchaseTimerPatch(currentPurchase, {
           ...parts.purchase,
           ...(await purchaseCostPatch(currentPurchase, parts.purchase, t)),
+          ...(await settlementCommissionPatch(
+            currentPurchase,
+            parts.purchase,
+            mergedItem.shopName,
+            t,
+          )),
           ...derivePurchaseFields({
             orderAmount: mergedItem.orderAmount,
             tax: mergedItem.tax,
@@ -693,11 +731,11 @@ export async function editItem(id, input, user) {
       { transaction: t },
     );
   });
-  return serializeItem(await OrderItem.findByPk(id, { include: itemInclude }));
+  return getItem(id, user);
 }
 /** 多选渠道覆盖原值；批量分配要么全部成功，要么整批回滚。 */
 export async function assignItems(input, user) {
-  requirePermission(user, 'purchaseChannel');
+  requirePermission(user, 'procurement');
   const entries = input?.items;
   assert(
     Array.isArray(entries) && entries.length > 0 && entries.length <= 500,
@@ -761,7 +799,7 @@ export async function updateOrderStatus(input, user) {
 }
 
 export async function updatePurchaseStatus(input, user) {
-  requirePermission(user, 'purchaseStatus');
+  requirePermission(user, 'procurement');
   return updateBatchStatus(input, user, 'purchaseStatus', '采购状态');
 }
 

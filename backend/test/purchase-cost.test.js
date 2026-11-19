@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { channelDiscount, purchaseCost } from '../src/lib/channel-discount.js';
-import { discountPreview, costPreview } from '../../frontend/src/utils/purchaseCost.js';
+import {
+  discountPreview,
+  costPreview,
+  currentFinanceConfig,
+} from '../../frontend/src/utils/purchaseCost.js';
 
 test('采购折扣按直接税金乘数计算，四舍五入4位；采购成本2位且前后端预览一致', () => {
   const input = { channelExchangeRate: '7.2', currentExchangeRate: '7.3', taxMultiplier: '1.08' };
@@ -43,4 +47,60 @@ test('配置最多两位小数、分母不可为0、不允许半配置，结果�
   assert.equal(channelDiscount({}).purchaseDiscount, null);
   for (const amount of ['', '待定', '-1', 'NaN', '10000000000000000'])
     assert.throws(() => purchaseCost('1', amount));
+});
+
+test('未结算可查看佣金与对应模式折扣，采购金额为空也可参考，不写入快照', () => {
+  const row = {
+    storeCommissionRate: '12',
+    purchaseChannel: ['XB'],
+    shippingMode: 'FBM',
+    settlement: null,
+    purchaseAmount: null,
+    commissionRate: null,
+    purchaseDiscount: null,
+  };
+  const options = [{ value: 'XB', fbaPurchaseDiscount: '0.8000', fbmPurchaseDiscount: '0.7795' }];
+  const before = structuredClone(row);
+  const result = currentFinanceConfig(row, options);
+  assert.equal(result.commissionRate, '12.00');
+  assert.equal(result.purchaseDiscount, '0.7795');
+  assert.match(result.discountMessage, /当前配置，结算时确定（XB · FBM）/);
+  assert.equal(
+    currentFinanceConfig({ ...row, shippingMode: 'FBA' }, options).purchaseDiscount,
+    '0.8000',
+  );
+  assert.deepEqual(row, before);
+});
+
+test('多渠道明确选择，缺少渠道/模式/配置时不给猜测折扣，0为有效配置', () => {
+  const options = [{ value: 'A', fbaPurchaseDiscount: '0', fbmPurchaseDiscount: '0.8' }];
+  const row = { storeCommissionRate: '0', purchaseChannel: ['A', 'B'], shippingMode: 'FBA' };
+  assert.equal(currentFinanceConfig(row, options).commissionRate, '0.00');
+  assert.equal(currentFinanceConfig(row, options).purchaseDiscount, null);
+  assert.match(currentFinanceConfig(row, options).discountMessage, /选择.*成本计算渠道/);
+  assert.equal(
+    currentFinanceConfig({ ...row, purchaseCostChannel: 'A' }, options).purchaseDiscount,
+    '0.0000',
+  );
+  for (const changes of [
+    { purchaseChannel: [] },
+    { shippingMode: null },
+    { shippingMode: 'WFS' },
+    { purchaseCostChannel: '其他' },
+    { purchaseCostChannel: 'B' },
+  ]) {
+    const result = currentFinanceConfig({ ...row, purchaseCostChannel: 'A', ...changes }, options);
+    assert.equal(result.purchaseDiscount, null);
+    assert.ok(result.discountMessage);
+  }
+  assert.equal(
+    currentFinanceConfig({ ...row, purchaseCostChannel: 'A' }, [{ ...options[0], active: false }])
+      .purchaseDiscount,
+    null,
+  );
+  for (const value of [null, '', ' ', 'invalid', '-1', '101'])
+    assert.equal(
+      currentFinanceConfig({ ...row, storeCommissionRate: value }, options).commissionRate,
+      null,
+    );
 });

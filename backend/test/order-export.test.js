@@ -12,6 +12,39 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+test('两类导出均保留平台到货日期范围，不受当前分页影响', async (t) => {
+  const queries = [];
+  t.mock.method(OrderItem, 'count', async (query) => {
+    queries.push(query);
+    return 1;
+  });
+  t.mock.method(OrderItem, 'findAll', async (query) => {
+    queries.push(query);
+    return [{ id: 1, order: { orderNumber: 'DELIVERY-DATE' }, purchase: {} }];
+  });
+  t.mock.method(DictionaryOption, 'findAll', async () => []);
+  for (const purchaseTemplate of [false, true]) {
+    const response = new PassThrough();
+    response.setHeader = () => {};
+    response.resume();
+    const complete = finished(response);
+    await exportOrders(
+      { filters: { deliveryStartDate: '2026-11-01', deliveryEndDate: '2026-11-16', page: 3 } },
+      response,
+      purchaseTemplate,
+    );
+    await complete;
+  }
+  assert.equal(queries.length, 4);
+  for (const query of queries) {
+    assert.deepEqual(query.where.platformDeliveryDate, {
+      [Op.gte]: '2026-11-01',
+      [Op.lte]: '2026-11-16',
+    });
+    assert.equal(query.offset, undefined);
+  }
+});
+
 test('订单导出嵌入官方图片缩略图，相同图片仅下载一次，下载失败保留原图链接', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'export-images-test-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

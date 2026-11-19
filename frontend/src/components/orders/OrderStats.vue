@@ -25,9 +25,9 @@ const cards = [
     valueKey: 'inProgress',
   },
   {
-    label: '售后跟进',
+    label: '采购售后',
     icon: Warning,
-    caption: '已标记需要售后',
+    caption: '已创建采购售后工单',
     kind: 'afterSales',
     valueKey: 'afterSales',
   },

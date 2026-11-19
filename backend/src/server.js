@@ -8,6 +8,7 @@ import { startThumbnailWarmer } from './services/thumbnail-warmer.js';
 import { startAuditCleanup } from './services/audit.js';
 import { startHomeScheduler } from './services/home/index.js';
 import { startAfterSaleNotifications } from './services/wecom-after-sales.js';
+import { startPurchaseStatisticsScheduler } from './services/purchase-statistics/index.js';
 try {
   if (config.secret.length < 32) throw new Error('请先配置 .env 中的 SESSION_SECRET');
   await db.authenticate();
@@ -31,6 +32,7 @@ try {
   const stopAudit = startAuditCleanup();
   const stopHome = startHomeScheduler();
   const stopNotifications = startAfterSaleNotifications();
+  const stopPurchaseStatistics = startPurchaseStatisticsScheduler();
   const stop = () =>
     server.close(async () => {
       clearInterval(cleanup);
@@ -39,6 +41,7 @@ try {
       await stopThumbnails();
       await stopAudit();
       await stopHome();
+      await stopPurchaseStatistics();
       await db.close();
       process.exit(0);
     });

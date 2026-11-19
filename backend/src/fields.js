@@ -28,7 +28,12 @@ export const CHANNELS = [
   'Ebay-2（0902）/恩恩采购表（eBay）',
   'MY采购表（eBay）',
 ];
-export const ROLES = { operations: '运营', purchasing: '采购', admin: '最高权限总账号' };
+export const ROLES = {
+  operations: '运营',
+  purchasing: '采购',
+  admin: '最高权限总账号',
+  supervisor: '主管',
+};
 const f = (key, label, group, type = 'text', extra = {}) => ({ key, label, group, type, ...extra });
 export const fields = [
   f('shopName', '店铺名', 'order'),
@@ -44,6 +49,21 @@ export const fields = [
   f('operationsNote', '运营备注', 'order', 'textarea'),
   f('tax', '税费', 'order', 'money'),
   f('orderAmount', '订单金额', 'order', 'money'),
+  f('walmartRefundAmount', 'Walmart退款金额', 'order', 'money', {
+    readOnly: true,
+    computed: true,
+  }),
+  f('purchaseRefundAmount', '采购退款金额', 'purchase', 'money', {
+    readOnly: true,
+    computed: true,
+  }),
+  f('disputeSuccessAmount', '争议成功金额', 'purchase', 'money', {
+    maxDecimals: 2,
+    importDisabled: true,
+  }),
+  f('commissionRate', '结算佣金率（%）', 'order', 'decimal', { readOnly: true, computed: true }),
+  f('commissionAmount', '佣金金额', 'order', 'money', { readOnly: true, computed: true }),
+  f('orderProfit', '订单利润', 'order', 'money', { readOnly: true, computed: true }),
   f('productName', '商品名称', 'product'),
   f('productSpecification', '商品规格', 'product', 'textarea'),
   f('walmartSku', 'WalmartSku', 'product'),
@@ -78,16 +98,30 @@ export const fields = [
   f('trackingScreenshot', '物流截图', 'purchase', 'image'),
   f('purchaseNote', '采购备注', 'purchase', 'textarea'),
   f('followupNote', '跟单备注', 'purchase', 'textarea'),
-  f('afterSales', '是否售后', 'purchase', 'select', { options: ['是', '否'] }),
-  f('afterSalesScreenshot', '售后截图', 'purchase', 'image'),
-  f('afterSalesResult', '售后结果', 'purchase', 'select', { options: ['已结束'] }),
-  f('afterSalesResultScreenshot', '售后结果截图', 'purchase', 'image'),
+  f('afterSales', '是否采购售后', 'purchase', 'select', { options: ['是', '否'], readOnly: true }),
+  // 保留数据库字段及完整导出；订单页面和采购导入不再维护历史售后字段。
+  f('afterSalesScreenshot', '售后截图', 'purchase', 'image', { retired: true, readOnly: true }),
+  f('afterSalesResult', '售后结果', 'purchase', 'select', {
+    options: ['已结束'],
+    retired: true,
+    readOnly: true,
+  }),
+  f('afterSalesResultScreenshot', '售后结果截图', 'purchase', 'image', {
+    retired: true,
+    readOnly: true,
+  }),
   f('settlement', '结算情况', 'purchase', 'select', { options: ['已结算', '未结算'] }),
   f('purchaseCostChannel', '成本计算渠道', 'purchase'),
   f('purchaseDiscount', '采购折扣', 'purchase', 'decimal', { readOnly: true }),
   f('purchaseCost', '采购成本', 'purchase', 'money', { readOnly: true }),
 ];
 export const fieldMap = Object.fromEntries(fields.map((f) => [f.key, f]));
+export const PURCHASE_AFTER_SALE_FIELDS = new Set([
+  'afterSales',
+  'afterSalesScreenshot',
+  'afterSalesResult',
+  'afterSalesResultScreenshot',
+]);
 // 旧模板和历史导入记录仍可能引用拆分前的两个物流截图字段。
 fieldMap.trackingScreenshot1 = fieldMap.trackingScreenshot;
 fieldMap.trackingScreenshot2 = fieldMap.trackingScreenshot;

@@ -5,6 +5,11 @@ export const DERIVED_PURCHASE_FIELDS = new Set([
   'priceFactor',
   'purchaseDiscount',
   'purchaseCost',
+  'commissionRate',
+  'commissionAmount',
+  'orderProfit',
+  'walmartRefundAmount',
+  'purchaseRefundAmount',
 ]);
 
 export function parseDecimal(value) {

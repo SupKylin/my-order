@@ -15,6 +15,7 @@ import {
 } from '../models.js';
 import { auditContext, auditCutoff, safeAuditValue } from '../lib/audit-context.js';
 import { assert } from '../errors.js';
+import { canViewAllActivity } from '../permissions.js';
 
 let installed = false;
 const pending = new Set();
@@ -175,7 +176,7 @@ export function auditRequests(req, res, next) {
 function logWhere(user) {
   return {
     createdAt: { [Op.gte]: auditCutoff() },
-    ...(user.role === 'admin' ? {} : { userId: user.id }),
+    ...(canViewAllActivity(user) ? {} : { userId: user.id }),
   };
 }
 export async function listAudit(query, user) {
@@ -192,7 +193,7 @@ export async function listAudit(query, user) {
   }
   if (query.userId) {
     assert(
-      user.role === 'admin' || Number(query.userId) === user.id,
+      canViewAllActivity(user) || Number(query.userId) === user.id,
       '只能查看自己的操作日志',
       403,
     );

@@ -84,7 +84,9 @@ export function workbookInfo(workbook, sheetName, headerRow = 1) {
         column: i,
         header: name,
         samples,
-        suggestedField: exact?.key || aliases[name.toLowerCase().replace(/\s/g, '')] || '',
+        suggestedField: exact?.importDisabled
+          ? ''
+          : exact?.key || aliases[name.toLowerCase().replace(/\s/g, '')] || '',
       });
   }
   return {

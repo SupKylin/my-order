@@ -5,6 +5,7 @@ import { api } from '../api/http';
 import { useAuth } from '../stores/auth';
 import { useMeta } from '../stores/meta';
 import { fmtDate } from '../utils/format';
+import { canViewAllActivity } from '../utils/permissions';
 import { auditActions as actions, auditResource } from '../utils/auditLabels';
 const History = defineAsyncComponent(() => import('./History.vue'));
 const auth = useAuth(),
@@ -15,7 +16,7 @@ const tab = ref('audit'),
   users = ref([]);
 const filters = computed(() => [
   { key: 'action', label: '全部操作类型', options: Object.entries(actions) },
-  ...(auth.user?.role === 'admin'
+  ...(canViewAllActivity(auth.user?.role)
     ? [
         {
           key: 'userId',
@@ -67,7 +68,7 @@ async function view(row) {
   }
 }
 onMounted(async () => {
-  if (auth.user?.role === 'admin') users.value = await api.get('/users');
+  if (canViewAllActivity(auth.user?.role)) users.value = await api.get('/order-owners');
 });
 </script>
 
@@ -88,7 +89,7 @@ onMounted(async () => {
       :deletable="false"
       :extra-filters="filters"
       placeholder="搜索对象ID或操作代码"
-      description="仅保留最近两个月；日志自动生成，只读。普通账号仅查看自己的操作。"
+      description="仅保留最近两个月；日志自动生成，只读。管理员、主管查看全部，采购、运营仅查看自己的操作。"
     >
       <el-table-column label="操作时间" min-width="175"
         ><template #default="{ row }">{{ fmtDate(row.createdAt, true) }}</template></el-table-column

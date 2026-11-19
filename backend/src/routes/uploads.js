@@ -4,6 +4,7 @@ import { imageUpload, excelUpload } from '../middleware/upload.js';
 import { saveImage, saveExcel } from '../services/storage.js';
 import { inspectExcel, getExcelUpload } from '../services/imports.js';
 import { assert } from '../errors.js';
+import { canViewAllActivity } from '../permissions.js';
 
 export function createUploadsRouter() {
   const router = Router();
@@ -24,7 +25,7 @@ export function createUploadsRouter() {
   router.get('/excel/:id/inspect', async (req, res) => {
     const upload = await getExcelUpload(req.params.id);
     assert(
-      req.user.role === 'admin' || upload.uploadedBy === req.user.id,
+      canViewAllActivity(req.user) || upload.uploadedBy === req.user.id,
       '无权查看该上传文件',
       403,
     );

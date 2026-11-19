@@ -19,4 +19,5 @@ export const afterSalesApi = {
   reply: (id, body) => api.post(`/purchase-after-sales/${id}/records`, body),
   status: (id, body) => api.post(`/purchase-after-sales/${id}/status`, body),
   feedback: (id) => api.post(`/purchase-after-sales/${id}/supplier-feedback`),
+  refundAmount: (id, body) => api.put(`/purchase-after-sales/${id}/refund-amount`, body),
 };

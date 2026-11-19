@@ -6,6 +6,44 @@ import { OrderItem } from '../src/models.js';
 import { shippingWindow } from '../src/lib/shipping-window.js';
 import { shippingWarning } from '../../frontend/src/utils/shippingWarning.js';
 
+test('平台到货日期包含起止日期，支持单边、清空，与发货日期等条件取交集', () => {
+  const query = {
+    deliveryStartDate: '2026-11-01',
+    deliveryEndDate: '2026-11-16',
+    shipStartDate: '2026-10-20',
+  };
+  const result = buildFilters(query);
+  assert.deepEqual(result.where.platformDeliveryDate, {
+    [Op.gte]: '2026-11-01',
+    [Op.lte]: '2026-11-16',
+  });
+  assert.deepEqual(result.where.platformShipDate, { [Op.gte]: '2026-10-20' });
+  assert.deepEqual(buildFilters({ deliveryEndDate: '2026-11-16' }).where.platformDeliveryDate, {
+    [Op.lte]: '2026-11-16',
+  });
+  assert.deepEqual(buildFilters({ deliveryStartDate: '2026-11-16' }).where.platformDeliveryDate, {
+    [Op.gte]: '2026-11-16',
+  });
+  assert.deepEqual(
+    buildFilters({ deliveryStartDate: '2026-11-16', deliveryEndDate: '2026-11-16' }).where
+      .platformDeliveryDate,
+    { [Op.gte]: '2026-11-16', [Op.lte]: '2026-11-16' },
+  );
+  assert.equal(
+    buildFilters({ deliveryStartDate: '', deliveryEndDate: '' }).where.platformDeliveryDate,
+    undefined,
+  );
+});
+
+test('平台到货日期拒绝非法日期和反向范围', () => {
+  for (const value of ['not-date', '2026-02-30', '2026-13-01'])
+    assert.throws(() => buildFilters({ deliveryStartDate: value }), /平台到货日期筛选格式无效/);
+  assert.throws(
+    () => buildFilters({ deliveryStartDate: '2026-11-16', deliveryEndDate: '2026-11-01' }),
+    /平台到货开始日期不能晚于结束日期/,
+  );
+});
+
 test('服务端日期边界与橙红预警一致，覆盖截止毫秒、24小时、跨年及夏令时日期', () => {
   for (const date of ['2026-01-01', '2026-03-08', '2026-07-15', '2026-11-01', '2026-12-31']) {
     const deadline = Date.parse(`${date}T00:00:00+08:00`) + 86400000 + 15 * 3600000;
@@ -52,7 +90,8 @@ test('预警与日期、价格、渠道取交集，清空预警恢复原筛选�
         ? { [Op.lt]: '2026-10-05' }
         : { [Op.gte]: '2026-10-05', [Op.lte]: '2026-10-05' },
     );
-    assert.ok(result.include[1].where[Op.and]);
+    assert.ok(result.include.find((relation) => relation.as === 'purchase').where[Op.or]);
+    assert.ok(result.where[Op.and].some((condition) => condition[Op.or]));
   }
   assert.deepEqual(buildFilters({ shippingWarning: '' }, now).where[Op.and], [{}]);
   assert.equal(buildFilters({}, now).where.platformOrderStatus, undefined);

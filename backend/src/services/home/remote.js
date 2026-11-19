@@ -1,3 +1,4 @@
+import { SELLER_REFUND_VERSION } from './seller-refund.js';
 import { WalmartClient } from '../walmart/client.js';
 import { fetchReconciliation, RECON_VERSION } from './reconciliation.js';
 import { fetchMonthlyReturns, RETURNS_VERSION, refundMonth } from './returns.js';
@@ -119,7 +120,9 @@ export async function fetchRemoteMetrics(
     retryOnly &&
     previous.reconciliation?.version === RECON_VERSION &&
     previous.reconciliation.status === 'ok' &&
-    Object.values(previous.reconciliation.reports || {}).every((r) => r.financeFormat === 2)
+    Object.values(previous.reconciliation.reports || {}).every(
+      (r) => r.financeFormat === 2 && r.sellerRefundVersion === SELLER_REFUND_VERSION,
+    )
       ? previous.reconciliation
       : await fetchReconciliation(client, previous.reconciliation, now);
   return result;

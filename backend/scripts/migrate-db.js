@@ -1,12 +1,15 @@
 import { db } from '../src/models.js';
+import { migratePurchaseStatistics } from '../src/services/purchase-statistics/model.js';
 import { migratePurchaseAfterSales } from '../src/migrations/purchase-after-sales.js';
 import { migrateHome } from '../src/services/home/model.js';
 import { migrateOrderTablePreferences } from '../src/migrations/order-table-preferences.js';
 import { migratePermissionsAudit } from '../src/migrations/permissions-audit.js';
+import { migrateUserRoles } from '../src/migrations/user-roles.js';
 import { migrateWalmart } from '../src/migrations/walmart.js';
 import { migrateDictionaries, migrateOrderFields, migrateStores } from '../src/migrations.js';
 
 try {
+  await migrateUserRoles();
   await migrateOrderTablePreferences();
   await migrateDictionaries();
   await migrateStores();
@@ -15,6 +18,7 @@ try {
   await migratePermissionsAudit();
   await migrateHome();
   await migratePurchaseAfterSales();
+  await migratePurchaseStatistics();
   console.log('字典、店铺、模板与订单字段增量升级完成，已有订单和模板保留。');
 } catch (error) {
   console.error(error.message);

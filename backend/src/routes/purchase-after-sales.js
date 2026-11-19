@@ -7,6 +7,7 @@ import {
   replyPurchaseAfterSale,
   changePurchaseAfterSaleStatus,
   markSupplierFeedback,
+  savePurchaseRefundAmount,
 } from '../services/purchase-after-sales.js';
 
 export function createPurchaseAfterSalesRouter() {
@@ -27,6 +28,9 @@ export function createPurchaseAfterSalesRouter() {
   );
   router.post('/:id/supplier-feedback', async (req, res) =>
     res.json(await markSupplierFeedback(req.params.id, req.user)),
+  );
+  router.put('/:id/refund-amount', async (req, res) =>
+    res.json(await savePurchaseRefundAmount(req.params.id, req.body, req.user)),
   );
   return router;
 }

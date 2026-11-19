@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, ref } from 'vue';
+import { computed, defineAsyncComponent, ref, provide, onBeforeUnmount } from 'vue';
 import {
   Search,
   Plus,
@@ -16,17 +16,22 @@ import {
 import { ElMessage } from 'element-plus';
 import { useOrders } from '../composables/useOrders';
 import { orderApi } from '../api/orders';
+import { api } from '../api/http';
 import OrderTable from '../components/orders/OrderTable.vue';
 import PurchaseAssignmentSummary from '../components/orders/PurchaseAssignmentSummary.vue';
 import { canEditOrder } from '../utils/orderWritePolicy';
 import { canManageProcurement } from '../utils/permissions';
 import { useOrderTablePreferences } from '../composables/useOrderTablePreferences';
 import { orderColumns } from '../components/orders/orderColumns';
+import BusinessDatePicker from '../components/BusinessDatePicker.vue';
 // 弹窗只在打开时挂载，因此不会提前下载编辑表单和图片上传逻辑。
 const OrderColumnSettings = defineAsyncComponent(
   () => import('../components/orders/OrderColumnSettings.vue'),
 );
 const OrderEditor = defineAsyncComponent(() => import('../components/OrderEditor.vue'));
+const AfterSaleDrawer = defineAsyncComponent(
+  () => import('../components/orders/AfterSaleDrawer.vue'),
+);
 const CreateAfterSaleDialog = defineAsyncComponent(
   () => import('../components/orders/CreateAfterSaleDialog.vue'),
 );
@@ -60,11 +65,12 @@ const {
   appliedFilters,
   dates,
   shipDates,
+  deliveryDates,
   purchaseAssignedDates,
   table,
   load,
   refresh,
-  search,
+  search: applySearch,
   changePageSize,
   changePage,
   reset,
@@ -72,20 +78,58 @@ const {
   openAssign,
   assign,
 } = useOrders();
+const orderDatePicker = ref(null),
+  shipDatePicker = ref(null),
+  deliveryDatePicker = ref(null),
+  assignmentDatePicker = ref(null);
+function search() {
+  for (const [picker, values] of [
+    [orderDatePicker, dates.value],
+    [shipDatePicker, shipDates.value],
+    [deliveryDatePicker, deliveryDates.value],
+    [assignmentDatePicker, purchaseAssignedDates.value],
+  ])
+    if (picker.value && !picker.value.validate(values)) return;
+  return applySearch();
+}
 const procurementAllowed = computed(() => canManageProcurement(auth.user?.role));
 const afterSaleItem = ref(null);
+const afterSaleTicketId = ref(null);
+provide('openPurchaseAfterSale', (ticket) => {
+  afterSaleTicketId.value = ticket.id;
+});
+const orderRefreshVersions = new Map();
+let active = true;
+onBeforeUnmount(() => {
+  active = false;
+});
+async function refreshAfterSaleOrder(ticket) {
+  const id = ticket?.itemId;
+  if (!id) return;
+  const version = (orderRefreshVersions.get(id) || 0) + 1;
+  orderRefreshVersions.set(id, version);
+  try {
+    const updated = await api.get(`/orders/${id}`);
+    if (!active || orderRefreshVersions.get(id) !== version) return;
+    // 原位更新，不重载列表，保留分页、滚动位置、展开行和跨页勾选。
+    for (const row of new Set([...rows.value, ...selected.value, editing.value].filter(Boolean)))
+      if (row.id === updated.id) Object.assign(row, updated);
+  } catch {
+    ElMessage.warning('工单已更新，但订单信息刷新失败，请稍后刷新订单');
+  }
+}
 function openAfterSale(row) {
-  if (row.purchaseAfterSale)
-    return router.push({
-      path: '/purchase-after-sales',
-      query: { ticket: row.purchaseAfterSale.id },
-    });
+  if (row.purchaseAfterSale) return (afterSaleTicketId.value = row.purchaseAfterSale.id);
   if (!canEditOrder(row)) return ElMessage.warning('WFS订单不允许创建采购售后工单');
   afterSaleItem.value = row;
 }
 function afterSaleCreated(result) {
+  if (afterSaleItem.value) {
+    afterSaleItem.value.afterSales = '是';
+    afterSaleItem.value.purchaseAfterSale = { id: result.id, status: result.status || 'open' };
+  }
   afterSaleItem.value = null;
-  router.push({ path: '/purchase-after-sales', query: { ticket: result.id } });
+  afterSaleTicketId.value = result.id;
 }
 const columnDialog = ref(false);
 const columnsOpening = ref(false);
@@ -140,6 +184,8 @@ const activeAdvancedFilters = computed(
       'endDate',
       'shipStartDate',
       'shipEndDate',
+      'deliveryStartDate',
+      'deliveryEndDate',
       'purchaseAssignedStartTime',
       'purchaseAssignedEndTime',
       'minPrice',
@@ -618,20 +664,23 @@ async function submitStatus() {
             ><el-option label="是" value="是" /><el-option label="否" value="否" /><el-option
               label="未分配"
               value="empty" /></el-select
-          ><el-select v-model="filters.afterSales" placeholder="是否售后" clearable
+          ><el-select v-model="filters.afterSales" placeholder="是否采购售后" clearable
             ><el-option label="是" value="是" /><el-option label="否" value="否" /></el-select
           ><el-select v-model="filters.settlement" placeholder="结算情况" clearable
             ><el-option label="已结算" value="已结算" /><el-option
               label="未结算"
               value="未结算" /></el-select
-          ><el-date-picker
+          ><BusinessDatePicker
+            ref="orderDatePicker"
+            policy="orderDate"
             v-model="dates"
             type="daterange"
             value-format="YYYY-MM-DD"
             start-placeholder="出单开始日期"
             end-placeholder="出单结束日期"
             range-separator="至"
-          /><el-date-picker
+          /><BusinessDatePicker
+            ref="shipDatePicker"
             v-model="shipDates"
             type="daterange"
             value-format="YYYY-MM-DD"
@@ -639,7 +688,20 @@ async function submitStatus() {
             end-placeholder="平台发货结束日期"
             range-separator="至"
           />
-          <el-date-picker
+          <BusinessDatePicker
+            ref="deliveryDatePicker"
+            v-model="deliveryDates"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            start-placeholder="平台到货开始日期"
+            end-placeholder="平台到货结束日期"
+            range-separator="至"
+            aria-label="平台到货日期区间"
+            clearable
+          />
+          <BusinessDatePicker
+            ref="assignmentDatePicker"
+            policy="recordDate"
             v-model="purchaseAssignedDates"
             type="daterange"
             value-format="YYYY-MM-DD"
@@ -752,6 +814,13 @@ async function submitStatus() {
     :item="afterSaleItem"
     @close="afterSaleItem = null"
     @created="afterSaleCreated"
+  />
+  <AfterSaleDrawer
+    v-if="afterSaleTicketId"
+    :ticket-id="afterSaleTicketId"
+    show-menu
+    @close="afterSaleTicketId = null"
+    @loaded="refreshAfterSaleOrder"
   />
   <BatchFollowupNoteDialog
     v-if="followupItems"

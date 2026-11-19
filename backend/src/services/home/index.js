@@ -1,6 +1,15 @@
-import { createHash } from 'node:crypto';
+import { snapshotSource } from './snapshot-source.js';
+import { sellerRefundLookup, SELLER_REFUND_VERSION } from './seller-refund.js';
 import { Op, Transaction } from 'sequelize';
-import { db, Store, Order, OrderItem, Purchase, storeOwnerInclude } from '../../models.js';
+import {
+  db,
+  Store,
+  Order,
+  OrderItem,
+  Purchase,
+  PurchaseAfterSale,
+  storeOwnerInclude,
+} from '../../models.js';
 import { StoreSnapshot } from './model.js';
 import { pstDay, createStatistics } from './statistics.js';
 import { fetchRemoteMetrics, REMOTE_METRICS } from './remote.js';
@@ -8,22 +17,9 @@ import { createDailyStatistics, dailyReport } from './daily.js';
 import { RECON_VERSION, storeFinance } from './reconciliation.js';
 import { RETURNS_VERSION, monthlyReturnsMetric } from './returns.js';
 import { homeFilters } from './filters.js';
+import { createProfitStatistics, profitReport } from './profit.js';
 
-export function snapshotSource(store) {
-  return (
-    createHash('sha256')
-      // 区分只存平台指标的新快照，回退旧版时可自动重建其所需的订单快照。
-      .update(
-        JSON.stringify([
-          'seller-performance-finance-pst-v6',
-          store.systemStoreName,
-          store.clientId,
-          store.clientSecret,
-        ]),
-      )
-      .digest('hex')
-  );
-}
+export { snapshotSource } from './snapshot-source.js';
 export function snapshotDue(snapshot, store, now = Date.now()) {
   if (
     !snapshot ||
@@ -41,7 +37,7 @@ export function snapshotDue(snapshot, store, now = Date.now()) {
       snapshot.remote?.reconciliation?.version !== RECON_VERSION ||
       snapshot.remote?.reconciliation?.status !== 'ok' ||
       Object.values(snapshot.remote?.reconciliation?.reports || {}).some(
-        (r) => r.financeFormat !== 2,
+        (r) => r.financeFormat !== 2 || r.sellerRefundVersion !== SELLER_REFUND_VERSION,
       ))
   );
 }
@@ -59,7 +55,13 @@ async function collectStoresStatistics(
       store.systemStoreName,
       {
         id: store.id,
+        sellerRefund: sellerRefundLookup(
+          snapshots.get(store.id)?.sourceKey === snapshotSource(store)
+            ? snapshots.get(store.id).remote?.reconciliation
+            : null,
+        ),
         statistics: createStatistics(now, range),
+        profit: createProfitStatistics(now, range),
         daily: createDailyStatistics(
           now,
           snapshots.get(store.id)?.sourceKey === snapshotSource(store)
@@ -74,14 +76,36 @@ async function collectStoresStatistics(
   let cursor = 0;
   for (;;) {
     const rows = await OrderItem.findAll({
-      attributes: ['id', 'shopName', 'walmart', 'orderAmount', 'fulfillmentParty', 'orderStatus'],
+      attributes: [
+        'id',
+        'shopName',
+        'walmart',
+        'returnInfo',
+        'orderAmount',
+        'fulfillmentParty',
+        'orderStatus',
+      ],
       where: { shopName: { [Op.in]: [...groups.keys()] }, id: { [Op.gt]: cursor } },
       include: [
         { model: Order, as: 'order', attributes: ['orderNumber'], required: true },
         {
+          model: PurchaseAfterSale,
+          as: 'purchaseAfterSale',
+          attributes: ['id', 'purchaseRefundAmount'],
+          required: false,
+        },
+        {
           model: Purchase,
           as: 'purchase',
-          attributes: ['reviewStatus', 'purchaseStatus', 'allocatable'],
+          attributes: [
+            'reviewStatus',
+            'purchaseStatus',
+            'allocatable',
+            'settlement',
+            'commissionRate',
+            'purchaseCost',
+            'disputeSuccessAmount',
+          ],
         },
       ],
       order: [['id', 'ASC']],
@@ -93,6 +117,8 @@ async function collectStoresStatistics(
       const group = groups.get(item.shopName);
       group.statistics.add(item);
       group.daily.add(item);
+      item.sellerRefund = group.sellerRefund(item);
+      group.profit.add(item);
     }
     if (rows.length < 500) break;
     cursor = rows.at(-1).id;
@@ -100,7 +126,7 @@ async function collectStoresStatistics(
   return new Map(
     [...groups.values()].map((group) => [
       group.id,
-      { ...group.statistics.result(), daily: group.daily.result() },
+      { ...group.statistics.result(), daily: group.daily.result(), profit: group.profit.result() },
     ]),
   );
 }
@@ -255,6 +281,7 @@ export async function readHome(user, now = Date.now(), query = {}) {
             }
           : {}),
         ...dailyReport(visibleStores, now, filters),
+        ...(filters ? { profit: profitReport(visibleStores) } : {}),
       };
     },
   );

@@ -1,5 +1,12 @@
 import { Router } from 'express';
-import { OrderItem, Purchase, DictionaryOption, Store, User } from '../models.js';
+import {
+  OrderItem,
+  Purchase,
+  PurchaseAfterSale,
+  DictionaryOption,
+  Store,
+  User,
+} from '../models.js';
 import { Op } from 'sequelize';
 import { allowedStoreNames } from '../permissions.js';
 import { ROLES } from '../fields.js';
@@ -21,7 +28,7 @@ export function createDashboardRouter() {
       currentRole: req.user.role,
       purchaseChannels: await DictionaryOption.findAll({
         where: { kind: 'purchaseChannel', active: true },
-        attributes: ['id', 'value', 'purchaseDiscount'],
+        attributes: ['id', 'value', 'fbaPurchaseDiscount', 'fbmPurchaseDiscount'],
         order: [
           ['sortOrder', 'ASC'],
           ['id', 'ASC'],
@@ -32,7 +39,7 @@ export function createDashboardRouter() {
   router.get('/order-owners', async (req, res) => {
     res.json(
       await User.findAll({
-        attributes: ['id', 'username', 'displayName'],
+        attributes: ['id', 'username', 'displayName', 'active'],
         ...(req.user.role === 'operations' ? { where: { id: req.user.id } } : {}),
         order: [['id', 'ASC']],
       }),
@@ -48,7 +55,12 @@ export function createDashboardRouter() {
       OrderItem.count({ where: { [Op.and]: [where, condition] }, include });
     const unassigned = await count({ '$purchase.assignedTo$': null });
     const inProgress = await count({ '$purchase.purchaseStatus$': '采购中' });
-    const afterSales = await count({ '$purchase.afterSales$': '是' });
+    const afterSales = await OrderItem.count({
+      where,
+      include: [
+        { model: PurchaseAfterSale, as: 'purchaseAfterSale', attributes: [], required: true },
+      ],
+    });
     // 筛选选项以店铺管理为准，使用系统店铺名与订单字段匹配。
     const storeOptions = await Store.findAll({
       ...(names ? { where: { ownerId: req.user.id } } : {}),

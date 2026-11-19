@@ -21,7 +21,12 @@ const discountFields = [
   ['currentExchangeRate', '当前实时汇率'],
   ['taxMultiplier', '税金'],
 ];
-const discount = computed(() => discountPreview(form));
+const modes = ['FBA', 'FBM'];
+const modeKey = (mode, key) => `${mode.toLowerCase()}${key[0].toUpperCase()}${key.slice(1)}`;
+const discount = (mode) =>
+  discountPreview(
+    Object.fromEntries(discountFields.map(([key]) => [key, form[modeKey(mode, key)]])),
+  );
 
 async function load() {
   await list.value?.refresh();
@@ -34,7 +39,11 @@ function edit(row) {
       ? { value: row.value, sortOrder: row.sortOrder, active: row.active }
       : { value: '', sortOrder: list.value?.total || 0, active: true },
   );
-  for (const [key] of discountFields) form[key] = row?.[key] == null ? undefined : Number(row[key]);
+  for (const mode of modes)
+    for (const [key] of discountFields) {
+      const field = modeKey(mode, key);
+      form[field] = row?.[field] == null ? undefined : Number(row[field]);
+    }
   dialog.value = true;
 }
 async function save() {
@@ -44,7 +53,9 @@ async function save() {
   try {
     const payload = { ...form, version: editing.value?.version };
     if (kind.value === 'purchaseChannel')
-      for (const [key] of discountFields) payload[key] = form[key] ?? null;
+      for (const mode of modes)
+        for (const [key] of discountFields)
+          payload[modeKey(mode, key)] = form[modeKey(mode, key)] ?? null;
     if (editing.value) await dictionaryApi.update(kind.value, editing.value.id, payload);
     else await dictionaryApi.create(kind.value, payload);
     // 同页下拉立即刷新，其他已打开页面通过元数据同步订阅更新。
@@ -79,9 +90,16 @@ watch(
     >
 
     <el-table-column label="选项名称" prop="value" min-width="260" />
-    <el-table-column v-if="kind === 'purchaseChannel'" label="采购折扣" width="140">
+    <el-table-column
+      v-for="mode in kind === 'purchaseChannel' ? modes : []"
+      :key="mode"
+      :label="`${mode} 采购折扣`"
+      width="150"
+    >
       <template #default="{ row }">{{
-        row.purchaseDiscount == null ? '未配置' : fixedDecimal(row.purchaseDiscount, 4)
+        row[modeKey(mode, 'purchaseDiscount')] == null
+          ? '未配置'
+          : fixedDecimal(row[modeKey(mode, 'purchaseDiscount')], 4)
       }}</template>
     </el-table-column>
     <el-table-column label="排序" prop="sortOrder" width="100" />
@@ -99,7 +117,7 @@ watch(
   <el-dialog
     v-model="dialog"
     :title="editing ? '编辑选项' : '新增选项'"
-    width="480px"
+    :width="kind === 'purchaseChannel' ? '760px' : '480px'"
     :close-on-click-modal="false"
     :close-on-press-escape="!saving"
     :show-close="!saving"
@@ -116,20 +134,29 @@ watch(
           :closable="false"
           style="margin-bottom: 18px"
         />
-        <el-form-item v-for="[key, label] in discountFields" :key="key" :label="label">
-          <el-input-number
-            v-model="form[key]"
-            :min="0"
-            :max="999999999999.99"
-            :precision="2"
-            :step="0.01"
-            controls-position="right"
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item label="采购折扣（自动计算）"
-          ><strong>{{ discount ?? '请完整填写三个数字' }}</strong></el-form-item
-        >
+        <div class="discount-modes">
+          <section v-for="mode in modes" :key="mode" class="discount-mode">
+            <h3>{{ mode }} 采购折扣</h3>
+            <el-form-item
+              v-for="[key, label] in discountFields"
+              :key="key"
+              :label="`${mode} ${label}`"
+            >
+              <el-input-number
+                v-model="form[modeKey(mode, key)]"
+                :min="0"
+                :max="999999999999.99"
+                :precision="2"
+                :step="0.01"
+                controls-position="right"
+                style="width: 100%"
+              />
+            </el-form-item>
+            <el-form-item label="采购折扣（自动计算）"
+              ><strong>{{ discount(mode) ?? '请完整填写三个数字' }}</strong></el-form-item
+            >
+          </section>
+        </div>
       </template>
       <el-form-item label="排序"
         ><el-input-number v-model="form.sortOrder" :min="0" :max="100000" :precision="0"
@@ -144,3 +171,23 @@ watch(
     >
   </el-dialog>
 </template>
+
+<style scoped>
+.discount-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.discount-mode {
+  min-width: 0;
+}
+.discount-mode h3 {
+  margin: 0 0 16px;
+  font-size: 15px;
+}
+@media (max-width: 600px) {
+  .discount-modes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+</style>

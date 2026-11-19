@@ -17,6 +17,7 @@ export async function migratePurchaseAfterSales() {
     supplierFeedbackAt: DataTypes.DATE(3),
     supplierFeedbackBy: DataTypes.INTEGER.UNSIGNED,
     supplierFeedbackName: DataTypes.STRING(100),
+    purchaseRefundAmount: DataTypes.DECIMAL(18, 2),
   })) {
     if (!ticketColumns[key])
       await query.addColumn('purchase_after_sales', key, { type, allowNull: true });

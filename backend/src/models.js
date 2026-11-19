@@ -1,10 +1,11 @@
 import { Sequelize, DataTypes } from 'sequelize';
 import { config } from './config.js';
-import { fields } from './fields.js';
+import { fields, ROLES } from './fields.js';
 import { decimalText } from './lib/decimal.js';
 import { storedChannels } from './lib/channels.js';
 import { priceFactorLevel } from './lib/price-factor.js';
 import { isWfsOrder } from './lib/order-write-policy.js';
+import { itemProfit } from './lib/order-profit.js';
 export const db = new Sequelize(config.db.database, config.db.username, config.db.password, {
   dialect: 'mysql',
   host: config.db.host,
@@ -16,6 +17,7 @@ export const db = new Sequelize(config.db.database, config.db.username, config.d
 });
 const id = () => ({ type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true });
 const fieldType = (f) => {
+  if (f.key === 'disputeSuccessAmount') return DataTypes.DECIMAL(18, 2);
   if (['money', 'decimal'].includes(f.type)) return DataTypes.DECIMAL(36, 20);
   if (f.type === 'multiselect') return DataTypes.TEXT;
   if (f.type === 'integer') return DataTypes.INTEGER.UNSIGNED;
@@ -30,7 +32,8 @@ const attrs = (group) =>
       .filter(
         (f) =>
           (group === 'item' ? f.group !== 'purchase' : f.group === 'purchase') &&
-          f.key !== 'orderNumber',
+          f.key !== 'orderNumber' &&
+          !f.computed,
       )
       .map((f) => [
         f.key,
@@ -60,7 +63,7 @@ export const User = db.define(
     username: { type: DataTypes.STRING(64), unique: true, allowNull: false },
     displayName: { type: DataTypes.STRING(100), allowNull: false },
     passwordHash: { type: DataTypes.STRING(255), allowNull: false },
-    role: { type: DataTypes.ENUM('operations', 'purchasing', 'admin'), allowNull: false },
+    role: { type: DataTypes.ENUM(...Object.keys(ROLES)), allowNull: false },
     active: { type: DataTypes.BOOLEAN, defaultValue: true },
     sessionVersion: { type: DataTypes.INTEGER, defaultValue: 1 },
     orderTablePreferences: { type: DataTypes.JSON, allowNull: true },
@@ -107,6 +110,7 @@ export const Purchase = db.define(
     id: id(),
     itemId: { type: DataTypes.INTEGER.UNSIGNED, unique: true, allowNull: false },
     ...attrs('purchase'),
+    commissionRate: { type: DataTypes.DECIMAL(5, 2), allowNull: true },
     assignedTo: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
     assignedAt: { type: DataTypes.DATE, allowNull: true },
     purchaseConfirmedAt: { type: DataTypes.DATE(3), allowNull: true },
@@ -140,6 +144,7 @@ export const PurchaseAfterSale = db.define(
     supplierFeedbackAt: { type: DataTypes.DATE(3), allowNull: true },
     supplierFeedbackBy: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
     supplierFeedbackName: { type: DataTypes.STRING(100), allowNull: true },
+    purchaseRefundAmount: { type: DataTypes.DECIMAL(18, 2), allowNull: true },
     lastActivityAt: { type: DataTypes.DATE(3), allowNull: false },
     completedAt: { type: DataTypes.DATE(3), allowNull: true },
   },
@@ -214,6 +219,16 @@ export const DictionaryOption = db.define(
     currentExchangeRate: { type: DataTypes.DECIMAL(14, 2), allowNull: true },
     taxMultiplier: { type: DataTypes.DECIMAL(14, 2), allowNull: true },
     purchaseDiscount: { type: DataTypes.DECIMAL(36, 20), allowNull: true },
+    ...Object.fromEntries(
+      ['fba', 'fbm'].flatMap((mode) => [
+        ...['ChannelExchangeRate', 'CurrentExchangeRate', 'TaxMultiplier'].map((key) => [
+          `${mode}${key}`,
+          { type: DataTypes.DECIMAL(14, 2), allowNull: true },
+        ]),
+        [`${mode}PurchaseDiscount`, { type: DataTypes.DECIMAL(36, 20), allowNull: true }],
+      ]),
+    ),
+    modeDiscountInitialized: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   },
   { tableName: 'dictionary_options', indexes: [{ unique: true, fields: ['kind', 'value'] }] },
 );
@@ -225,6 +240,7 @@ export const Store = db.define(
     systemStoreName: { type: DataTypes.STRING(191), allowNull: false, unique: true },
     ownerId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
     isThirdParty: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    commissionRate: { type: DataTypes.DECIMAL(5, 2), allowNull: true },
     clientId: { type: DataTypes.STRING(255), allowNull: true },
     clientSecret: { type: DataTypes.TEXT, allowNull: true },
     version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
@@ -325,7 +341,7 @@ export const itemInclude = [
   {
     model: PurchaseAfterSale,
     as: 'purchaseAfterSale',
-    attributes: ['id', 'status'],
+    attributes: ['id', 'status', 'purchaseRefundAmount'],
     required: false,
   },
   {
@@ -339,7 +355,7 @@ export const itemInclude = [
   {
     model: Store,
     as: 'store',
-    attributes: ['id', 'systemStoreName', 'ownerId', 'isThirdParty'],
+    attributes: ['id', 'systemStoreName', 'ownerId', 'isThirdParty', 'commissionRate'],
     required: false,
     include: [storeOwnerInclude],
   },
@@ -357,6 +373,8 @@ export function serializeItem(instance) {
     assignee: value.purchase?.assignee || null,
     storeOwner: value.store?.owner || null,
     storeIsThirdParty: Boolean(value.store?.isThirdParty),
+    // 仅供未结算详情展示当前配置，不能覆盖结算快照或参与利润/导出。
+    storeCommissionRate: value.store?.commissionRate ?? null,
     purchaseAfterSale: value.purchaseAfterSale || null,
     manualEditable: !isWfsOrder(value),
     priceFactorLevel: priceFactorLevel(value.purchase?.priceFactor),
@@ -378,6 +396,9 @@ export function serializeItem(instance) {
         ? decimalText(stored, f.type === 'money' ? 2 : 4)
         : stored;
   }
+  // 工单存在即为采购售后，完毕后仍为“是”；不回写或迁移旧人工标记。
+  result.afterSales = value.purchaseAfterSale ? '是' : '否';
+  Object.assign(result, itemProfit(value));
   result.sku = result.walmartSku;
   return result;
 }

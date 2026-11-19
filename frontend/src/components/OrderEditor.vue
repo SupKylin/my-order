@@ -9,10 +9,21 @@ import { orderApi } from '../api/orders';
 import { canEditOrder } from '../utils/orderWritePolicy';
 import { fmtBeijingDate } from '../utils/format';
 import { imageValues as parseImageValues } from '../utils/image-values';
-import { costPreview, fixedDecimal } from '../utils/purchaseCost';
+import { costPreview, fixedDecimal, currentFinanceConfig } from '../utils/purchaseCost';
+import AfterSaleLink from './orders/AfterSaleLink.vue';
 const platformReadOnly = (field) =>
   field.group === 'product' || ['orderNumber', 'shopName', 'fulfillmentParty'].includes(field.key);
 const derivedPurchaseFields = new Set(['purchaseLimit', 'priceFactor']);
+const financeKeys = new Set([
+  'commissionRate',
+  'commissionAmount',
+  'purchaseDiscount',
+  'purchaseCost',
+  'walmartRefundAmount',
+  'purchaseRefundAmount',
+  'disputeSuccessAmount',
+  'orderProfit',
+]);
 const props = defineProps({ modelValue: Boolean, item: Object });
 const emit = defineEmits(['update:modelValue', 'saved']);
 const meta = useMeta(),
@@ -23,7 +34,7 @@ const meta = useMeta(),
   busy = ref(false),
   initializing = ref(false),
   uploadingFields = reactive(new Set()),
-  openGroups = ref(['order', 'purchase']);
+  openGroups = ref(['order', 'purchase', 'finance']);
 const fieldReadOnly = (field) =>
   field.readOnly ||
   platformReadOnly(field) ||
@@ -32,12 +43,27 @@ const fieldReadOnly = (field) =>
     ['purchaseStatus', 'purchaseChannel'].includes(field.key));
 const visible = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) });
 const costChannels = computed(() => form.purchaseChannel || []);
+const reference = computed(() =>
+  currentFinanceConfig(
+    { ...form, storeCommissionRate: props.item?.storeCommissionRate },
+    meta.purchaseChannels,
+  ),
+);
+const useSavedCommission = computed(
+  () => form.settlement === '已结算' && original.value.settlement === '已结算',
+);
+const displayedCommission = computed(() =>
+  useSavedCommission.value ? original.value.commissionRate : reference.value.commissionRate,
+);
 const costChanged = computed(
   () => (form.purchaseCostChannel || null) !== (original.value.purchaseCostChannel || null),
 );
 const newCostSnapshot = computed(
   () =>
-    form.settlement === '已结算' && (original.value.settlement !== '已结算' || costChanged.value),
+    form.settlement === '已结算' &&
+    (original.value.settlement !== '已结算' ||
+      costChanged.value ||
+      form.shippingMode !== original.value.shippingMode),
 );
 const costChannel = computed(() =>
   costChanged.value
@@ -48,10 +74,11 @@ const costChannel = computed(() =>
 );
 const costDiscount = computed(() =>
   form.settlement !== '已结算'
-    ? null
+    ? reference.value.purchaseDiscount
     : newCostSnapshot.value
-      ? meta.purchaseChannels.find((channel) => channel.value === costChannel.value)
-          ?.purchaseDiscount
+      ? meta.purchaseChannels.find((channel) => channel.value === costChannel.value)?.[
+          `${String(form.shippingMode || '').toLowerCase()}PurchaseDiscount`
+        ]
       : original.value.purchaseDiscount,
 );
 const displayedDiscount = computed(() =>
@@ -75,16 +102,27 @@ const imageUrlsFor = (value) => imageListFor(value).map((path) => meta.imageUrl(
 const sections = [
   { key: 'order', label: '订单信息', note: '订单身份、平台时间与状态' },
   { key: 'product', label: '商品与收件信息', note: '由 Walmart 同步 · 只读' },
-  { key: 'purchase', label: '采购与交付', note: '采购准备、物流记录、售后及结算' },
+  {
+    key: 'purchase',
+    label: '采购与交付',
+    note: '采购准备、物流记录及结算；售后请进入采购售后工单',
+  },
+  { key: 'finance', label: '利润核算', note: '结算时佣金、成本、退款及争议成功金额；金额单位 USD' },
 ];
+const sectionFields = (key) =>
+  key === 'finance'
+    ? [...financeKeys].map((name) => meta.fieldMap[name]).filter(Boolean)
+    : meta.fields.filter(
+        (field) => field.group === key && !field.retired && !financeKeys.has(field.key),
+      );
 watch(
   () => props.modelValue,
   async (show) => {
     if (!show) return;
     initializing.value = true;
     try {
-      await meta.load();
-      openGroups.value = ['order', 'purchase'];
+      await meta.load(true);
+      openGroups.value = ['order', 'purchase', 'finance'];
       conflictMessage.value = '';
       for (const f of meta.fields) {
         let value = props.item?.[f.key] ?? null;
@@ -103,6 +141,9 @@ watch(
 async function save() {
   if (blocked.value) return;
   if (!canEditOrder(props.item)) return ElMessage.warning('WFS 订单只读，不能修改');
+  const dispute = String(form.disputeSuccessAmount ?? '').trim();
+  if (dispute && !/^\d{1,12}(?:\.\d{1,2})?$/.test(dispute))
+    return ElMessage.warning('争议成功金额须为非负金额，最多2位小数');
   busy.value = true;
   try {
     const fields = Object.fromEntries(
@@ -121,7 +162,7 @@ async function save() {
       Object.keys(fields).map((key) => [key, original.value[key]]),
     );
     if (
-      ['settlement', 'purchaseAmount', 'purchaseCostChannel'].some((key) =>
+      ['settlement', 'purchaseAmount', 'purchaseCostChannel', 'shippingMode'].some((key) =>
         Object.hasOwn(fields, key),
       )
     )
@@ -131,6 +172,7 @@ async function save() {
         'purchaseCostChannel',
         'purchaseChannel',
         'purchaseDiscount',
+        'shippingMode',
       ])
         baseFields[key] = original.value[key];
     if (props.item?.id)
@@ -188,19 +230,36 @@ async function save() {
             ><div class="section-heading">
               <strong>{{ section.label }}</strong
               ><span>{{ section.note }}</span>
-            </div></template
-          >
-          <div class="form-grid">
+              <AfterSaleLink
+                v-if="section.key === 'purchase'"
+                :ticket="item?.purchaseAfterSale"
+              /></div
+          ></template>
+          <div class="form-grid" :class="{ 'finance-grid': section.key === 'finance' }">
+            <el-form-item v-if="section.key === 'finance'" label="订单金额（已保存）"
+              ><span>{{ item?.orderAmount ?? '—' }}</span></el-form-item
+            >
             <el-form-item v-if="section.key === 'purchase'" label="采购成功时间（北京时间）">
               <span>{{ fmtBeijingDate(item?.purchaseConfirmedAt) }}</span>
             </el-form-item>
             <el-form-item
-              v-for="field in meta.fields.filter((f) => f.group === section.key)"
+              v-for="field in sectionFields(section.key)"
               :key="field.key"
-              :label="field.label"
+              :label="
+                field.key === 'commissionRate' && !useSavedCommission
+                  ? '店铺佣金率（%）'
+                  : field.label
+              "
               :required="field.required"
               :class="{ 'full-width': ['textarea', 'url'].includes(field.type) }"
-              ><template v-if="field.key === 'purchaseCostChannel'">
+              ><template v-if="field.key === 'afterSales'">
+                <div class="purchase-after-sale-summary">
+                  <span>{{ item?.purchaseAfterSale ? '是' : '否' }}</span>
+                  <AfterSaleLink :ticket="item?.purchaseAfterSale" />
+                  <span class="muted">由采购售后工单自动维护</span>
+                </div>
+              </template>
+              <template v-else-if="field.key === 'purchaseCostChannel'">
                 <el-select
                   :model-value="costChannel"
                   clearable
@@ -221,7 +280,8 @@ async function save() {
                   />
                 </el-select>
                 <span class="muted"
-                  >单渠道结算时自动使用；多渠道请选择一个。更改此项并保存会使用新渠道当前折扣。</span
+                  >单渠道结算时自动使用；多渠道请选择一个。更改渠道或发货模式并保存，会使用对应
+                  FBA／FBM 折扣。</span
                 >
               </template>
               <template v-else-if="['purchaseDiscount', 'purchaseCost'].includes(field.key)">
@@ -230,8 +290,45 @@ async function save() {
                 }}</span>
                 <span class="muted">{{
                   field.key === 'purchaseDiscount'
-                    ? '采购渠道汇率 ÷ 当前实时汇率 × 税金；结算时保存折扣'
+                    ? form.settlement !== '已结算' || newCostSnapshot
+                      ? reference.discountMessage
+                      : '使用结算时保存的采购折扣；渠道配置变更不影响历史快照'
                     : '采购成本 = 已保存的采购折扣 × 采购金额；保存后生效'
+                }}</span>
+                <span v-if="field.key === 'purchaseDiscount'" class="muted"
+                  >采购折扣＝渠道汇率 ÷ 实时汇率 × 税金</span
+                >
+              </template>
+              <template v-else-if="field.key === 'commissionRate'">
+                <span>{{ displayedCommission == null ? '—' : `${displayedCommission}%` }}</span>
+                <span class="muted">{{
+                  useSavedCommission
+                    ? '结算时保存店铺佣金，之后不随店铺费率变化'
+                    : reference.commissionMessage
+                }}</span>
+              </template>
+              <template
+                v-else-if="['walmartRefundAmount', 'purchaseRefundAmount'].includes(field.key)"
+              >
+                <span>{{ form[field.key] ?? '—' }}</span>
+                <span class="muted">{{
+                  field.key === 'walmartRefundAmount'
+                    ? item?.walmartRefundMessage
+                    : item?.purchaseRefundMessage
+                }}</span>
+              </template>
+              <template v-else-if="field.key === 'disputeSuccessAmount'">
+                <FieldInput v-model="form[field.key]" :field="field" />
+                <span class="muted">非负金额，最多2位小数；未填写按0计算，仅手工维护</span>
+              </template>
+              <template v-else-if="field.computed">
+                <span>{{ form[field.key] ?? '未计算' }}</span>
+                <span class="muted">{{
+                  field.key === 'commissionAmount'
+                    ? '订单金额 × 结算时佣金率'
+                    : item?.orderProfit == null
+                      ? item?.profitMessage
+                      : '使用已保存的数据计算，保存后更新'
                 }}</span>
               </template>
               <template v-else-if="fieldReadOnly(field)">
@@ -278,7 +375,13 @@ async function save() {
                 v-model="form[field.key]"
                 @uploading="trackUpload(field.key, $event)"
               />
-            </el-form-item></div></el-collapse-item></el-collapse></el-form
+            </el-form-item>
+          </div>
+          <p v-if="section.key === 'finance'" class="muted profit-formula">
+            订单利润＝订单金额－订单金额×佣金－采购成本－卖家退款净扣款＋采购退款金额＋争议成功金额。显示已保存结果，本次修改保存后更新。
+          </p>
+        </el-collapse-item></el-collapse
+      ></el-form
     ><template #footer
       ><span class="muted drawer-tip">页面内清空字段并保存，会主动清除该字段。</span
       ><el-button :disabled="blocked" @click="visible = false">取消</el-button
@@ -292,3 +395,20 @@ async function save() {
     ></el-drawer
   >
 </template>
+<style scoped>
+.profit-formula {
+  line-height: 1.8;
+}
+.finance-grid :deep(.el-form-item__content) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  line-height: 1.6;
+}
+.purchase-after-sale-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+</style>

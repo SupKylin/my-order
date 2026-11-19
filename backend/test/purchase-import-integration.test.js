@@ -638,3 +638,72 @@ test('四项多选按框内并集、框间交集查询，分页、统计及两�
     );
   }
 });
+
+test('采购售后旧映射跳过并提示，其他采购字段正常导入，历史数据保持不变', async () => {
+  const item = await createItem('RETIRED-AFTER-SALE');
+  const old = {
+    afterSales: '是',
+    afterSalesScreenshot: 'old-image',
+    afterSalesResult: '已结束',
+    afterSalesResultScreenshot: 'old-result',
+  };
+  await Purchase.update(old, { where: { itemId: item.id } });
+  const extra = Object.keys(old),
+    sourceKeys = ['shopName', 'orderNumber', 'walmartSku', 'purchaseNote', ...extra];
+  const result = await preview(
+    [
+      [
+        '店铺A',
+        'RETIRED-AFTER-SALE',
+        '001',
+        '新的采购备注',
+        '否',
+        '不是图片',
+        '错误状态',
+        '不是图片',
+      ],
+    ],
+    sourceKeys,
+  );
+  assert.equal(result.blockingErrorCount, 0);
+  assert.equal(result.updated, 1);
+  for (const key of extra)
+    assert(result.warnings.some((w) => w.field === key && w.message.includes('采购售后工单')));
+  await commitImport(result.id, actor, 'purchase');
+  const purchase = await Purchase.findOne({ where: { itemId: item.id } });
+  assert.equal(purchase.purchaseNote, '新的采购备注');
+  for (const key of extra) assert.equal(purchase[key], old[key]);
+  assert.equal((await getItem(item.id, actor)).afterSales, '否');
+  const onlyRetired = await preview(
+    [['店铺A', 'RETIRED-AFTER-SALE', '001', '否']],
+    ['shopName', 'orderNumber', 'walmartSku', 'afterSales'],
+  );
+  assert.equal(onlyRetired.updated, 0);
+  assert.equal(onlyRetired.blockingErrorCount, 0);
+  assert.match(onlyRetired.rows[0].skipReason, /采购售后字段已停用/);
+  const payload = await templatePayload({
+    ...template,
+    mappings: sourceKeys.map((field) => ({ header: field, field })),
+  });
+  for (const key of extra) assert.equal(payload.mappings.find((m) => m.header === key).field, '');
+});
+
+test('升级前生成的采购预览提交时也不能覆盖采购售后字段', async () => {
+  const item = await createItem('STALE-AFTER-SALE');
+  await Purchase.update(
+    { afterSales: '是', afterSalesResult: '已结束' },
+    { where: { itemId: item.id } },
+  );
+  const result = await preview([['店铺A', 'STALE-AFTER-SALE', '001', '采购SKU', '正常备注']]);
+  const job = await ImportJob.findByPk(result.id);
+  const rows = job.rows;
+  Object.assign(rows[0].patch, { afterSales: '否', afterSalesResult: null });
+  job.changed('rows', true);
+  await job.update({ rows });
+  await commitImport(result.id, actor, 'purchase');
+  const purchase = await Purchase.findOne({ where: { itemId: item.id } });
+  assert.equal(purchase.afterSales, '是');
+  assert.equal(purchase.afterSalesResult, '已结束');
+  assert.equal(purchase.purchaseNote, '正常备注');
+  assert((await job.reload()).warnings.some((w) => w.field === 'afterSales'));
+});

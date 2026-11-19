@@ -9,12 +9,14 @@ import { migrateProcurementState } from './migrations/procurement-state.js';
 import { migratePurchaseAssignment } from './migrations/purchase-assignment.js';
 import { migratePurchaseQuantity } from './migrations/purchase-quantity.js';
 import { migratePurchaseCost } from './migrations/purchase-cost.js';
+import { migrateProfit } from './migrations/profit.js';
 
 /** 仅增加本次所需表和可空字段，禁止通过 alter/force 改写现有业务表。 */
 export async function migrateDictionaries() {
   const query = db.getQueryInterface();
   await DictionaryOption.sync();
   await migratePurchaseCost('dictionary_options');
+  await migrateProfit('dictionary_options');
   const columns = await query.describeTable('import_templates');
   if (!columns.purchaseChannelId)
     await query.addColumn('import_templates', 'purchaseChannelId', {
@@ -53,6 +55,7 @@ export async function migrateDictionaries() {
 /** 店铺配置是独立业务表，只创建表，不改写已有订单数据。 */
 export async function migrateStores() {
   await Store.sync();
+  await migrateProfit('stores');
   const query = db.getQueryInterface();
   const columns = await query.describeTable('stores');
   if (!columns.isThirdParty)
@@ -88,6 +91,7 @@ export async function migrateStores() {
 
 /** 仅扩展指定列的容量，保留旧数据；不使用 sync alter/force 重建业务表。 */
 export async function migrateOrderFields() {
+  await migrateProfit('purchases');
   await migratePurchaseCost('purchases');
   await migratePurchaseQuantity();
   await migratePurchaseAssignment();
@@ -131,6 +135,8 @@ export async function migrateOrderFields() {
       await query.changeColumn(table, 'sku', { type: DataTypes.STRING(191), allowNull: true });
     const decimalFields = fields.filter(
       (field) =>
+        !field.computed &&
+        field.key !== 'disputeSuccessAmount' &&
         ['money', 'decimal'].includes(field.type) &&
         (field.group === 'purchase') === (table === 'purchases'),
     );

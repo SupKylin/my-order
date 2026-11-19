@@ -18,9 +18,9 @@ import { upsertImported } from './orders.js';
 import { AppError, assert } from '../errors.js';
 import { IMPORT_MATCH_RULE, PURCHASE_MATCH_RULE } from '../lib/order-identity.js';
 import { matchImportRows, matchPurchaseRows } from '../lib/import-matching.js';
-import { fieldMap } from '../fields.js';
+import { fieldMap, PURCHASE_AFTER_SALE_FIELDS } from '../fields.js';
 import { purchaseFingerprint } from '../lib/order-concurrency.js';
-import { allowedStoreNames, NO_STORE_PERMISSION } from '../permissions.js';
+import { allowedStoreNames, NO_STORE_PERMISSION, canViewAllActivity } from '../permissions.js';
 import {
   assertPurchaseImport,
   isWfsOrder,
@@ -38,9 +38,11 @@ export function validateImportMappings(template, kind) {
   if (kind === 'legacy') return;
   const selected = template.mappings.filter((mapping) => mapping.field);
   const allowed = (field) =>
-    kind === 'order'
+    field.computed ||
+    (kind === 'order'
       ? field.group !== 'purchase'
-      : ['orderNumber', 'walmartSku', 'shopName'].includes(field.key) || field.group === 'purchase';
+      : ['orderNumber', 'walmartSku', 'shopName'].includes(field.key) ||
+        field.group === 'purchase');
   const invalid = selected.find((mapping) => !allowed(fieldMap[mapping.field]));
   assert(
     !invalid,
@@ -94,6 +96,8 @@ export async function prepareImport(input, user, kind = 'legacy') {
   const allowed = await allowedStoreNames(user);
   const snapshots = [];
   const ignoredStatusSources = new Set();
+  const ignoredAfterSaleSources = new Set();
+  const ignoredManualSources = new Set();
   let firstTemplate;
   const fieldDefinitions = await getFieldDefinitions();
   for (const entry of sources) {
@@ -104,7 +108,9 @@ export async function prepareImport(input, user, kind = 'legacy') {
       ? await ImportTemplate.findByPk(entry.templateId)
       : entry.template;
     assert(source, '请选择导入模板');
-    const template = await templatePayload(source.toJSON ? source.toJSON() : source);
+    const template = await templatePayload(source.toJSON ? source.toJSON() : source, {
+      forImport: true,
+    });
     // 工作表属于本次文件选择，绝不复用旧模板中保存的工作表。
     assert(typeof entry.sheetName === 'string' && entry.sheetName.trim(), '请选择本次导入的工作表');
     template.sheetName = entry.sheetName;
@@ -116,11 +122,21 @@ export async function prepareImport(input, user, kind = 'legacy') {
     const ignoredDerivedMappings = template.mappings.filter((mapping) =>
       DERIVED_PURCHASE_FIELDS.has(mapping.field),
     );
+    const ignoredManualMappings = template.mappings.filter(
+      (mapping) => fieldMap[mapping.field]?.importDisabled,
+    );
+    if (ignoredManualMappings.length) ignoredManualSources.add(upload.id);
+    const ignoredAfterSaleMappings = template.mappings.filter((mapping) =>
+      PURCHASE_AFTER_SALE_FIELDS.has(mapping.field),
+    );
+    if (ignoredAfterSaleMappings.length) ignoredAfterSaleSources.add(upload.id);
     const effectiveTemplate = {
       ...template,
       mappings: template.mappings.filter(
         (mapping) =>
           !DERIVED_PURCHASE_FIELDS.has(mapping.field) &&
+          !fieldMap[mapping.field]?.importDisabled &&
+          !PURCHASE_AFTER_SALE_FIELDS.has(mapping.field) &&
           (!ignoreStatus || mapping.field !== 'purchaseStatus'),
       ),
     };
@@ -143,6 +159,18 @@ export async function prepareImport(input, user, kind = 'legacy') {
         row: template.headerRow,
         field: mapping.field,
         message: `${fieldMap[mapping.field].label}由系统自动计算，已跳过该字段并保留系统计算值`,
+      });
+    for (const mapping of ignoredManualMappings)
+      extracted.warnings.push({
+        row: template.headerRow,
+        field: mapping.field,
+        message: `${fieldMap[mapping.field].label}仅允许手工维护，已跳过该字段并保留原值`,
+      });
+    for (const mapping of ignoredAfterSaleMappings)
+      extracted.warnings.push({
+        row: template.headerRow,
+        field: mapping.field,
+        message: `${fieldMap[mapping.field].label}已改由采购售后工单维护，已跳过该字段`,
       });
     for (const key of ['rows', 'errors', 'warnings'])
       data[key].push(
@@ -244,6 +272,12 @@ export async function prepareImport(input, user, kind = 'legacy') {
       if (ignoredStatusSources.has(row.sourceId)) {
         row.action = 'missing';
         row.skipReason = '运营账号无权修改采购状态，本行没有其他可更新的采购字段';
+      } else if (ignoredAfterSaleSources.has(row.sourceId)) {
+        row.action = 'missing';
+        row.skipReason = '采购售后字段已停用，本行没有其他可更新的采购字段';
+      } else if (ignoredManualSources.has(row.sourceId)) {
+        row.action = 'missing';
+        row.skipReason = '争议成功金额仅允许手工维护，本行没有其他可更新的采购字段';
       } else
         data.errors.push({
           row: row.rowNumber,
@@ -365,6 +399,41 @@ export async function commitImport(id, user, kind = 'legacy') {
     // 角色可能在预览后变化，旧预览提交时也不能绕过字段权限。
     for (const row of job.rows) {
       delete row.patch.purchaseChannel;
+      let ignoredManual = false;
+      for (const key of Object.keys(row.patch)) {
+        if (!fieldMap[key]?.importDisabled) continue;
+        delete row.patch[key];
+        ignoredManual = true;
+        job.warnings.push({
+          row: row.rowNumber,
+          sourceId: row.sourceId,
+          sourceName: row.sourceName,
+          field: key,
+          message: `${fieldMap[key].label}仅允许手工维护，已跳过该字段并保留原值`,
+        });
+      }
+      let ignoredAfterSale = false;
+      for (const key of PURCHASE_AFTER_SALE_FIELDS) {
+        if (!Object.hasOwn(row.patch, key)) continue;
+        delete row.patch[key];
+        ignoredAfterSale = true;
+        job.warnings.push({
+          row: row.rowNumber,
+          sourceId: row.sourceId,
+          sourceName: row.sourceName,
+          field: key,
+          message: `${fieldMap[key].label}已改由采购售后工单维护，已跳过该字段`,
+        });
+      }
+      if (
+        ignoredAfterSale &&
+        row.action === 'update' &&
+        !Object.keys(row.patch).some((key) => fieldMap[key]?.group === 'purchase') &&
+        !row.purchaseSkuMapped
+      ) {
+        row.action = 'missing';
+        row.skipReason = '采购售后字段已停用，本行没有其他可更新的采购字段';
+      }
       for (const key of DERIVED_PURCHASE_FIELDS) {
         if (!Object.hasOwn(row.patch, key)) continue;
         delete row.patch[key];
@@ -375,6 +444,15 @@ export async function commitImport(id, user, kind = 'legacy') {
           field: key,
           message: `${fieldMap[key].label}由系统自动计算，已跳过该字段并保留系统计算值`,
         });
+      }
+      if (
+        ignoredManual &&
+        row.action === 'update' &&
+        !Object.keys(row.patch).some((key) => fieldMap[key]?.group === 'purchase') &&
+        !row.purchaseSkuMapped
+      ) {
+        row.action = 'missing';
+        row.skipReason = '争议成功金额仅允许手工维护，本行没有其他可更新的采购字段';
       }
       if (user.role !== 'operations' || !Object.hasOwn(row.patch, 'purchaseStatus')) continue;
       delete row.patch.purchaseStatus;
@@ -531,7 +609,7 @@ export async function commitImport(id, user, kind = 'legacy') {
 
 export async function listImports(user) {
   const jobs = await ImportJob.findAll({
-    ...(user && user.role !== 'admin' ? { where: { createdBy: user.id } } : {}),
+    ...(user && !canViewAllActivity(user) ? { where: { createdBy: user.id } } : {}),
     attributes: [
       'id',
       'uploadId',
@@ -556,6 +634,6 @@ export async function listImports(user) {
 export async function getImportPreview(id, user) {
   const job = await ImportJob.findByPk(id);
   assert(job, '导入记录不存在', 404);
-  assert(!user || user.role === 'admin' || job.createdBy === user.id, '无权查看该导入结果', 403);
+  assert(!user || canViewAllActivity(user) || job.createdBy === user.id, '无权查看该导入结果', 403);
   return previewResult(job);
 }

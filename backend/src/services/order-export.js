@@ -1,3 +1,4 @@
+import { enrichSellerRefunds } from './seller-refund.js';
 import ExcelJS from 'exceljs';
 import { Op } from 'sequelize';
 import { fields } from '../fields.js';
@@ -171,6 +172,7 @@ export async function exportOrders(
   sheet.getRow(1).commit();
   const dropdowns = createDropdownSources(workbook, selectedColumns, definitions);
   do {
+    if (!purchaseTemplate) await enrichSellerRefunds(batch);
     if (thumbnails)
       await thumbnails.prepare(batch, (completedImages, imageCount) => {
         progress({ stage: 'images', completedRows, totalRows: count, completedImages, imageCount });

@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { Refresh, Search } from '@element-plus/icons-vue';
 import { loadHomeReport } from '../../api/home';
 import StoreOwnerSelect from './StoreOwnerSelect.vue';
+import BusinessDatePicker from '../BusinessDatePicker.vue';
 
 const props = defineProps({ byStore: Boolean, managed: Boolean, sharedReport: Object });
 const loading = ref(false),
@@ -18,6 +19,7 @@ const storeIds = ref([]),
   ownerId = ref(null),
   dates = ref([]);
 const applied = ref({ storeIds: [], ownerId: null, dates: [] });
+const datePicker = ref(null);
 const page = ref(1),
   pageSize = ref(50);
 const columns = [
@@ -52,6 +54,7 @@ const visible = computed(() =>
 );
 const incomplete = computed(() => filtered.value.some((row) => !row.ready));
 function query() {
+  if (datePicker.value && !datePicker.value.validate(dates.value)) return;
   applied.value = {
     storeIds: [...(storeIds.value || [])],
     ownerId: ownerId.value,
@@ -122,7 +125,11 @@ onMounted(() => {
           :label="`${store.name}${store.isThirdParty ? '（三方）' : ''}`"
         />
       </el-select>
-      <el-date-picker
+      <BusinessDatePicker
+        ref="datePicker"
+        policy="storeSummary"
+        :min-date="report?.startDate"
+        :max-date="report?.endDate"
         v-model="dates"
         type="daterange"
         value-format="YYYY-MM-DD"

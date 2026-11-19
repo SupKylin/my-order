@@ -13,13 +13,15 @@ import { WalmartSync } from './walmart/models.js';
 import { publicUser } from '../auth.js';
 import { dictionaryKinds } from '../dictionaries.js';
 import { assert } from '../errors.js';
+import { ROLES } from '../fields.js';
+import { canViewAllActivity } from '../permissions.js';
 
 // 维护页独立使用分页接口，原有下拉框、导入页的全量查询保持兼容。
 export const resources = {
   users: {
     model: User,
     search: ['username', 'displayName'],
-    filters: { role: ['operations', 'purchasing', 'admin'], active: ['true', 'false'] },
+    filters: { role: Object.keys(ROLES), active: ['true', 'false'] },
   },
   stores: {
     model: Store,
@@ -64,7 +66,7 @@ export async function listManagement(resource, query = {}, user) {
   assert(Number.isSafeInteger(page) && page > 0 && page <= 1000000, '页码无效');
   assert([20, 50, 100].includes(pageSize), '每页条数无效');
   const where = resource === 'dictionaries' ? { kind: query.kind } : {};
-  if (resource === 'imports' && user && user.role !== 'admin') where.createdBy = user.id;
+  if (resource === 'imports' && user && !canViewAllActivity(user)) where.createdBy = user.id;
   const q = typeof query.q === 'string' ? query.q.trim() : '';
   assert(q.length <= 255, '关键词最多 255 字');
   // 转义 LIKE 通配符，关键词中的 % 和 _ 按原文搜索。

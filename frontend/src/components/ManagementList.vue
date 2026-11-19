@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api/http';
 import { useAuth } from '../stores/auth';
 import { useMeta } from '../stores/meta';
+import BusinessDatePicker from './BusinessDatePicker.vue';
 
 const props = defineProps({
   resource: { type: String, required: true },
@@ -26,6 +27,7 @@ const loading = ref(false),
   deleting = ref(false),
   selected = ref([]);
 const draft = reactive({ q: '', dates: [], active: '', role: '', status: '', enabled: '' });
+const datePicker = ref(null);
 let applied = {},
   requestVersion = 0;
 const filters = computed(() =>
@@ -36,11 +38,7 @@ const filters = computed(() =>
           {
             key: 'role',
             label: '全部角色',
-            options: [
-              ['operations', '运营'],
-              ['purchasing', '采购'],
-              ['admin', '最高权限总账号'],
-            ],
+            options: Object.entries(meta.roles),
           },
           {
             key: 'active',
@@ -120,6 +118,7 @@ async function refresh() {
   }
 }
 function query() {
+  if (datePicker.value && !datePicker.value.validate(draft.dates)) return;
   applied = { q: draft.q.trim(), startDate: draft.dates?.[0], endDate: draft.dates?.[1] };
   for (const filter of filters.value) applied[filter.key] = draft[filter.key];
   page.value = 1;
@@ -247,7 +246,9 @@ defineExpose({ refresh, total });
           :label="label"
         />
       </el-select>
-      <el-date-picker
+      <BusinessDatePicker
+        ref="datePicker"
+        :policy="resource === 'audit-logs' ? 'auditDate' : 'recordDate'"
         v-model="draft.dates"
         type="daterange"
         value-format="YYYY-MM-DD"

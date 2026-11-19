@@ -1,12 +1,32 @@
 import { Store } from './models.js';
 import { assert } from './errors.js';
 
-const common = ['home', 'orders', 'imports', 'templates', 'audit-logs', 'purchase-after-sales'];
+const common = [
+  'home',
+  'orders',
+  'imports',
+  'templates',
+  'audit-logs',
+  'purchase-after-sales',
+  'purchase-statistics',
+];
 export const rolePermissions = {
   admin: ['*'],
-  purchasing: [...common, 'purchaseChannel', 'purchasePlatform', 'purchaseStatus'],
+  supervisor: [
+    ...common,
+    'stores',
+    'purchasePlatform',
+    'risk-addresses',
+    'orderStatus',
+    'procurement',
+  ],
+  purchasing: [...common, 'purchaseChannel', 'purchasePlatform', 'purchaseStatus', 'procurement'],
   operations: [...common, 'risk-addresses', 'orderStatus'],
 };
+/** 全部账号的日志/导入结果读取，与账号管理权限分离。 */
+export function canViewAllActivity(user) {
+  return ['admin', 'supervisor'].includes(user?.role);
+}
 export function requirePermission(user, permission) {
   assert(
     user &&

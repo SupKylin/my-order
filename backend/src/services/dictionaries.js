@@ -2,7 +2,12 @@ import { db, DictionaryOption } from '../models.js';
 import { fields } from '../fields.js';
 import { dictionaryKinds, optionKey } from '../dictionaries.js';
 import { assert } from '../errors.js';
-import { channelDiscount, discountInputs } from '../lib/channel-discount.js';
+import {
+  modeChannelDiscount,
+  modeDiscountKey,
+  discountInputs,
+  shippingModes,
+} from '../lib/channel-discount.js';
 
 export function checkKind(kind) {
   assert(Object.hasOwn(dictionaryKinds, kind), '不支持的字典类型', 404);
@@ -72,11 +77,21 @@ export async function saveDictionaryOption(kind, id, input) {
       409,
     );
     const data = { value, sortOrder, active: input.active };
-    if (
-      kind === 'purchaseChannel' &&
-      Object.keys(discountInputs).some((key) => Object.hasOwn(input, key))
-    )
-      Object.assign(data, channelDiscount(input));
+    if (kind === 'purchaseChannel') {
+      assert(
+        !Object.keys(discountInputs).some((key) => Object.hasOwn(input, key)),
+        '采购折扣已区分 FBA / FBM，请刷新页面后分别填写',
+      );
+      for (const mode of shippingModes) {
+        if (
+          Object.keys(discountInputs).some((key) =>
+            Object.hasOwn(input, modeDiscountKey(mode, key)),
+          )
+        )
+          Object.assign(data, modeChannelDiscount(input, mode));
+      }
+      data.modeDiscountInitialized = true;
+    }
     // 只更新字典，不替换历史订单中的字符串快照。
     return existing
       ? existing.update({ ...data, version: existing.version + 1 }, { transaction })

@@ -25,13 +25,7 @@ const time = (value) =>
         <strong>{{ line.status }}</strong> · 退货单 {{ line.returnOrderId }} · 商品行
         {{ line.lineNumber }} · 数量 {{ line.quantity ?? '—' }}
       </p>
-      <p>
-        申请时间：{{ time(line.requestedAt) }} ·
-        {{ line.status === '已退款' ? '退款金额' : '接口金额' }}：{{
-          line.amount == null ? '暂不可用' : `${line.amount} ${line.currency}`
-        }}
-        · 退款完成时间：{{ time(line.completedAt) }}
-      </p>
+      <p>申请时间：{{ time(line.requestedAt) }} · 退款完成时间：{{ time(line.completedAt) }}</p>
       <p class="muted">
         退款状态：{{ line.refundStatus || '未返回' }} · 退货状态：{{ line.returnStatus || '未返回'
         }}<span v-if="line.reason"> · 原因：{{ line.reason }}</span>

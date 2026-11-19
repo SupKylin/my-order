@@ -1,3 +1,4 @@
+import { SELLER_REFUND_VERSION } from './seller-refund.js';
 import { amountText, amountUnits, pstDay } from './statistics.js';
 
 export const RECON_VERSION = 2;
@@ -50,6 +51,7 @@ async function fetchReport(client, date) {
     postedRefunds = new Map(),
     payments = new Map(),
     paymentIssues = new Set();
+  const sellerRefundRows = [];
   let datesComplete = true;
   for (let page = 0; page < 1000; page++) {
     if (seen.has(offset)) throw new Error('财务对账分页重复，数据未完整获取');
@@ -90,6 +92,22 @@ async function fetchReport(client, date) {
       const type = String(row['Amount Type'] || '')
         .trim()
         .toLowerCase();
+      if (REFUND_CHARGES.has(type) || NON_CUSTOMER_CHARGES.has(type)) {
+        const currency = String(row.Currency || '')
+          .trim()
+          .toUpperCase();
+        if (currency && currency !== 'USD') throw new Error('退款报表含非 USD 金额');
+        sellerRefundRows.push({
+          transaction: String(row['Transaction Key'] || '').trim(),
+          order: String(row['Customer Order #'] || '').trim(),
+          sku: String(row['Partner Item Id'] || '').trim(),
+          po: String(row['Purchase Order #'] || '').trim(),
+          orderLine: String(row['Purchase Order line #'] || '').trim(),
+          type,
+          amount: signedText(signedUnits(row.Amount)),
+          customer: REFUND_CHARGES.has(type),
+        });
+      }
       if (NON_CUSTOMER_CHARGES.has(type)) continue;
       if (!REFUND_CHARGES.has(type)) throw new Error('财务对账包含尚未识别的退款费用类型');
       // 美国站 v1 报表实际以空 Currency 返回 USD；显式其他币种不混算。
@@ -116,6 +134,8 @@ async function fetchReport(client, date) {
         start,
         end,
         financeFormat: 2,
+        sellerRefundVersion: SELLER_REFUND_VERSION,
+        sellerRefundRows,
         datesComplete,
         postedRefunds: [...postedRefunds].map(([day, units]) => [day, signedText(units)]),
         paidAmount:
@@ -160,7 +180,11 @@ export async function fetchReconciliation(client, previous = {}, now = new Date(
     result.availableDates = dates.map(({ value }) => value);
     let firstError;
     for (const { value } of dates) {
-      if (result.reports[value]?.financeFormat === 2) continue;
+      if (
+        result.reports[value]?.financeFormat === 2 &&
+        result.reports[value]?.sellerRefundVersion === SELLER_REFUND_VERSION
+      )
+        continue;
       try {
         result.reports[value] = await fetchReport(client, value);
       } catch (error) {

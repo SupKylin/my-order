@@ -27,12 +27,16 @@ import {
   getPurchaseAfterSale as detail,
   changePurchaseAfterSaleStatus as status,
   markSupplierFeedback,
+  savePurchaseRefundAmount as saveRefund,
 } from '../src/services/purchase-after-sales.js';
 import { migratePurchaseAfterSales } from '../src/migrations/purchase-after-sales.js';
 import { getItem, listOrders } from '../src/services/orders.js';
 import { createApp } from '../src/app.js';
 import { hashPassword } from '../src/auth.js';
 import { drainAudit } from '../src/services/audit.js';
+import { exportOrders } from '../src/services/order-export.js';
+import ExcelJS from 'exceljs';
+import { Writable } from 'node:stream';
 
 const isolated = /^my_order_after_sales_test_\d+$/.test(config.db.database);
 const test = (name, fn) => baseTest(name, { skip: !isolated }, fn);
@@ -54,6 +58,19 @@ const message = (content = '售后问题', images = []) => ({
 });
 const rejects = (run, code) =>
   assert.rejects(run, (error) => error.status === code || error.statusCode === code);
+
+async function refundFixture(name) {
+  const order = await Order.create({ orderNumber: `REFUND-${name}` });
+  const item = await OrderItem.create({
+    orderId: order.id,
+    shopName: '售后A',
+    walmartSku: name,
+    purchaseChannelKey: name,
+  });
+  await Purchase.create({ itemId: item.id, purchaseAmount: '25.00' });
+  const ticket = await create({ itemId: item.id, ...message('采购退款测试') }, users.operator);
+  return { item, ticket };
+}
 before(async () => {
   if (!isolated) return;
   // 本地可配置真实机器人，隔离测试不得继承启用状态。
@@ -70,7 +87,12 @@ before(async () => {
   );
   created = true;
   await db.sync();
-  for (const key of ['supplierFeedbackAt', 'supplierFeedbackBy', 'supplierFeedbackName'])
+  for (const key of [
+    'supplierFeedbackAt',
+    'supplierFeedbackBy',
+    'supplierFeedbackName',
+    'purchaseRefundAmount',
+  ])
     await db.getQueryInterface().removeColumn('purchase_after_sales', key);
   // 模拟已有旧通知表，增量升级应补列，重复执行安全。
   await db.getQueryInterface().removeColumn('after_sale_notifications', 'parts');
@@ -167,7 +189,9 @@ test('运营创建多图工单，幂等重试；原订单和采购数据不变�
     originalPurchase,
   );
   assert.equal((await getItem(items.a.id, users.admin)).purchaseAfterSale.id, ticketId);
+  assert.equal((await getItem(items.a.id, users.admin)).afterSales, '是');
   assert.equal((await getItem(items.a2.id, users.admin)).purchaseAfterSale, null);
+  assert.equal((await getItem(items.a2.id, users.admin)).afterSales, '否');
   const orders = await listOrders({ page: 1, pageSize: 20 }, users.operator);
   assert.equal(orders.total, 3);
   assert(orders.rows.some((row) => row.purchaseAfterSale?.id === ticketId));
@@ -240,16 +264,19 @@ test('采购回复、并发消息均保留；重复提交不增加记录，不�
 test('结束时保护并发新消息，结束不可回复；有权限运营可重开，全程保留事件和原记录', async () => {
   await rejects(() => status(ticketId, { status: 'completed', version: 1 }, users.admin), 409);
   let data = await detail(ticketId, {}, users.operator);
+  await Ticket.update({ purchaseRefundAmount: '0.00' }, { where: { id: ticketId } });
   await status(ticketId, { status: 'completed', version: data.version }, users.buyer);
   await rejects(() => reply(ticketId, message('不应写入'), users.operator), 409);
   data = await detail(ticketId, {}, users.operator);
   assert.equal(data.status, 'completed');
+  assert.equal((await getItem(items.a.id, users.admin)).afterSales, '是');
   assert(data.completedAt);
   assert.equal(data.records.at(-1).kind, 'completed');
   assert.equal((await list({ status: 'completed' }, users.operator)).total, 1);
   await status(ticketId, { status: 'open', version: data.version }, users.operator);
   data = await detail(ticketId, {}, users.operator);
   assert.equal(data.completedAt, null);
+  assert.equal((await getItem(items.a.id, users.admin)).afterSales, '是');
   assert.equal(data.records.at(-1).kind, 'reopened');
   await reply(ticketId, message('重新沟通'), users.operator);
   assert.equal((await detail(ticketId, {}, users.buyer)).records.length, 7);
@@ -429,6 +456,7 @@ test('处理中汇总跨分页；完毕与重新打开后立即变化，店铺�
   assert.equal(result.rows.length, 1);
   assert.equal(result.openCount, 21);
   const ticket = result.rows[0];
+  await Ticket.update({ purchaseRefundAmount: '0.00' }, { where: { id: ticket.id } });
   await status(ticket.id, { status: 'completed', version: ticket.version }, users.operator);
   result = await list({ q: 'SUMMARY-PAGES', status: 'completed' }, users.operator);
   assert.equal(result.total, 1);
@@ -521,11 +549,25 @@ test('企业微信通知事务入队、幂等、状态不推送、重试与失�
     const ticket = await create(input, users.operator);
     await create(input, users.operator);
     assert.equal(await Notification.count(), 1);
+    const purchase = await Purchase.create({
+      itemId: item.id,
+      purchaseChannel: ['通知渠道A', '通知渠道B'],
+      purchaseStatus: '采购成功（已出跟踪号）',
+    });
+    let current = await detail(ticket.id, {}, users.operator);
+    assert.deepEqual(current.item.purchaseChannel, ['通知渠道A', '通知渠道B']);
+    assert.equal(current.item.purchaseStatus, '采购成功（已出跟踪号）');
     const replyInput = message('采购人员回复');
     await reply(ticket.id, replyInput, users.buyer);
+    // 修改后再刷新详情获得新值；同一回复重试不改写已入队的通知快照。
+    await purchase.update({ purchaseChannel: ['通知渠道C'], purchaseStatus: '采购失败' });
     await reply(ticket.id, replyInput, users.buyer);
     assert.equal(await Notification.count(), 2);
+    current = await detail(ticket.id, {}, users.buyer);
+    assert.deepEqual(current.item.purchaseChannel, ['通知渠道C']);
+    assert.equal(current.item.purchaseStatus, '采购失败');
     const d = await detail(ticket.id, {}, users.admin);
+    await Ticket.update({ purchaseRefundAmount: '0.00' }, { where: { id: ticket.id } });
     await status(ticket.id, { status: 'completed', version: d.version }, users.admin);
     assert.equal(await Notification.count(), 2);
     await rejects(() => reply(ticket.id, message('不推送失败回复'), users.buyer), 409);
@@ -533,6 +575,10 @@ test('企业微信通知事务入队、幂等、状态不推送、重试与失�
     const pending = await Notification.findAll({ order: [['id', 'ASC']] });
     assert(pending[0].content.includes('新工单'));
     assert(pending[1].content.includes('新回复'));
+    assert(pending[0].content.includes('采购渠道：未分配\n'));
+    assert(pending[1].content.includes('采购渠道：通知渠道A / 通知渠道B\n'));
+    assert(pending.every((row) => !row.content.includes('采购状态：')));
+    assert(!pending[1].content.includes('通知渠道C'));
     assert(!JSON.stringify(pending).includes('test-only'));
     let calls = 0;
     const transport = async (_url, options) => {
@@ -541,6 +587,9 @@ test('企业微信通知事务入队、幂等、状态不推送、重试与失�
       assert.equal(body.msgtype, 'markdown_v2');
       assert.equal(body.images, undefined);
       assert(Buffer.byteLength(body.markdown_v2.content) <= 4096);
+      assert(body.markdown_v2.content.includes('采购渠道：'));
+      assert(!body.markdown_v2.content.includes('采购状态：'));
+      assert(!body.markdown_v2.content.includes('通知渠道C'));
       return { ok: true, json: async () => ({ errcode: 0 }) };
     };
     await deliverAfterSaleNotification(async () => ({
@@ -738,6 +787,7 @@ test('反馈供应商默认否，采购与管理员可标记；并发幂等、�
   assert.equal(await Record.count({ where: { ticketId: ticket.id } }), recordsCount);
   assert.deepEqual((await item.reload()).toJSON(), beforeItem);
   assert.equal((await list({ q: 'FEEDBACK-TEST' }, users.operator)).rows[0].supplierFeedback, true);
+  await Ticket.update({ purchaseRefundAmount: '0.00' }, { where: { id: ticket.id } });
   await status(ticket.id, { status: 'completed', version: result.version }, users.admin);
   result = await detail(ticket.id, {}, users.admin);
   await status(ticket.id, { status: 'open', version: result.version }, users.admin);
@@ -756,6 +806,7 @@ test('最高管理员可反馈已结束工单，忽略伪造清空输入，反�
     purchaseChannelKey: 'FEEDBACK-ADMIN',
   });
   const ticket = await create({ itemId: item.id, ...message() }, users.other);
+  await Ticket.update({ purchaseRefundAmount: '0.00' }, { where: { id: ticket.id } });
   await status(ticket.id, { status: 'completed', version: 1 }, users.admin);
   const oldCreate = AuditLog.create;
   AuditLog.create = async () => {
@@ -850,4 +901,260 @@ test('未反馈汇总跨页并独立于状态和反馈筛选，遵守其他条�
   ])
     assert.equal((await list({ ...query, ...extra }, users.admin)).unfeedbackCount, 0);
   await rejects(() => list({ ...query, supplierFeedback: 'invalid' }, users.admin), 400);
+});
+
+test('采购售后取工单而非旧标记：分页筛选、统计及完整导出一致，保留历史字段', async () => {
+  const order = await Order.create({ orderNumber: 'TICKET-SOURCE-ONLY' });
+  const ids = [];
+  for (const [index, oldFlag, ticketStatus] of [
+    [0, '是', null],
+    [1, '否', 'open'],
+    [2, null, 'completed'],
+    [3, null, null],
+  ]) {
+    const item = await OrderItem.create({
+      orderId: order.id,
+      shopName: '售后A',
+      walmartSku: `SOURCE-${index}`,
+      purchaseChannelKey: `SOURCE-${index}`,
+    });
+    ids.push(item.id);
+    await Purchase.create({
+      itemId: item.id,
+      afterSales: oldFlag,
+      afterSalesResult: '已结束',
+      afterSalesScreenshot: 'legacy-image',
+      afterSalesResultScreenshot: 'legacy-result',
+    });
+    if (ticketStatus)
+      await Ticket.create({
+        itemId: item.id,
+        status: ticketStatus,
+        createdBy: users.admin.id,
+        creatorName: 'admin',
+        lastActivityAt: new Date(),
+      });
+    assert.equal((await getItem(item.id, users.admin)).afterSales, ticketStatus ? '是' : '否');
+  }
+  for (const flag of ['是', '否']) {
+    const query = { q: 'TICKET-SOURCE-ONLY', afterSales: flag, pageSize: 1 };
+    const first = await listOrders(query, users.operator),
+      second = await listOrders({ ...query, page: 2 }, users.operator);
+    assert.equal(first.total, 2);
+    assert.equal(second.total, 2);
+    assert.equal(first.rows.length, 1);
+    assert.equal(second.rows.length, 1);
+    assert(first.rows.every((r) => r.afterSales === flag));
+    assert.notEqual(first.rows[0].id, second.rows[0].id);
+    assert.equal((await listOrders(query, users.other)).total, 0);
+    const chunks = [];
+    const stream = new Writable({
+      write(chunk, _encoding, done) {
+        chunks.push(chunk);
+        done();
+      },
+    });
+    stream.setHeader = () => {};
+    await exportOrders({ filters: query }, stream, false, users.operator);
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(Buffer.concat(chunks));
+    const sheet = book.worksheets[0],
+      headers = sheet.getRow(1).values;
+    assert.equal(sheet.rowCount, 3);
+    for (const r of [2, 3]) {
+      assert.equal(sheet.getRow(r).getCell(headers.indexOf('是否采购售后')).text, flag);
+      assert.equal(sheet.getRow(r).getCell(headers.indexOf('售后截图')).text, 'legacy-image');
+      assert.equal(sheet.getRow(r).getCell(headers.indexOf('售后结果')).text, '已结束');
+      assert.equal(sheet.getRow(r).getCell(headers.indexOf('售后结果截图')).text, 'legacy-result');
+    }
+  }
+  const response = await fetch(base + '/dashboard', { headers: sessions.admin });
+  assert.equal((await response.json()).afterSales, await Ticket.count());
+  const original = await Purchase.findOne({ where: { itemId: ids[0] } });
+  assert.equal(original.afterSales, '是');
+  for (const role of ['admin', 'operator', 'buyer'])
+    for (const key of [
+      'afterSales',
+      'afterSalesScreenshot',
+      'afterSalesResult',
+      'afterSalesResultScreenshot',
+    ]) {
+      const response = await fetch(`${base}/orders/${ids[0]}`, {
+        method: 'PUT',
+        headers: sessions[role],
+        body: JSON.stringify({
+          version: 1,
+          fields: { [key]: null },
+          baseFields: { [key]: original[key] },
+        }),
+      });
+      assert.equal(response.status, 400);
+      assert.match((await response.json()).message, /采购售后工单/);
+    }
+  assert.equal((await original.reload()).afterSales, '是');
+  await rejects(() => listOrders({ afterSales: 'invalid' }, users.admin), 400);
+});
+
+test('采购退款金额为空禁止关闭，0可保存关闭，列表详情一致且不改订单采购或通知', async () => {
+  const { item, ticket } = await refundFixture('ZERO');
+  const beforeItem = (await item.reload()).toJSON();
+  const purchase = await Purchase.findOne({ where: { itemId: item.id } }),
+    beforePurchase = purchase.toJSON();
+  const { AfterSaleNotification: Notification } = await import('../src/models.js');
+  const notifications = await Notification.count(),
+    records = await Record.count({ where: { ticketId: ticket.id } });
+  assert.equal((await detail(ticket.id, {}, users.admin)).purchaseRefundAmount, null);
+  // 关闭接口不接受未保存或伪造的金额绕过数据库校验。
+  const denied = await fetch(`${base}/purchase-after-sales/${ticket.id}/status`, {
+    method: 'POST',
+    headers: sessions.operator,
+    body: JSON.stringify({ status: 'completed', version: 1, purchaseRefundAmount: '0' }),
+  });
+  assert.equal(denied.status, 400);
+  assert.match((await denied.json()).message, /采购退款金额/);
+  assert.equal((await detail(ticket.id, {}, users.admin)).status, 'open');
+  const saved = await fetch(`${base}/purchase-after-sales/${ticket.id}/refund-amount`, {
+    method: 'PUT',
+    headers: sessions.operator,
+    body: JSON.stringify({ version: 1, purchaseRefundAmount: 0 }),
+  });
+  assert.equal(saved.status, 200);
+  const data = await saved.json();
+  assert.equal(data.purchaseRefundAmount, '0.00');
+  assert.equal((await detail(ticket.id, {}, users.admin)).purchaseRefundAmount, '0.00');
+  assert.equal(
+    (await list({ q: 'REFUND-ZERO' }, users.operator)).rows[0].purchaseRefundAmount,
+    '0.00',
+  );
+  assert.equal(await Record.count({ where: { ticketId: ticket.id } }), records);
+  await status(ticket.id, { status: 'completed', version: data.version }, users.buyer);
+  await rejects(
+    () =>
+      saveRefund(ticket.id, { purchaseRefundAmount: '10', version: data.version + 1 }, users.admin),
+    409,
+  );
+  assert.deepEqual((await item.reload()).toJSON(), beforeItem);
+  assert.deepEqual((await purchase.reload()).toJSON(), beforePurchase);
+  assert.equal(await Notification.count(), notifications);
+});
+
+test('采购退款金额拒绝非法格式，支持精确2位金额和显式清空，权限及WFS保护有效', async () => {
+  const { item, ticket } = await refundFixture('VALIDATION');
+  for (const amount of [
+    -1,
+    '-0.01',
+    '1.001',
+    '1e2',
+    'abc',
+    true,
+    [],
+    {},
+    undefined,
+    '10000000000000000',
+    'NaN',
+    'Infinity',
+  ])
+    await rejects(
+      () => saveRefund(ticket.id, { purchaseRefundAmount: amount, version: 1 }, users.admin),
+      400,
+    );
+  await rejects(
+    () => saveRefund(ticket.id, { purchaseRefundAmount: '1', version: 1 }, users.other),
+    403,
+  );
+  let d = await saveRefund(
+    ticket.id,
+    { purchaseRefundAmount: '9999999999999999.99', version: 1 },
+    users.admin,
+  );
+  assert.equal(d.purchaseRefundAmount, '9999999999999999.99');
+  await migratePurchaseAfterSales(); // 幂等迁移不得覆盖已维护的金额。
+  assert.equal(
+    (await detail(ticket.id, {}, users.buyer)).purchaseRefundAmount,
+    d.purchaseRefundAmount,
+  );
+  d = await saveRefund(
+    ticket.id,
+    { purchaseRefundAmount: ' 12.30 ', version: d.version },
+    users.buyer,
+  );
+  assert.equal(d.purchaseRefundAmount, '12.30');
+  const same = await saveRefund(
+    ticket.id,
+    { purchaseRefundAmount: '12.3', version: d.version },
+    users.buyer,
+  );
+  assert.equal(same.version, d.version);
+  d = await saveRefund(
+    ticket.id,
+    { purchaseRefundAmount: '  ', version: d.version },
+    users.operator,
+  );
+  assert.equal(d.purchaseRefundAmount, null);
+  await rejects(
+    () => status(ticket.id, { status: 'completed', version: d.version }, users.admin),
+    400,
+  );
+  const audit = await AuditLog.findOne({
+    where: {
+      entityId: String(ticket.id),
+      action: 'purchase_after_sale',
+      'details.kind': 'refund_amount',
+    },
+    order: [['id', 'DESC']],
+  });
+  assert.deepEqual(audit.details.before, { purchaseRefundAmount: '12.30' });
+  assert.deepEqual(audit.details.after, { purchaseRefundAmount: null });
+  await item.update({ fulfillmentParty: 'WFSFulfilled' });
+  await rejects(
+    () => saveRefund(ticket.id, { purchaseRefundAmount: '0', version: d.version }, users.buyer),
+    403,
+  );
+});
+
+test('退款金额修改采用版本和事务保护，旧版本不能覆盖，审计失败整笔回滚', async () => {
+  const { ticket } = await refundFixture('CONCURRENT');
+  const results = await Promise.allSettled([
+    saveRefund(ticket.id, { purchaseRefundAmount: '10.10', version: 1 }, users.admin),
+    saveRefund(ticket.id, { purchaseRefundAmount: '20.20', version: 1 }, users.buyer),
+  ]);
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  assert.equal(results.find((r) => r.status === 'rejected').reason.status, 409);
+  const d = await detail(ticket.id, {}, users.admin);
+  await rejects(() => status(ticket.id, { status: 'completed', version: 1 }, users.admin), 409);
+  const oldCreate = AuditLog.create;
+  AuditLog.create = async () => {
+    throw new Error('refund audit failure');
+  };
+  try {
+    await assert.rejects(() =>
+      saveRefund(ticket.id, { purchaseRefundAmount: '30', version: d.version }, users.admin),
+    );
+  } finally {
+    AuditLog.create = oldCreate;
+  }
+  const after = await detail(ticket.id, {}, users.admin);
+  assert.equal(after.version, d.version);
+  assert.equal(after.purchaseRefundAmount, d.purchaseRefundAmount);
+});
+
+test('历史已完毕工单不回填金额或改状态，重开后空值不能再次关闭', async () => {
+  const { ticket } = await refundFixture('LEGACY');
+  await Ticket.update(
+    { status: 'completed', completedAt: new Date() },
+    { where: { id: ticket.id } },
+  );
+  await migratePurchaseAfterSales();
+  await migratePurchaseAfterSales();
+  let d = await detail(ticket.id, {}, users.admin);
+  assert.equal(d.status, 'completed');
+  assert.equal(d.purchaseRefundAmount, null);
+  await status(ticket.id, { status: 'open', version: d.version }, users.operator);
+  d = await detail(ticket.id, {}, users.admin);
+  await rejects(
+    () => status(ticket.id, { status: 'completed', version: d.version }, users.buyer),
+    400,
+  );
+  d = await saveRefund(ticket.id, { purchaseRefundAmount: '0', version: d.version }, users.buyer);
+  await status(ticket.id, { status: 'completed', version: d.version }, users.operator);
 });

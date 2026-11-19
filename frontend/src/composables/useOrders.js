@@ -75,6 +75,8 @@ export function useOrders() {
     endDate: '',
     shipStartDate: '',
     shipEndDate: '',
+    deliveryStartDate: '',
+    deliveryEndDate: '',
     purchaseAssignedStartTime: '',
     purchaseAssignedEndTime: '',
     shippingWarning: '',
@@ -84,6 +86,7 @@ export function useOrders() {
   });
   const dates = ref([]),
     shipDates = ref([]),
+    deliveryDates = ref([]),
     purchaseAssignedDates = ref([]),
     table = ref();
   // 草稿筛选与已查询条件分开，翻页、刷新和导出不会应用尚未确认的条件。
@@ -179,6 +182,8 @@ export function useOrders() {
       endDate: '',
       shipStartDate: '',
       shipEndDate: '',
+      deliveryStartDate: '',
+      deliveryEndDate: '',
       purchaseAssignedStartTime: '',
       purchaseAssignedEndTime: '',
       shippingWarning: '',
@@ -187,6 +192,7 @@ export function useOrders() {
     });
     dates.value = [];
     shipDates.value = [];
+    deliveryDates.value = [];
     purchaseAssignedDates.value = [];
     await search();
   }
@@ -289,6 +295,14 @@ export function useOrders() {
     { flush: 'sync' },
   );
   watch(
+    deliveryDates,
+    (value) => {
+      filters.deliveryStartDate = value?.[0] || '';
+      filters.deliveryEndDate = value?.[1] || '';
+    },
+    { flush: 'sync' },
+  );
+  watch(
     dates,
     (value) => {
       filters.startDate = value?.[0] || '';
@@ -366,6 +380,7 @@ export function useOrders() {
     dates,
     shipDates,
     table,
+    deliveryDates,
     purchaseAssignedDates,
     load,
     refresh,

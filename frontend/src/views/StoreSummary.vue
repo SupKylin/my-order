@@ -4,11 +4,14 @@ import { Refresh, Search } from '@element-plus/icons-vue';
 import DailyStatistics from '../components/home/DailyStatistics.vue';
 import StoreOverview from '../components/home/StoreOverview.vue';
 import StoreOwnerSelect from '../components/home/StoreOwnerSelect.vue';
+import ProfitStatistics from '../components/home/ProfitStatistics.vue';
 import { loadHomeReport } from '../api/home';
+import BusinessDatePicker from '../components/BusinessDatePicker.vue';
 
 const report = ref(null),
   loading = ref(false);
 const draft = reactive({ dates: [], storeIds: [], ownerId: null });
+const datePicker = ref(null);
 const applied = ref({ scope: 'summary', storeIds: [], ownerId: null });
 const stores = computed(() => report.value?.storeOptions || []);
 let requestVersion = 0;
@@ -30,6 +33,7 @@ async function load() {
   }
 }
 function query() {
+  if (datePicker.value && !datePicker.value.validate(draft.dates)) return;
   applied.value = {
     scope: 'summary',
     storeIds: [...draft.storeIds],
@@ -54,7 +58,9 @@ onMounted(load);
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新统计</el-button>
       </div>
       <div class="global-filters">
-        <el-date-picker
+        <BusinessDatePicker
+          ref="datePicker"
+          policy="storeSummary"
           v-model="draft.dates"
           type="daterange"
           value-format="YYYY-MM-DD"
@@ -93,6 +99,7 @@ onMounted(load);
     </section>
     <StoreOverview :report="report" />
     <StoreOverview :report="report" third-party />
+    <ProfitStatistics :report="report" />
     <div class="daily-section">
       <DailyStatistics by-store managed :shared-report="report" />
     </div>

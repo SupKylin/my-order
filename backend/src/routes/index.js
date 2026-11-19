@@ -17,6 +17,7 @@ import { authorizeApi } from '../permissions.js';
 import { auditRequests, installAuditHooks } from '../services/audit.js';
 import { createAuditRouter } from './audit.js';
 import { createPurchaseAfterSalesRouter } from './purchase-after-sales.js';
+import { createPurchaseStatisticsRouter } from './purchase-statistics.js';
 
 /** 统一注册 API 边界；业务路由默认受登录和 CSRF 保护。 */
 export function createApiRouter() {
@@ -30,6 +31,7 @@ export function createApiRouter() {
   router.use(createDashboardRouter());
   router.use(createOrdersRouter());
   router.use('/purchase-after-sales', createPurchaseAfterSalesRouter());
+  router.use('/purchase-statistics', createPurchaseStatisticsRouter());
   router.use('/users', createUsersRouter());
   router.use('/templates', createTemplatesRouter());
   router.use('/uploads', createUploadsRouter());

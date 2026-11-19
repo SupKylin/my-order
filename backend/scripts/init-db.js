@@ -1,8 +1,10 @@
 import mysql from 'mysql2/promise';
+import { migratePurchaseStatistics } from '../src/services/purchase-statistics/model.js';
 import { migrateHome } from '../src/services/home/model.js';
 import { migratePurchaseAfterSales } from '../src/migrations/purchase-after-sales.js';
 import { migrateOrderTablePreferences } from '../src/migrations/order-table-preferences.js';
 import { migratePermissionsAudit } from '../src/migrations/permissions-audit.js';
+import { migrateUserRoles } from '../src/migrations/user-roles.js';
 import { migrateWalmart } from '../src/migrations/walmart.js';
 import { config } from '../src/config.js';
 import { db, User } from '../src/models.js';
@@ -57,6 +59,7 @@ try {
   await connection.end();
   connection = null;
   await db.sync();
+  await migrateUserRoles();
   await migrateOrderTablePreferences();
   await migrateDictionaries();
   await migrateStores();
@@ -65,6 +68,7 @@ try {
   await migratePermissionsAudit();
   await migrateHome();
   await migratePurchaseAfterSales();
+  await migratePurchaseStatistics();
   const username = process.env.ADMIN_USERNAME || 'admin';
   if (!(await User.findOne({ where: { username } })))
     await User.create({

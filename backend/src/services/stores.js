@@ -1,5 +1,6 @@
 import { db, AuditLog, Store, User, storeOwnerInclude } from '../models.js';
 import { assert } from '../errors.js';
+import { normalizeCommissionRate } from '../lib/order-profit.js';
 
 function validateInput(input, editing) {
   const walmartStoreName = String(input.walmartStoreName ?? '').trim();
@@ -25,6 +26,7 @@ function serializeStore(store) {
     systemStoreName: value.systemStoreName,
     ownerId: value.ownerId ?? null,
     isThirdParty: Boolean(value.isThirdParty),
+    commissionRate: value.commissionRate ?? null,
     owner: value.owner || null,
     clientId: value.clientId || '',
     clientSecret: value.clientSecret || '',
@@ -58,6 +60,8 @@ export async function saveStore(id, input, actor) {
     ...(patch.clientId.trim() ? { clientId: patch.clientId } : {}),
     ...(patch.clientSecret.trim() ? { clientSecret: patch.clientSecret } : {}),
   };
+  if (Object.hasOwn(input, 'commissionRate'))
+    data.commissionRate = normalizeCommissionRate(input.commissionRate);
   const result = await db.transaction(async (transaction) => {
     if (Object.hasOwn(input, 'isThirdParty')) {
       assert(typeof input.isThirdParty === 'boolean', '三方店铺标记须为是或否');

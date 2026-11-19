@@ -62,12 +62,16 @@ export function normalizeValue(f, value) {
     return `${date} ${time ? `${time[1].padStart(2, '0')}:${time[2]}:${time[3] || '00'}` : '00:00:00'}`;
   }
   if (['money', 'decimal', 'integer'].includes(f.type)) {
+    if (f.maxDecimals != null && !['string', 'number'].includes(typeof value))
+      throw new Error('请输入非负数字');
     const raw = expandNumericValue(value)
       .trim()
       .replace(/^[¥￥$]\s*/, '')
       .replace(/,/g, '');
     if (!/^(?:\d+)(?:\.\d+)?$/.test(raw)) throw new Error('请输入非负数字');
     const [whole, fraction = ''] = raw.split('.');
+    if (f.maxDecimals != null && fraction.length > f.maxDecimals)
+      throw new Error(`最多支持 ${f.maxDecimals} 位小数`);
     if (BigInt(whole) > 999999999999n) throw new Error('数字超出允许范围');
     if (f.type === 'integer') {
       const num = Number(raw);
