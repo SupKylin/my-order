@@ -20,10 +20,11 @@ import { api } from '../api/http';
 import OrderTable from '../components/orders/OrderTable.vue';
 import PurchaseAssignmentSummary from '../components/orders/PurchaseAssignmentSummary.vue';
 import { canEditOrder } from '../utils/orderWritePolicy';
-import { canManageProcurement } from '../utils/permissions';
+import { canManageProcurement, canAssignChannel, canEditPurchaseNotes } from '../utils/permissions';
 import { useOrderTablePreferences } from '../composables/useOrderTablePreferences';
 import { orderColumns } from '../components/orders/orderColumns';
 import BusinessDatePicker from '../components/BusinessDatePicker.vue';
+import LossMarkDialog from '../components/orders/LossMarkDialog.vue';
 // 弹窗只在打开时挂载，因此不会提前下载编辑表单和图片上传逻辑。
 const OrderColumnSettings = defineAsyncComponent(
   () => import('../components/orders/OrderColumnSettings.vue'),
@@ -31,6 +32,12 @@ const OrderColumnSettings = defineAsyncComponent(
 const OrderEditor = defineAsyncComponent(() => import('../components/OrderEditor.vue'));
 const AfterSaleDrawer = defineAsyncComponent(
   () => import('../components/orders/AfterSaleDrawer.vue'),
+);
+const ChannelChangeDrawer = defineAsyncComponent(
+  () => import('../components/orders/ChannelChangeDrawer.vue'),
+);
+const CreateChannelChangeDialog = defineAsyncComponent(
+  () => import('../components/orders/CreateChannelChangeDialog.vue'),
 );
 const CreateAfterSaleDialog = defineAsyncComponent(
   () => import('../components/orders/CreateAfterSaleDialog.vue'),
@@ -93,7 +100,25 @@ function search() {
   return applySearch();
 }
 const procurementAllowed = computed(() => canManageProcurement(auth.user?.role));
+const assignmentAllowed = computed(() => canAssignChannel(auth.user?.role));
+const notesAllowed = computed(() => canEditPurchaseNotes(auth.user?.role));
 const afterSaleItem = ref(null);
+const channelChangeItem = ref(null),
+  channelChangeTicketId = ref(null);
+provide('openChannelChange', (ticket) => {
+  channelChangeTicketId.value = ticket.id;
+});
+function openChannelChange(row) {
+  if (row.channelChangeTicket?.status === 'open')
+    return (channelChangeTicketId.value = row.channelChangeTicket.id);
+  if (!canEditOrder(row)) return ElMessage.warning('WFS订单不允许创建渠道变更工单');
+  channelChangeItem.value = row;
+}
+function channelChangeCreated(result) {
+  if (channelChangeItem.value) channelChangeItem.value.channelChangeTicket = result;
+  channelChangeItem.value = null;
+  channelChangeTicketId.value = result.id;
+}
 const afterSaleTicketId = ref(null);
 provide('openPurchaseAfterSale', (ticket) => {
   afterSaleTicketId.value = ticket.id;
@@ -109,8 +134,12 @@ async function refreshAfterSaleOrder(ticket) {
   const version = (orderRefreshVersions.get(id) || 0) + 1;
   orderRefreshVersions.set(id, version);
   try {
-    const updated = await api.get(`/orders/${id}`);
+    const [updated, summary] = await Promise.all([
+      api.get(`/orders/${id}`),
+      api.get('/orders/purchase-assignment-summary'),
+    ]);
     if (!active || orderRefreshVersions.get(id) !== version) return;
+    assignmentSummary.value = summary;
     // 原位更新，不重载列表，保留分页、滚动位置、展开行和跨页勾选。
     for (const row of new Set([...rows.value, ...selected.value, editing.value].filter(Boolean)))
       if (row.id === updated.id) Object.assign(row, updated);
@@ -147,7 +176,25 @@ const statusLabel = computed(() =>
 const statusDraft = ref('');
 const statusItems = ref([]);
 const followupItems = ref(null);
+const lossItems = ref(null),
+  lossValue = ref(true);
+function openLossMark(items, value) {
+  if (loading.value) return;
+  if (!items.length || items.length > 500) return ElMessage.warning('请选择 1 至 500 条商品明细');
+  if (items.some((item) => !canEditOrder(item)))
+    return ElMessage.warning('WFS 订单不能修改亏损标记');
+  lossItems.value = items.map(({ id, version }) => ({ id, version }));
+  lossValue.value = value;
+}
+function lossSaved(updated) {
+  const changes = new Map(updated.map((item) => [item.id, item]));
+  for (const row of new Set([...rows.value, ...selected.value, editing.value].filter(Boolean)))
+    if (changes.has(row.id)) Object.assign(row, changes.get(row.id));
+  lossItems.value = null;
+  table.value?.clearSelection();
+}
 function openFollowupDialog() {
+  if (!notesAllowed.value) return;
   if (!selected.value.length) return ElMessage.warning('请先勾选商品明细');
   if (selected.value.length > 500) return ElMessage.warning('单次最多修改 500 条商品明细');
   if (selected.value.some((item) => !canEditOrder(item)))
@@ -417,7 +464,7 @@ async function submitStatus() {
           <el-button :icon="Plus" @click="edit(null)">新增明细</el-button>
           -->
           <el-button
-            v-if="procurementAllowed"
+            v-if="assignmentAllowed"
             :icon="User"
             :loading="opening"
             :disabled="!selected.length || loading"
@@ -436,6 +483,7 @@ async function submitStatus() {
           <el-button type="primary" :icon="Upload" @click="router.push('/imports/new')">导入订单</el-button>
           -->
           <el-button
+            v-if="notesAllowed"
             :icon="EditPen"
             :disabled="!selected.length || loading"
             @click="openFollowupDialog"
@@ -443,6 +491,16 @@ async function submitStatus() {
           >
           <el-button :icon="Download" :loading="exportBusy" @click="exportOrderRows()"
             >导出订单</el-button
+          >
+          <el-button
+            type="danger"
+            plain
+            :disabled="!selected.length || loading"
+            @click="openLossMark(selected, true)"
+            >批量标记亏损</el-button
+          >
+          <el-button :disabled="!selected.length || loading" @click="openLossMark(selected, false)"
+            >批量取消亏损标记</el-button
           >
           <el-button :icon="Download" :loading="exportBusy" @click="exportOrderRows(true)"
             >导出数据填写采购信息</el-button
@@ -750,7 +808,7 @@ async function submitStatus() {
         <span
           >已跨页选中 <strong>{{ selected.length }}</strong> 条商品明细</span
         ><el-button
-          v-if="procurementAllowed"
+          v-if="assignmentAllowed"
           type="primary"
           size="small"
           :icon="User"
@@ -774,7 +832,12 @@ async function submitStatus() {
           >批量更改运营订单状态</el-button
         ><el-button size="small" :icon="CopyDocument" @click="copyTrackingNumbers"
           >复制物流单号</el-button
-        ><el-button size="small" :icon="EditPen" :disabled="loading" @click="openFollowupDialog"
+        ><el-button
+          v-if="notesAllowed"
+          size="small"
+          :icon="EditPen"
+          :disabled="loading"
+          @click="openFollowupDialog"
           >批量修改跟单备注</el-button
         ><el-button text size="small" @click="table.clearSelection()">取消选择</el-button>
       </div>
@@ -785,12 +848,14 @@ async function submitStatus() {
           :rows="rows"
           :loading="loading"
           :show-operations="operationsOpen"
-          :can-assign="procurementAllowed"
+          :can-assign="assignmentAllowed"
           :warning-now="warningNow"
           @selection-change="selected = $event"
           @edit="edit"
           @assign="openAssign"
           @after-sale="openAfterSale"
+          @channel-change="openChannelChange"
+          @loss-mark="(row) => openLossMark([row], !row.isLoss)"
         />
       </div>
       <div class="table-footer">
@@ -809,6 +874,26 @@ async function submitStatus() {
     </section>
   </div>
   <OrderEditor v-if="editor" v-model="editor" :item="editing" @saved="refresh" />
+  <LossMarkDialog
+    v-if="lossItems"
+    :items="lossItems"
+    :is-loss="lossValue"
+    @close="lossItems = null"
+    @saved="lossSaved"
+  />
+  <CreateChannelChangeDialog
+    v-if="channelChangeItem"
+    :item="channelChangeItem"
+    @close="channelChangeItem = null"
+    @created="channelChangeCreated"
+  />
+  <ChannelChangeDrawer
+    v-if="channelChangeTicketId"
+    :ticket-id="channelChangeTicketId"
+    show-menu
+    @close="channelChangeTicketId = null"
+    @loaded="refreshAfterSaleOrder"
+  />
   <CreateAfterSaleDialog
     v-if="afterSaleItem"
     :item="afterSaleItem"
@@ -823,13 +908,13 @@ async function submitStatus() {
     @loaded="refreshAfterSaleOrder"
   />
   <BatchFollowupNoteDialog
-    v-if="followupItems"
+    v-if="followupItems && notesAllowed"
     :items="followupItems"
     @close="followupItems = null"
     @saved="followupSaved"
   />
   <AssignmentDialog
-    v-if="assignDialog && procurementAllowed"
+    v-if="assignDialog && assignmentAllowed"
     v-model="assignDialog"
     v-model:channels="assignmentChannels"
     :count="assignmentItems.length"

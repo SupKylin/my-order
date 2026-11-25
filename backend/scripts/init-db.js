@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise';
 import { migratePurchaseStatistics } from '../src/services/purchase-statistics/model.js';
 import { migrateHome } from '../src/services/home/model.js';
 import { migratePurchaseAfterSales } from '../src/migrations/purchase-after-sales.js';
+import { migrateChannelChangeTickets } from '../src/migrations/channel-change-tickets.js';
 import { migrateOrderTablePreferences } from '../src/migrations/order-table-preferences.js';
 import { migratePermissionsAudit } from '../src/migrations/permissions-audit.js';
 import { migrateUserRoles } from '../src/migrations/user-roles.js';
@@ -68,6 +69,7 @@ try {
   await migratePermissionsAudit();
   await migrateHome();
   await migratePurchaseAfterSales();
+  await migrateChannelChangeTickets();
   await migratePurchaseStatistics();
   const username = process.env.ADMIN_USERNAME || 'admin';
   if (!(await User.findOne({ where: { username } })))

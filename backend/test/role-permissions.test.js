@@ -4,6 +4,8 @@ import {
   canVisit,
   canManageProcurement,
   canViewAllActivity,
+  canAssignChannel,
+  canEditPurchaseNotes,
 } from '../../frontend/src/utils/permissions.js';
 import { rolePermissions, requirePermission } from '../src/permissions.js';
 import { ROLES } from '../src/fields.js';
@@ -16,6 +18,7 @@ test('四角色菜单及业务权限矩阵，未知角色关闭', () => {
       '/store-summary',
       '/orders',
       '/purchase-after-sales',
+      '/channel-change-tickets',
       '/imports/purchases/new',
       '/templates',
       '/imports',
@@ -29,6 +32,17 @@ test('四角色菜单及业务权限矩阵，未知角色关闭', () => {
     for (const path of ['/settings/order-statuses', '/settings/risk-addresses'])
       assert.equal(canVisit(role, path), role !== 'purchasing');
     assert.equal(canManageProcurement(role), role !== 'operations');
+    assert.equal(canAssignChannel(role), ['admin', 'purchasing'].includes(role));
+    assert.equal(canEditPurchaseNotes(role), ['admin', 'purchasing'].includes(role));
+    for (const permission of ['assign-channel', 'purchase-notes']) {
+      if (canAssignChannel(role))
+        assert.doesNotThrow(() => requirePermission({ role }, permission));
+      else
+        assert.throws(
+          () => requirePermission({ role }, permission),
+          (error) => error.status === 403,
+        );
+    }
     assert.equal(canViewAllActivity(role), ['admin', 'supervisor'].includes(role));
     if (canManageProcurement(role))
       assert.doesNotThrow(() => requirePermission({ role }, 'procurement'));

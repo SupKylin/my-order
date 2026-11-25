@@ -7,6 +7,7 @@ import { shippingRemainingHours, shippingWarningLabels } from '../../utils/shipp
 import { purchaseWarning, confirmationTime } from '../../utils/purchaseWarning';
 import { imageValues as parseImageValues } from '../../utils/image-values';
 import AfterSaleLink from './AfterSaleLink.vue';
+import ChannelChangeLink from './ChannelChangeLink.vue';
 const props = defineProps({
   row: { type: Object, required: true },
   field: { type: Object, required: true },
@@ -35,9 +36,13 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
   <div
     v-if="field.key === 'orderNumber'"
     class="order-number-cell"
-    :class="{ 'has-cancellation-intent': showCancellationIntent }"
+    :class="{
+      'has-cancellation-intent': showCancellationIntent,
+      'has-channel-change': Boolean(row.channelChangeTicket),
+    }"
   >
     <span class="mono order-number-text">{{ value ?? '—' }}</span>
+    <el-tag v-if="row.isLoss" type="danger" effect="dark" size="small">亏损</el-tag>
     <span v-if="showCancellationIntent" class="cancellation-intent-badge">
       <el-tag
         type="danger"
@@ -56,6 +61,7 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
       >{{ factorLabels[row.priceFactorLevel] }}</span
     >
     <AfterSaleLink :ticket="row.purchaseAfterSale" />
+    <ChannelChangeLink :ticket="row.channelChangeTicket" />
     <el-tag
       v-if="row.addressRisk"
       type="danger"

@@ -96,7 +96,7 @@ async function createItem(orderNumber, walmartSku = '001', shopName = '店铺A')
   });
   return item;
 }
-async function preview(rows, sourceKeys = keys) {
+async function preview(rows, sourceKeys = keys, user = actor) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(template.sheetName);
   sheet.addRow(sourceKeys);
@@ -107,7 +107,7 @@ async function preview(rows, sourceKeys = keys) {
     filename: `${id}.xlsx`,
     originalName: '采购匹配测试.xlsx',
     kind: 'excel',
-    uploadedBy: actor.id,
+    uploadedBy: user.id,
   });
   const filepath = uploadPath(file);
   files.push(filepath);
@@ -129,10 +129,64 @@ async function preview(rows, sourceKeys = keys) {
         },
       ],
     },
-    actor,
+    user,
     'purchase',
   );
 }
+
+test('运营和主管导入忽略采购及跟单备注，预览和旧预览提交均校验权限', async () => {
+  for (const role of ['operations', 'supervisor']) {
+    const user = await User.create({
+      username: `notes-${role}`,
+      displayName: role,
+      role,
+      passwordHash: 'unused',
+    });
+    const shop = `notes-${role}`;
+    await Store.create({ systemStoreName: shop, walmartStoreName: shop, ownerId: user.id });
+    const number = `NOTES-${role}`;
+    const item = await createItem(number, '001', shop);
+    await Purchase.update({ followupNote: '原跟单' }, { where: { itemId: item.id } });
+    const sourceKeys = [
+      'shopName',
+      'orderNumber',
+      'walmartSku',
+      'purchaseSku',
+      'purchaseNote',
+      'followupNote',
+    ];
+    const result = await preview(
+      [[shop, number, '001', '新SKU', '禁止采购备注', '禁止跟单备注']],
+      sourceKeys,
+      user,
+    );
+    assert.equal(result.blockingErrorCount, 0);
+    assert.equal(result.updated, 1);
+    for (const key of ['purchaseNote', 'followupNote']) {
+      assert(result.warnings.some((w) => w.field === key && w.message.includes('无权')));
+      assert.equal(Object.hasOwn(result.rows[0].patch, key), false);
+    }
+    // 模拟升级前保存的预览：提交阶段仍必须剔除受限字段。
+    const job = await ImportJob.findByPk(result.id);
+    const rows = job.rows;
+    Object.assign(rows[0].patch, { purchaseNote: '旧预览覆盖', followupNote: null });
+    job.changed('rows', true);
+    await job.update({ rows });
+    assert.equal((await commitImport(result.id, user, 'purchase')).updated, 1);
+    const purchase = await Purchase.findOne({ where: { itemId: item.id } });
+    assert.equal(purchase.purchaseSku, '新SKU');
+    assert.equal(purchase.purchaseNote, '原备注');
+    assert.equal(purchase.followupNote, '原跟单');
+    const notesOnly = await preview(
+      [[shop, number, '001', '禁止']],
+      ['shopName', 'orderNumber', 'walmartSku', 'followupNote'],
+      user,
+    );
+    assert.equal(notesOnly.updated, 0);
+    assert.equal(notesOnly.blockingErrorCount, 0);
+    assert.match(notesOnly.rows[0].skipReason, /备注无修改权限/);
+  }
+});
 
 test('采购 Excel 提交时记录成功时间，重复成功保留，重新采购更新时间且预览不改库', async () => {
   const successStates = [

@@ -87,6 +87,8 @@ function summary(ticket) {
     purchaseRefundAmount: value.purchaseRefundAmount ?? null,
     item: {
       id: item.id,
+      version: item.version,
+      isLoss: Boolean(item.isLoss),
       shopName: item.shopName,
       orderNumber: item.order.orderNumber,
       walmartSku: item.walmartSku,
@@ -101,6 +103,8 @@ function summary(ticket) {
 }
 const itemFields = [
   'id',
+  'version',
+  'isLoss',
   'shopName',
   'walmartSku',
   'productName',
@@ -122,10 +126,10 @@ async function findTicket(id, user, transaction, lock = false) {
     ticket = await Ticket.findByPk(ticket.id, { transaction, lock: transaction.LOCK.UPDATE });
   return { ticket, item };
 }
-async function messageInput(input, user, transaction) {
-  assert(input && typeof input.content === 'string', '请填写售后内容');
+export async function messageInput(input, user, transaction, label = '售后') {
+  assert(input && typeof input.content === 'string', `请填写${label}内容`);
   const content = input.content.trim();
-  assert(content.length > 0 && content.length <= 12000, '售后内容须为1至12000个字符');
+  assert(content.length > 0 && content.length <= 12000, `${label}内容须为1至12000个字符`);
   assert(
     typeof input.requestId === 'string' && uuid.test(input.requestId),
     '提交标识无效，请重新打开输入框',

@@ -8,7 +8,10 @@ import { storedChannels } from '../lib/channels.js';
 
 const MAX_ATTEMPTS = 5;
 const INTERVAL_MS = 4000; // 单实例串行发送，每分钟最多15次（含重试）。
-const enabled = () => Boolean(config.wecom.webhook && config.wecom.appUrl);
+const webhookFor = (channelChange) =>
+  channelChange ? config.wecom.channelChangeWebhook : config.wecom.webhook;
+const enabled = () =>
+  Boolean((config.wecom.webhook || config.wecom.channelChangeWebhook) && config.wecom.appUrl);
 
 export function notificationSettings(webhook, appUrl) {
   const url = new URL(webhook);
@@ -49,6 +52,9 @@ export function notificationContent(
     content,
     imageCount,
     createdAt,
+    channelChange,
+    beforeChannels,
+    targetChannels,
   },
   appUrl,
 ) {
@@ -58,9 +64,9 @@ export function notificationContent(
     timeStyle: 'medium',
     hour12: false,
   }).format(new Date(createdAt));
-  const link = `${appUrl}/purchase-after-sales?ticket=${ticketId}`;
+  const link = `${appUrl}/${channelChange ? 'channel-change-tickets' : 'purchase-after-sales'}?ticket=${ticketId}`;
   return [
-    kind === 'created' ? '【采购售后新工单】' : '【采购售后新回复】',
+    `【${channelChange ? '渠道变更' : '采购售后'}${kind === 'created' ? '新工单' : '新回复'}】`,
     `工单 #${ticketId} · 消息 #${recordId}`,
     `店铺：${shopName}`,
     `订单号：${orderNumber}`,
@@ -71,6 +77,12 @@ export function notificationContent(
         .filter(Boolean)
         .join(' / ') || '未分配'
     }`,
+    ...(channelChange
+      ? [
+          `变更前采购渠道：${beforeChannels?.join(' / ') || '未分配'}`,
+          `目标采购渠道：${targetChannels?.join(' / ') || '待分配'}`,
+        ]
+      : []),
     `发送人：${actorName}`,
     `时间：${time}（北京）`,
     `内容：${content}`,
@@ -86,9 +98,16 @@ const combinedImagePath = (imagePath) => {
 };
 
 // 内容按字符转义，避免用户输入被解释成图片、链接或格式；图片语法不可拆断。
-export function notificationParts(content, images, ticketId, recordId, appUrl) {
+export function notificationParts(
+  content,
+  images,
+  ticketId,
+  recordId,
+  appUrl,
+  channelChange = false,
+) {
   const origin = new URL(appUrl).origin;
-  const link = `${origin}/purchase-after-sales?ticket=${ticketId}`;
+  const link = `${origin}/${channelChange ? 'channel-change-tickets' : 'purchase-after-sales'}?ticket=${ticketId}`;
   const plain = content.endsWith(`查看工单：${link}`)
     ? content.slice(0, -`查看工单：${link}`.length)
     : content;
@@ -188,11 +207,18 @@ export async function prepareNotificationImage(imagePath, storage = config.stora
 }
 
 // 与沟通记录同事务写入，提交后由后台发送；同一recordId只入队一次。
-export async function queueAfterSaleNotification(ticket, item, record, kind, transaction) {
-  if (!enabled()) return;
+export async function queueAfterSaleNotification(
+  ticket,
+  item,
+  record,
+  kind,
+  transaction,
+  channelChange = false,
+) {
+  if (!config.wecom.appUrl || !webhookFor(channelChange)) return;
   let settings;
   try {
-    settings = notificationSettings(config.wecom.webhook, config.wecom.appUrl);
+    settings = notificationSettings(webhookFor(channelChange), config.wecom.appUrl);
   } catch {
     console.error('企业微信通知配置无效，跳过通知入队');
     return;
@@ -218,15 +244,25 @@ export async function queueAfterSaleNotification(ticket, item, record, kind, tra
       content: record.content,
       imageCount: record.images.length,
       createdAt: record.createdAt,
+      channelChange,
+      beforeChannels: ticket.beforeChannels,
+      targetChannels: ticket.targetChannels,
     },
     settings.appUrl,
   );
   await Notification.create(
     {
       ticketId: ticket.id,
-      recordId: record.id,
+      ...(channelChange ? { channelChangeRecordId: record.id } : { recordId: record.id }),
       content,
-      parts: notificationParts(content, record.images, ticket.id, record.id, settings.appUrl),
+      parts: notificationParts(
+        content,
+        record.images,
+        ticket.id,
+        record.id,
+        settings.appUrl,
+        channelChange,
+      ),
     },
     { transaction },
   );
@@ -259,10 +295,17 @@ export async function sendWecom(content, webhook, transport = fetch) {
 
 export async function deliverAfterSaleNotification(transport = fetch, now = new Date()) {
   if (!enabled()) return false;
-  const settings = notificationSettings(config.wecom.webhook, config.wecom.appUrl);
   const notification = await db.transaction(async (transaction) => {
     const row = await Notification.findOne({
-      where: { status: 'pending', nextAttemptAt: { [Op.lte]: now } },
+      where: {
+        status: 'pending',
+        nextAttemptAt: { [Op.lte]: now },
+        ...(!config.wecom.webhook
+          ? { channelChangeRecordId: { [Op.ne]: null } }
+          : !config.wecom.channelChangeWebhook
+            ? { channelChangeRecordId: null }
+            : {}),
+      },
       order: [['id', 'ASC']],
       transaction,
       lock: transaction.LOCK.UPDATE,
@@ -285,6 +328,10 @@ export async function deliverAfterSaleNotification(transport = fetch, now = new 
   ];
   let result;
   try {
+    const settings = notificationSettings(
+      webhookFor(notification.channelChangeRecordId != null),
+      config.wecom.appUrl,
+    );
     const part = parts[notification.nextPart];
     let payload = part;
     if (part.msgtype === 'markdown_v2') {
@@ -321,7 +368,8 @@ export async function deliverAfterSaleNotification(transport = fetch, now = new 
 export function startAfterSaleNotifications() {
   if (!enabled()) return async () => {};
   try {
-    notificationSettings(config.wecom.webhook, config.wecom.appUrl);
+    for (const webhook of [config.wecom.webhook, config.wecom.channelChangeWebhook].filter(Boolean))
+      notificationSettings(webhook, config.wecom.appUrl);
   } catch {
     console.error('企业微信通知配置无效，推送未启动');
     return async () => {};

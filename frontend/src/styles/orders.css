@@ -88,6 +88,18 @@
   gap: 10px;
   align-items: center;
 }
+.orders-panel > .panel-heading {
+  flex-wrap: wrap;
+}
+.orders-panel > .panel-heading .button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+}
+.orders-panel > .panel-heading .button-row .el-button {
+  margin-left: 0;
+}
 .panel-heading p {
   margin-top: 7px;
   font-size: 11px;
@@ -231,6 +243,13 @@
 .order-number-cell.has-cancellation-intent {
   flex-wrap: wrap;
   row-gap: 4px;
+}
+.order-number-cell.has-channel-change {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.order-number-cell.has-channel-change .order-number-text {
+  flex-shrink: 0;
 }
 .cancellation-intent-badge {
   flex-basis: 100%;
@@ -404,6 +423,10 @@ body .column-settings-dialog .el-dialog__body {
 /* 单元格背景同时覆盖左右固定列，悬停时仍保留预警色。 */
 .orders-table .shipping-row-yellow {
   --shipping-row-bg: #fffced;
+}
+.orders-table .el-table__body tr.loss-mark-row > td.el-table__cell {
+  background-color: #fef0f0;
+  color: #c45656;
 }
 .orders-table .shipping-row-orange {
   --shipping-row-bg: #fff3e6;

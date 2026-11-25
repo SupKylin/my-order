@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus';
 import FieldInput from './FieldInput.vue';
 import { useMeta } from '../stores/meta';
 import { useAuth } from '../stores/auth';
-import { canManageProcurement } from '../utils/permissions';
+import { canManageProcurement, canAssignChannel, canEditPurchaseNotes } from '../utils/permissions';
 import { orderApi } from '../api/orders';
 import { canEditOrder } from '../utils/orderWritePolicy';
 import { fmtBeijingDate } from '../utils/format';
@@ -39,8 +39,9 @@ const fieldReadOnly = (field) =>
   field.readOnly ||
   platformReadOnly(field) ||
   derivedPurchaseFields.has(field.key) ||
-  (!canManageProcurement(auth.user?.role) &&
-    ['purchaseStatus', 'purchaseChannel'].includes(field.key));
+  (!canManageProcurement(auth.user?.role) && field.key === 'purchaseStatus') ||
+  (!canAssignChannel(auth.user?.role) && field.key === 'purchaseChannel') ||
+  (!canEditPurchaseNotes(auth.user?.role) && ['purchaseNote', 'followupNote'].includes(field.key));
 const visible = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) });
 const costChannels = computed(() => form.purchaseChannel || []);
 const reference = computed(() =>

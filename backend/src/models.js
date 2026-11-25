@@ -86,6 +86,7 @@ export const OrderItem = db.define(
     walmartSourceKey: { type: DataTypes.STRING(64), allowNull: true, unique: true },
     walmart: { type: DataTypes.JSON, allowNull: true },
     returnInfo: { type: DataTypes.JSON, allowNull: true },
+    isLoss: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     addressKey: { type: DataTypes.STRING(64), allowNull: true },
     ...attrs('item'),
     version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
@@ -172,11 +173,60 @@ export const PurchaseAfterSaleRecord = db.define(
     indexes: [{ unique: true, fields: ['ticketId', 'requestId'] }, { fields: ['ticketId', 'id'] }],
   },
 );
+export const ChannelChangeTicket = db.define(
+  'ChannelChangeTicket',
+  {
+    id: id(),
+    itemId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+    // MySQL允许多个NULL；唯一值使每条商品最多存在一个未关闭工单。
+    openItemId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true, unique: true },
+    requestId: { type: DataTypes.UUID, allowNull: false, unique: true },
+    status: { type: DataTypes.ENUM('open', 'completed'), allowNull: false, defaultValue: 'open' },
+    version: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 1 },
+    beforeChannels: { type: DataTypes.JSON, allowNull: false },
+    targetChannels: { type: DataTypes.JSON, allowNull: false },
+    beforePurchase: { type: DataTypes.JSON, allowNull: true },
+    targetPurchase: { type: DataTypes.JSON, allowNull: true },
+    executedBefore: { type: DataTypes.JSON, allowNull: true },
+    executedAfter: { type: DataTypes.JSON, allowNull: true },
+    createdBy: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+    creatorName: { type: DataTypes.STRING(100), allowNull: false },
+    appliedAt: DataTypes.DATE(3),
+    appliedBy: DataTypes.INTEGER.UNSIGNED,
+    appliedByName: DataTypes.STRING(100),
+    lastActivityAt: { type: DataTypes.DATE(3), allowNull: false },
+    completedAt: DataTypes.DATE(3),
+  },
+  {
+    tableName: 'channel_change_tickets',
+    indexes: [{ fields: ['itemId', 'id'] }, { fields: ['status', 'lastActivityAt'] }],
+  },
+);
+export const ChannelChangeRecord = db.define(
+  'ChannelChangeRecord',
+  {
+    id: id(),
+    ticketId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+    requestId: { type: DataTypes.UUID, allowNull: false },
+    kind: { type: DataTypes.ENUM('message', 'completed', 'reopened', 'applied'), allowNull: false },
+    actorId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+    actorName: { type: DataTypes.STRING(100), allowNull: false },
+    actorRole: { type: DataTypes.STRING(32), allowNull: false },
+    content: { type: DataTypes.TEXT, allowNull: false },
+    images: { type: DataTypes.JSON, allowNull: false },
+  },
+  {
+    tableName: 'channel_change_records',
+    updatedAt: false,
+    indexes: [{ unique: true, fields: ['ticketId', 'requestId'] }, { fields: ['ticketId', 'id'] }],
+  },
+);
 export const AfterSaleNotification = db.define(
   'AfterSaleNotification',
   {
     id: id(),
-    recordId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, unique: true },
+    recordId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true, unique: true },
+    channelChangeRecordId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true, unique: true },
     ticketId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
     content: { type: DataTypes.TEXT, allowNull: false },
     parts: { type: DataTypes.JSON, allowNull: true },
@@ -308,6 +358,15 @@ OrderItem.hasOne(PurchaseAfterSale, {
   onDelete: 'RESTRICT',
 });
 PurchaseAfterSale.belongsTo(OrderItem, { as: 'item', foreignKey: 'itemId', onDelete: 'RESTRICT' });
+ChannelChangeTicket.belongsTo(OrderItem, {
+  as: 'item',
+  foreignKey: 'itemId',
+  onDelete: 'RESTRICT',
+});
+ChannelChangeRecord.belongsTo(ChannelChangeTicket, {
+  foreignKey: 'ticketId',
+  onDelete: 'RESTRICT',
+});
 PurchaseAfterSaleRecord.belongsTo(PurchaseAfterSale, {
   foreignKey: 'ticketId',
   onDelete: 'RESTRICT',
@@ -365,6 +424,7 @@ export function serializeItem(instance) {
   const result = {
     id: value.id,
     version: value.version,
+    isLoss: Boolean(value.isLoss),
     orderNumber: value.order?.orderNumber,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
@@ -376,6 +436,7 @@ export function serializeItem(instance) {
     // 仅供未结算详情展示当前配置，不能覆盖结算快照或参与利润/导出。
     storeCommissionRate: value.store?.commissionRate ?? null,
     purchaseAfterSale: value.purchaseAfterSale || null,
+    channelChangeTicket: value.channelChangeTicket || null,
     manualEditable: !isWfsOrder(value),
     priceFactorLevel: priceFactorLevel(value.purchase?.priceFactor),
     purchaseConfirmedAt: value.purchase?.purchaseConfirmedAt || null,

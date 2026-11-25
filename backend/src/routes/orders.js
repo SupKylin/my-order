@@ -1,3 +1,5 @@
+import { purchaseAssignmentSummary } from '../services/purchase-assignment-summary.js';
+import { updateLossMark } from '../services/order-loss.js';
 import { Router } from 'express';
 import {
   getItem,
@@ -36,11 +38,17 @@ export function createOrdersRouter() {
   router.post('/orders/batch-status', async (req, res) =>
     res.json(await updateOrderStatus(req.body, req.user)),
   );
+  router.post('/orders/batch-loss-mark', async (req, res) =>
+    res.json(await updateLossMark(req.body, req.user)),
+  );
   router.post('/orders/batch-purchase-status', async (req, res) =>
     res.json(await updatePurchaseStatus(req.body, req.user)),
   );
   router.post('/orders/batch-followup-note', async (req, res) =>
     res.json(await updateFollowupNote(req.body, req.user)),
+  );
+  router.get('/orders/purchase-assignment-summary', async (req, res) =>
+    res.json(await purchaseAssignmentSummary(req.user)),
   );
   router.get('/orders/:id', async (req, res) => res.json(await getItem(req.params.id, req.user)));
   router.post('/orders', async (req, res) =>

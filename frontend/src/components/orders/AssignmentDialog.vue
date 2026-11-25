@@ -2,7 +2,7 @@
 import { useMeta } from '../../stores/meta';
 const assignDialog = defineModel({ type: Boolean });
 const channels = defineModel('channels', { type: Array, required: true });
-defineProps({ count: Number, assignBusy: Boolean });
+defineProps({ count: Number, assignBusy: Boolean, description: String });
 const emit = defineEmits(['submit']);
 const meta = useMeta();
 </script>
@@ -15,7 +15,7 @@ const meta = useMeta();
     :close-on-press-escape="!assignBusy"
     :show-close="!assignBusy"
     ><p class="dialog-description">
-      为选中的 {{ count }} 条商品明细分配采购渠道，本次选择将覆盖原渠道。
+      {{ description || `为选中的 ${count} 条商品明细分配采购渠道，本次选择将覆盖原渠道。` }}
     </p>
     <el-form label-position="top"
       ><el-form-item label="采购渠道" required

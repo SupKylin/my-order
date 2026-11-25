@@ -2,7 +2,7 @@ import { enrichSellerRefunds } from './seller-refund.js';
 import ExcelJS from 'exceljs';
 import { Op } from 'sequelize';
 import { fields } from '../fields.js';
-import { OrderItem, serializeItem } from '../models.js';
+import { OrderItem, ChannelChangeTicket, serializeItem } from '../models.js';
 import { assert } from '../errors.js';
 import { buildFilters } from './orders.js';
 import { getFieldDefinitions } from './dictionaries.js';
@@ -119,10 +119,11 @@ export async function exportOrders(
   input,
   res,
   purchaseTemplate = false,
-  { progress = () => {}, cache, user } = {},
+  { progress = () => {}, cache, user, itemIds } = {},
 ) {
   // 两类导出均复用列表筛选条件；勾选状态、分页参数不能缩小或绕过筛选范围。
   const filters = buildFilters(input.filters || {}, Date.now(), user);
+  if (itemIds) filters.where = { [Op.and]: [filters.where, { id: { [Op.in]: itemIds } }] };
   const selectedColumns = purchaseTemplate ? purchaseTemplateColumns : columns;
   let lastId = null;
   const fetchBatch = () =>
@@ -157,11 +158,32 @@ export async function exportOrders(
     ? new ExcelJS.stream.xlsx.WorkbookWriter({ stream: res, useStyles: true })
     : new ExcelJS.Workbook();
   const thumbnails = purchaseTemplate ? null : createProductThumbnails(workbook, cache);
-  let completedRows = 0;
-  const imageColumn = selectedColumns.findIndex(({ key }) => key === 'productImage') + 1;
   const sheet = workbook.addWorksheet(purchaseTemplate ? '采购信息' : '订单明细', {
     views: [{ state: 'frozen', ySplit: 1 }],
   });
+  const history = purchaseTemplate
+    ? null
+    : workbook.addWorksheet('渠道变更历史', { views: [{ state: 'frozen', ySplit: 1 }] });
+  const historyFields = fields.filter((field) => field.group === 'purchase');
+  if (history) {
+    history.columns = [
+      ['ticketId', '工单号'],
+      ['shopName', '店铺名'],
+      ['orderNumber', '订单号'],
+      ['walmartSku', 'WalmartSku'],
+      ['appliedByName', '执行人'],
+      ['appliedAt', '确认时间（北京）'],
+      ['snapshotNote', '历史数据说明'],
+      ...historyFields.flatMap((field) => [
+        [`before_${field.key}`, `变更前·${field.label}`],
+        [`after_${field.key}`, `变更后·${field.label}`],
+      ]),
+    ].map(([key, header]) => ({ key, header, width: 24, style: { numFmt: '@' } }));
+    history.getRow(1).font = { bold: true };
+  }
+  let historyCount = 0;
+  let completedRows = 0;
+  const imageColumn = selectedColumns.findIndex(({ key }) => key === 'productImage') + 1;
   sheet.columns = selectedColumns.map(({ key, header }) => ({
     header,
     width: key === 'purchaseUrl' ? 40 : 22,
@@ -173,6 +195,53 @@ export async function exportOrders(
   const dropdowns = createDropdownSources(workbook, selectedColumns, definitions);
   do {
     if (!purchaseTemplate) await enrichSellerRefunds(batch);
+    if (history) {
+      const identities = new Map(batch.map((item) => [item.id, serializeItem(item)]));
+      const changes = await ChannelChangeTicket.findAll({
+        where: { itemId: { [Op.in]: batch.map((item) => item.id) }, appliedAt: { [Op.ne]: null } },
+        order: [
+          ['itemId', 'ASC'],
+          ['appliedAt', 'ASC'],
+          ['id', 'ASC'],
+        ],
+      });
+      assert(
+        historyCount + changes.length <= maxRows,
+        '渠道变更历史超过Excel单表上限，请缩小筛选范围',
+      );
+      for (const change of changes) {
+        const identity = identities.get(change.itemId);
+        const cell = (value) => (Array.isArray(value) ? value.join('、') : (value ?? ''));
+        const row = {
+          ticketId: change.id,
+          shopName: identity.shopName,
+          orderNumber: identity.orderNumber,
+          walmartSku: identity.walmartSku,
+          appliedByName: change.appliedByName,
+          appliedAt: new Intl.DateTimeFormat('sv-SE', {
+            timeZone: 'Asia/Shanghai',
+            dateStyle: 'short',
+            timeStyle: 'medium',
+          }).format(change.appliedAt),
+          snapshotNote:
+            change.executedBefore && change.executedAfter
+              ? ''
+              : '旧工单未记录完整执行快照，不推测历史值',
+        };
+        for (const field of historyFields) {
+          row[`before_${field.key}`] = cell(
+            change.executedBefore?.[field.key] ??
+              (field.key === 'purchaseChannel' ? change.beforeChannels : null),
+          );
+          row[`after_${field.key}`] = cell(
+            change.executedAfter?.[field.key] ??
+              (field.key === 'purchaseChannel' ? change.targetChannels : null),
+          );
+        }
+        history.addRow(row);
+        historyCount++;
+      }
+    }
     if (thumbnails)
       await thumbnails.prepare(batch, (completedImages, imageCount) => {
         progress({ stage: 'images', completedRows, totalRows: count, completedImages, imageCount });

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { afterSalesApi } from '../api/purchase-after-sales';
@@ -10,6 +10,8 @@ import AfterSaleDrawer from '../components/orders/AfterSaleDrawer.vue';
 import StoreOwnerSelect from '../components/home/StoreOwnerSelect.vue';
 import { canManageProcurement } from '../utils/permissions';
 import BusinessDatePicker from '../components/BusinessDatePicker.vue';
+import LossMarkDialog from '../components/orders/LossMarkDialog.vue';
+import { canEditOrder } from '../utils/orderWritePolicy';
 
 const route = useRoute(),
   router = useRouter(),
@@ -35,6 +37,29 @@ const rows = ref([]),
   pageSize = ref(20),
   loading = ref(false);
 const drawer = ref(null);
+const table = ref(null),
+  selected = ref([]),
+  lossItems = ref(null),
+  lossValue = ref(true);
+const selectable = (row) => canEditOrder(row.item);
+function clearSelection() {
+  table.value?.clearSelection();
+  selected.value = [];
+}
+function openLossMark(tickets, value) {
+  if (loading.value) return;
+  if (!tickets.length || tickets.length > 500) return ElMessage.warning('请选择 1 至 500 条工单');
+  if (tickets.some((row) => !selectable(row))) return ElMessage.warning('WFS 订单不能修改亏损标记');
+  lossItems.value = tickets.map(({ item }) => ({ id: item.id, version: item.version }));
+  lossValue.value = value;
+}
+function lossSaved(updated) {
+  const changes = new Map(updated.map((item) => [item.id, item]));
+  for (const row of new Set([...rows.value, ...selected.value]))
+    if (changes.has(row.item.id)) Object.assign(row.item, changes.get(row.item.id));
+  lossItems.value = null;
+  clearSelection();
+}
 const datePicker = ref(null);
 let applied = {},
   listVersion = 0;
@@ -72,13 +97,24 @@ async function loadList() {
       pageSize: pageSize.value,
     });
     if (version === listVersion) {
+      const selectedBefore = [...selected.value];
       rows.value = data.rows;
       total.value = data.total;
       openCount.value = data.openCount ?? null;
       unfeedbackCount.value = data.unfeedbackCount ?? null;
+      await nextTick();
+      if (version !== listVersion) return;
+      const current = new Map(rows.value.map((row) => [row.id, row]));
+      table.value?.clearSelection();
+      for (const row of selectedBefore) {
+        const latest = current.get(row.id) || row;
+        if (selectable(latest)) table.value?.toggleRowSelection(latest, true);
+      }
+      selected.value = table.value?.getSelectionRows() || [];
     }
   } catch {
     if (version === listVersion) {
+      clearSelection();
       rows.value = [];
       total.value = 0;
       openCount.value = null;
@@ -89,7 +125,9 @@ async function loadList() {
   }
 }
 function search() {
+  if (loading.value) return;
   if (datePicker.value && !datePicker.value.validate(draft.dates)) return;
+  clearSelection();
   applied = {
     q: draft.q.trim(),
     status: draft.status,
@@ -139,6 +177,7 @@ async function loadOptions() {
   }
 }
 function refresh() {
+  clearSelection();
   loadList();
   loadOptions();
 }
@@ -168,7 +207,20 @@ onBeforeUnmount(() => {
           >未反馈 {{ unfeedbackCount ?? '—' }} 条</el-tag
         >
       </h2>
-      <el-button :loading="loading || optionsLoading" @click="refresh">刷新</el-button>
+      <div class="after-sale-toolbar">
+        <span v-if="selected.length">已选 {{ selected.length }} 条</span>
+        <el-button
+          type="danger"
+          plain
+          :disabled="!selected.length || loading"
+          @click="openLossMark(selected, true)"
+          >批量标记亏损</el-button
+        >
+        <el-button :disabled="!selected.length || loading" @click="openLossMark(selected, false)"
+          >批量取消亏损标记</el-button
+        >
+        <el-button :loading="loading || optionsLoading" @click="refresh">刷新</el-button>
+      </div>
     </div>
     <div class="after-sale-filters">
       <el-input
@@ -260,7 +312,22 @@ onBeforeUnmount(() => {
       ><el-button :disabled="loading" @click="reset">重置</el-button>
     </div>
     <div class="after-sale-table">
-      <el-table :data="rows" v-loading="loading" height="100%" row-key="id">
+      <el-table
+        ref="table"
+        :data="rows"
+        v-loading="loading"
+        height="100%"
+        row-key="id"
+        :row-class-name="({ row }) => (row.item.isLoss ? 'loss-mark-row' : '')"
+        @selection-change="selected = $event"
+      >
+        <el-table-column
+          type="selection"
+          width="46"
+          fixed
+          :selectable="selectable"
+          reserve-selection
+        />
         <el-table-column label="店铺名" min-width="180"
           ><template #default="{ row }"
             >{{ row.item.shopName }}
@@ -269,7 +336,12 @@ onBeforeUnmount(() => {
             ></template
           ></el-table-column
         >
-        <el-table-column prop="item.orderNumber" label="订单号" min-width="190" />
+        <el-table-column prop="item.orderNumber" label="订单号" min-width="190">
+          <template #default="{ row }"
+            >{{ row.item.orderNumber }}
+            <el-tag v-if="row.item.isLoss" type="danger" effect="dark" size="small">亏损</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column
           prop="item.walmartSku"
           label="Walmart SKU"
@@ -318,10 +390,18 @@ onBeforeUnmount(() => {
             fmtDate(row.lastActivityAt, true)
           }}</template></el-table-column
         >
-        <el-table-column label="操作" fixed="right" :min-width="canFeedback ? 180 : 110">
+        <el-table-column label="操作" fixed="right" :min-width="canFeedback ? 230 : 190">
           <template #default="{ row }">
             <div class="after-sale-row-actions">
               <el-button link type="primary" @click="open(row)">查看工单</el-button>
+              <el-button
+                v-if="selectable(row)"
+                link
+                :type="row.item.isLoss ? 'info' : 'danger'"
+                @click="openLossMark([row], !row.item.isLoss)"
+              >
+                {{ row.item.isLoss ? '取消亏损标记' : '标记亏损' }}
+              </el-button>
               <el-button
                 v-if="canFeedback && row.item.manualEditable"
                 link
@@ -359,6 +439,13 @@ onBeforeUnmount(() => {
     @close="close"
     @changed="loadList"
   />
+  <LossMarkDialog
+    v-if="lossItems"
+    :items="lossItems"
+    :is-loss="lossValue"
+    @close="lossItems = null"
+    @saved="lossSaved"
+  />
 </template>
 <style scoped>
 .after-sale-page {
@@ -377,6 +464,22 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+.after-sale-heading {
+  flex-wrap: wrap;
+}
+.after-sale-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.after-sale-toolbar .el-button {
+  margin-left: 0;
+}
+.after-sale-table :deep(.el-table__body tr.loss-mark-row > td.el-table__cell) {
+  background-color: #fef0f0;
+  color: #c45656;
 }
 h2 {
   margin: 0;

@@ -63,6 +63,7 @@ export const orderApi = {
     api.put(`/orders/${id}`, { fields, version, ...(baseFields ? { baseFields } : {}) }),
   remove: (id, version) => api.delete(`/orders/${id}`, { data: { version } }),
   removeMany: (items) => api.post('/orders/batch-delete', { items }),
+  updateLossMark: (items, isLoss) => api.post('/orders/batch-loss-mark', { items, isLoss }),
   updateStatus: (items, orderStatus) => api.post('/orders/batch-status', { items, orderStatus }),
   updateFollowupNote: (items, mode, followupNote) =>
     api.post('/orders/batch-followup-note', { items, mode, followupNote }),

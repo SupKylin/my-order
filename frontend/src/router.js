@@ -19,6 +19,11 @@ const router = createRouter({
       meta: { title: '采购售后' },
     },
     {
+      path: '/channel-change-tickets',
+      component: () => import('./views/ChannelChangeTickets.vue'),
+      meta: { title: '渠道变更工单' },
+    },
+    {
       path: '/store-summary',
       component: () => import('./views/StoreSummary.vue'),
       meta: { title: '店铺汇总' },

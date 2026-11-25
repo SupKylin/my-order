@@ -1,4 +1,5 @@
 import { enrichSellerRefunds } from './seller-refund.js';
+import { enrichChannelChangeTickets } from './channel-change-tickets.js';
 import { Op, fn, col, literal, where as sqlWhere } from 'sequelize';
 import { db, Order, OrderItem, Purchase, AuditLog, itemInclude, serializeItem } from '../models.js';
 import { fields, PURCHASE_AFTER_SALE_FIELDS } from '../fields.js';
@@ -12,7 +13,13 @@ import { filterValues } from '../lib/filter-values.js';
 import { RETURN_STATUSES } from './walmart/returns.js';
 import { shippingWindow } from '../lib/shipping-window.js';
 import { assertOrderEditable } from '../lib/order-write-policy.js';
-import { orderScope, assertItemAccess, requirePermission } from '../permissions.js';
+import {
+  orderScope,
+  assertItemAccess,
+  requirePermission,
+  canAssignChannel,
+  canEditPurchaseNotes,
+} from '../permissions.js';
 import { procurementStatePatch } from '../lib/procurement-state.js';
 import { sameFieldValue } from '../lib/order-concurrency.js';
 import { purchaseAssignmentSummary } from './purchase-assignment-summary.js';
@@ -29,6 +36,7 @@ export async function getItem(id, user) {
   assert(item, '商品明细不存在', 404);
   await assertItemAccess(item, user);
   await enrichSellerRefunds([item]);
+  await enrichChannelChangeTickets([item]);
   return serializeItem(item);
 }
 
@@ -534,7 +542,9 @@ export async function listOrders(query, user) {
   return {
     serverNow: new Date().toISOString(),
     purchaseAssignmentSummary: await purchaseAssignmentSummary(user, now),
-    rows: (await enrichSellerRefunds(result.rows)).map(serializeItem),
+    rows: (await enrichChannelChangeTickets(await enrichSellerRefunds(result.rows))).map(
+      serializeItem,
+    ),
     total: result.count,
     page,
     pageSize,
@@ -587,12 +597,26 @@ export async function editItem(id, input, user) {
       requireKeys: !hasBase,
       fieldDefinitions: editableDefinitions,
     });
-    for (const key of ['purchaseStatus', 'purchaseChannel']) {
+    for (const key of ['purchaseStatus', 'purchaseChannel', 'purchaseNote', 'followupNote']) {
       if (!Object.hasOwn(patch, key)) continue;
       if (!sameFieldValue(key, currentPurchase?.[key], patch[key]))
-        requirePermission(user, 'procurement');
+        requirePermission(
+          user,
+          key === 'purchaseStatus'
+            ? 'procurement'
+            : key === 'purchaseChannel'
+              ? 'assign-channel'
+              : 'purchase-notes',
+        );
       // 兼容旧表单携带未改变的字段，不让只读字段参与覆盖或冲突检查。
-      else if (user.role === 'operations') delete patch[key];
+      else if (
+        key === 'purchaseStatus'
+          ? user.role === 'operations'
+          : key === 'purchaseChannel'
+            ? !canAssignChannel(user)
+            : !canEditPurchaseNotes(user)
+      )
+        delete patch[key];
     }
     for (const key of DERIVED_PURCHASE_FIELDS) delete patch[key];
     const currentOrder = await Order.findByPk(item.orderId, { transaction: t });
@@ -735,7 +759,7 @@ export async function editItem(id, input, user) {
 }
 /** 多选渠道覆盖原值；批量分配要么全部成功，要么整批回滚。 */
 export async function assignItems(input, user) {
-  requirePermission(user, 'procurement');
+  requirePermission(user, 'assign-channel');
   const entries = input?.items;
   assert(
     Array.isArray(entries) && entries.length > 0 && entries.length <= 500,
@@ -805,7 +829,7 @@ export async function updatePurchaseStatus(input, user) {
 
 /** 跟单备注支持覆盖、追加或明确清空；沿用权限、版本与事务边界。 */
 export async function updateFollowupNote(input, user) {
-  requirePermission(user, 'orders');
+  requirePermission(user, 'purchase-notes');
   const entries = input?.items;
   assert(
     Array.isArray(entries) && entries.length > 0 && entries.length <= 500,

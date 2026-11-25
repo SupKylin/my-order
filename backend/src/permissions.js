@@ -8,6 +8,7 @@ const common = [
   'templates',
   'audit-logs',
   'purchase-after-sales',
+  'channel-change-tickets',
   'purchase-statistics',
 ];
 export const rolePermissions = {
@@ -20,7 +21,15 @@ export const rolePermissions = {
     'orderStatus',
     'procurement',
   ],
-  purchasing: [...common, 'purchaseChannel', 'purchasePlatform', 'purchaseStatus', 'procurement'],
+  purchasing: [
+    ...common,
+    'purchaseChannel',
+    'purchasePlatform',
+    'purchaseStatus',
+    'procurement',
+    'assign-channel',
+    'purchase-notes',
+  ],
   operations: [...common, 'risk-addresses', 'orderStatus'],
 };
 /** 全部账号的日志/导入结果读取，与账号管理权限分离。 */
@@ -90,3 +99,6 @@ export function authorizeApi(req, res, next) {
   requirePermission(req.user, permission);
   next();
 }
+
+export const canAssignChannel = (user) => ['admin', 'purchasing'].includes(user?.role);
+export const canEditPurchaseNotes = canAssignChannel;

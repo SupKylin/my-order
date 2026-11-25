@@ -4,6 +4,7 @@ import { useMeta } from '../../stores/meta';
 import WalmartDetails from './WalmartDetails.vue';
 import ReturnDetails from './ReturnDetails.vue';
 import AfterSaleLink from './AfterSaleLink.vue';
+import ChannelChangeLink from './ChannelChangeLink.vue';
 import ProfitDetails from './ProfitDetails.vue';
 defineProps({ row: { type: Object, required: true } });
 const meta = useMeta();
@@ -33,6 +34,7 @@ const meta = useMeta();
       <div class="product-detail-heading">
         <h3>{{ row.productName || '未填写商品名称' }}</h3>
         <AfterSaleLink :ticket="row.purchaseAfterSale" />
+        <ChannelChangeLink :ticket="row.channelChangeTicket" />
       </div>
       <div class="product-grid">
         <div>

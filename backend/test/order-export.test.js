@@ -1,16 +1,18 @@
-import { test } from 'node:test';
+import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import { finished } from 'node:stream/promises';
 import ExcelJS from 'exceljs';
 import sharp from 'sharp';
 import { Op } from 'sequelize';
-import { DictionaryOption, OrderItem } from '../src/models.js';
+import { DictionaryOption, OrderItem, ChannelChangeTicket } from '../src/models.js';
 import { exportOrders, purchaseTemplateColumns } from '../src/services/order-export.js';
 import { createThumbnailCache } from '../src/lib/excel/thumbnail-cache.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+
+beforeEach((t) => t.mock.method(ChannelChangeTicket, 'findAll', async () => []));
 
 test('两类导出均保留平台到货日期范围，不受当前分页影响', async (t) => {
   const queries = [];

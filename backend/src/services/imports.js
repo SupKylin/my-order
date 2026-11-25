@@ -1,3 +1,4 @@
+import { canEditPurchaseNotes } from '../permissions.js';
 import { randomUUID } from 'node:crypto';
 import { Op } from 'sequelize';
 import {
@@ -130,6 +131,11 @@ export async function prepareImport(input, user, kind = 'legacy') {
       PURCHASE_AFTER_SALE_FIELDS.has(mapping.field),
     );
     if (ignoredAfterSaleMappings.length) ignoredAfterSaleSources.add(upload.id);
+    const ignoredNoteMappings = canEditPurchaseNotes(user)
+      ? []
+      : template.mappings.filter((mapping) =>
+          ['purchaseNote', 'followupNote'].includes(mapping.field),
+        );
     const effectiveTemplate = {
       ...template,
       mappings: template.mappings.filter(
@@ -137,7 +143,8 @@ export async function prepareImport(input, user, kind = 'legacy') {
           !DERIVED_PURCHASE_FIELDS.has(mapping.field) &&
           !fieldMap[mapping.field]?.importDisabled &&
           !PURCHASE_AFTER_SALE_FIELDS.has(mapping.field) &&
-          (!ignoreStatus || mapping.field !== 'purchaseStatus'),
+          (!ignoreStatus || mapping.field !== 'purchaseStatus') &&
+          (canEditPurchaseNotes(user) || !['purchaseNote', 'followupNote'].includes(mapping.field)),
       ),
     };
     firstTemplate ||= effectiveTemplate;
@@ -148,6 +155,12 @@ export async function prepareImport(input, user, kind = 'legacy') {
       fieldDefinitions,
       { allowedStoreNames: allowed, retainInvalidIdentity: kind === 'purchase' },
     );
+    for (const mapping of ignoredNoteMappings)
+      extracted.warnings.push({
+        row: template.headerRow,
+        field: mapping.field,
+        message: `当前账号无权修改${fieldMap[mapping.field].label}，已忽略并保留原值`,
+      });
     if (ignoreStatus)
       extracted.warnings.push({
         row: template.headerRow,
@@ -278,6 +291,15 @@ export async function prepareImport(input, user, kind = 'legacy') {
       } else if (ignoredManualSources.has(row.sourceId)) {
         row.action = 'missing';
         row.skipReason = '争议成功金额仅允许手工维护，本行没有其他可更新的采购字段';
+      } else if (
+        data.warnings.some(
+          (warning) =>
+            warning.sourceId === row.sourceId &&
+            ['purchaseNote', 'followupNote'].includes(warning.field),
+        )
+      ) {
+        row.action = 'missing';
+        row.skipReason = '备注无修改权限，本行没有其他可更新的采购字段';
       } else
         data.errors.push({
           row: row.rowNumber,
@@ -453,6 +475,30 @@ export async function commitImport(id, user, kind = 'legacy') {
       ) {
         row.action = 'missing';
         row.skipReason = '争议成功金额仅允许手工维护，本行没有其他可更新的采购字段';
+      }
+      if (!canEditPurchaseNotes(user)) {
+        let ignoredNotes = false;
+        for (const key of ['purchaseNote', 'followupNote']) {
+          if (!Object.hasOwn(row.patch, key)) continue;
+          delete row.patch[key];
+          ignoredNotes = true;
+          job.warnings.push({
+            row: row.rowNumber,
+            sourceId: row.sourceId,
+            sourceName: row.sourceName,
+            field: key,
+            message: `当前账号无权修改${fieldMap[key].label}，已忽略并保留原值`,
+          });
+        }
+        if (
+          ignoredNotes &&
+          row.action === 'update' &&
+          !Object.keys(row.patch).some((key) => fieldMap[key]?.group === 'purchase') &&
+          !row.purchaseSkuMapped
+        ) {
+          row.action = 'missing';
+          row.skipReason = '备注无修改权限，本行没有其他可更新的采购字段';
+        }
       }
       if (user.role !== 'operations' || !Object.hasOwn(row.patch, 'purchaseStatus')) continue;
       delete row.patch.purchaseStatus;

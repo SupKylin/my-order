@@ -4,6 +4,7 @@ const common = [
   '/purchase-statistics',
   '/orders',
   '/purchase-after-sales',
+  '/channel-change-tickets',
   '/imports/purchases/new',
   '/templates',
   '/imports',
@@ -33,3 +34,6 @@ export function canManageProcurement(role) {
 export function canViewAllActivity(role) {
   return ['admin', 'supervisor'].includes(role);
 }
+
+export const canAssignChannel = (role) => ['admin', 'purchasing'].includes(role);
+export const canEditPurchaseNotes = canAssignChannel;

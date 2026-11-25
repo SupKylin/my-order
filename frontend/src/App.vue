@@ -36,6 +36,7 @@ const menus = [
   { path: '/purchase-statistics', label: '采购统计汇总', icon: Document },
   { path: '/orders', label: '订单管理', icon: Box },
   { path: '/purchase-after-sales', label: '采购售后', icon: Document },
+  { path: '/channel-change-tickets', label: '渠道变更工单', icon: Document },
   // 订单统一由 Walmart API 接入，保留 Excel 导入入口代码。
   // { path: '/imports/new', label: '导入订单', icon: Upload },
   { path: '/imports/purchases/new', label: '导入采购', icon: Upload },
@@ -72,6 +73,7 @@ const managementPage = computed(
       '/users',
       '/stores',
       '/purchase-after-sales',
+      '/channel-change-tickets',
     ].includes(route.path) || route.path.startsWith('/settings/'),
 );
 async function signOut() {

@@ -6,6 +6,7 @@ const props = defineProps({
   submit: { type: Function, required: true },
   disabled: Boolean,
   label: { type: String, default: '发送记录' },
+  subject: { type: String, default: '售后' },
 });
 const emit = defineEmits(['sent', 'busy']);
 const content = ref(''),
@@ -27,7 +28,7 @@ function uploadState(value) {
 }
 async function send() {
   if (sending.value || uploading.value || props.disabled) return;
-  if (!content.value.trim()) return ElMessage.warning('请填写售后内容');
+  if (!content.value.trim()) return ElMessage.warning(`请填写${props.subject}内容`);
   if ((images.value || []).length > 20) return ElMessage.warning('每条记录最多上传20张图片');
   const body = { content: content.value.trim(), images: images.value || [] };
   const signature = JSON.stringify(body);
@@ -39,7 +40,7 @@ async function send() {
     content.value = '';
     images.value = [];
     pending = null;
-    ElMessage.success('售后记录已保存');
+    ElMessage.success(`${props.subject}记录已保存`);
     emit('sent', result);
   } catch {
     /* 保留内容、图片和提交标识，失败后可安全重试。 */
@@ -51,17 +52,17 @@ async function send() {
 </script>
 <template>
   <el-form label-position="top" :disabled="disabled || sending">
-    <el-form-item label="售后内容">
+    <el-form-item :label="`${subject}内容`">
       <el-input
         v-model="content"
         type="textarea"
         :rows="3"
         maxlength="12000"
         show-word-limit
-        placeholder="填写售后问题或回复内容"
+        :placeholder="`填写${subject}说明或回复内容`"
       />
     </el-form-item>
-    <el-form-item label="售后图片（每条最多20张）">
+    <el-form-item :label="`${subject}图片（每条最多20张）`">
       <FieldInput :field="{ type: 'image' }" v-model="images" @uploading="uploadState" />
     </el-form-item>
     <el-button type="primary" :loading="sending" :disabled="disabled || uploading" @click="send">{{

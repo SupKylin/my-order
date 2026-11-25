@@ -24,6 +24,7 @@ export const config = {
   sessionMs: 7 * 24 * 60 * 60 * 1000,
   wecom: {
     webhook: process.env.WECOM_AFTER_SALES_WEBHOOK || '',
+    channelChangeWebhook: process.env.WECOM_CHANNEL_CHANGE_WEBHOOK || '',
     appUrl: process.env.WECOM_AFTER_SALES_APP_URL || '',
   },
 };

@@ -1,6 +1,7 @@
 import { db } from '../src/models.js';
 import { migratePurchaseStatistics } from '../src/services/purchase-statistics/model.js';
 import { migratePurchaseAfterSales } from '../src/migrations/purchase-after-sales.js';
+import { migrateChannelChangeTickets } from '../src/migrations/channel-change-tickets.js';
 import { migrateHome } from '../src/services/home/model.js';
 import { migrateOrderTablePreferences } from '../src/migrations/order-table-preferences.js';
 import { migratePermissionsAudit } from '../src/migrations/permissions-audit.js';
@@ -18,6 +19,7 @@ try {
   await migratePermissionsAudit();
   await migrateHome();
   await migratePurchaseAfterSales();
+  await migrateChannelChangeTickets();
   await migratePurchaseStatistics();
   console.log('字典、店铺、模板与订单字段增量升级完成，已有订单和模板保留。');
 } catch (error) {

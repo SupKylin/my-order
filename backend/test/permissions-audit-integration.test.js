@@ -45,7 +45,7 @@ const users = {},
   items = {},
   stores = {},
   files = [];
-const keys = ['shopName', 'orderNumber', 'walmartSku', 'purchaseNote', 'allocatable'];
+const keys = ['shopName', 'orderNumber', 'walmartSku', 'merchantName', 'allocatable'];
 const template = {
   name: '权限测试',
   headerRow: 1,
@@ -146,7 +146,7 @@ before(async () => {
       platformOrderStatus: '已确认',
       fulfillmentParty: 'SellerFulfilled',
     });
-    await Purchase.create({ itemId: items[name].id, purchaseNote: 'before' });
+    await Purchase.create({ itemId: items[name].id, merchantName: 'before' });
   }
   await DictionaryOption.create({ kind: 'purchaseChannel', value: '渠道A' });
   await DictionaryOption.create({ kind: 'orderStatus', value: '砍单' });
@@ -254,7 +254,7 @@ test('跨店铺编辑和混合批量分配拒绝，事务回滚且不会留下�
     (
       await request('operations', `/orders/${items.B.id}`, 'PUT', {
         version: 1,
-        fields: { orderNumber: 'ORDER-B', purchaseNote: 'unauthorized' },
+        fields: { orderNumber: 'ORDER-B', merchantName: 'unauthorized' },
       })
     ).status,
     403,
@@ -355,8 +355,8 @@ test('混合采购导入仅更新本人店铺，外店非法采购字段跳过�
   const done = await request('operations', `/imports/purchases/${p.id}/commit`, 'POST', {});
   assert.equal(done.status, 200, JSON.stringify(done.data));
   assert.equal(done.data.updated, 1);
-  assert.equal((await Purchase.findOne({ where: { itemId: items.A.id } })).purchaseNote, 'own');
-  assert.equal((await Purchase.findOne({ where: { itemId: items.B.id } })).purchaseNote, 'before');
+  assert.equal((await Purchase.findOne({ where: { itemId: items.A.id } })).merchantName, 'own');
+  assert.equal((await Purchase.findOne({ where: { itemId: items.B.id } })).merchantName, 'before');
   const next = await preview([['A', 'ORDER-A', 'SKU', 'must skip', '是']]);
   await stores.A.update({ ownerId: users.admin.id });
   const skipped = await request('operations', `/imports/purchases/${next.id}/commit`, 'POST', {});
@@ -849,7 +849,7 @@ test('后台同步不再干扰编辑和采购导入，同字段冲突、旧客�
     purchaseFingerprint(await Purchase.findOne({ where: { itemId: item.id } })),
     purchaseFingerprint(originalPurchase),
   );
-  assert.equal((await edit(original, { purchaseNote: '采购草稿', allocatable: '是' })).status, 200);
+  assert.equal((await edit(original, { merchantName: '采购草稿', allocatable: '是' })).status, 200);
   assert.equal((await read()).orderAmount, '46.99', '保存采购不能覆盖同步后的金额');
   assert.equal((await read()).platformOrderStatus, '已发货');
 
@@ -859,7 +859,7 @@ test('后台同步不再干扰编辑和采购导入，同字段冲突、旧客�
   assert.equal((await read()).orderAmount, '46.99');
   const missingBase = await request('operations', `/orders/${item.id}`, 'PUT', {
     version: original.version,
-    fields: { purchaseNote: '绕过' },
+    fields: { merchantName: '绕过' },
     baseFields: {},
   });
   assert.equal(missingBase.status, 400);
@@ -867,22 +867,22 @@ test('后台同步不再干扰编辑和采购导入，同字段冲突、旧客�
     (
       await request('operations', `/orders/${item.id}`, 'PUT', {
         version: original.version,
-        fields: { orderNumber: remote.customerOrderId, purchaseNote: '旧客户端覆盖' },
+        fields: { orderNumber: remote.customerOrderId, merchantName: '旧客户端覆盖' },
       })
     ).status,
     409,
   );
 
   const shared = await read();
-  assert.equal((await edit(shared, { purchaseNote: '同事修改' })).status, 200);
-  assert.equal((await edit(shared, { merchantName: '另一个字段' })).status, 200);
-  const conflict = await edit(shared, { purchaseNote: '覆盖同事' });
+  assert.equal((await edit(shared, { merchantName: '同事修改' })).status, 200);
+  assert.equal((await edit(shared, { purchaseSku: '另一个字段' })).status, 200);
+  const conflict = await edit(shared, { merchantName: '覆盖同事' });
   assert.equal(conflict.status, 409);
-  assert.equal(conflict.data.details[0].label, '采购备注');
-  assert.equal((await read()).purchaseNote, '同事修改');
-  assert.equal((await edit(await read(), { purchaseNote: null })).status, 200);
-  assert.equal((await read()).purchaseNote, null);
-  assert.equal((await edit(await read(), { purchaseNote: '越权' }, 'empty')).status, 403);
+  assert.equal(conflict.data.details[0].label, '采购商家名');
+  assert.equal((await read()).merchantName, '同事修改');
+  assert.equal((await edit(await read(), { merchantName: null })).status, 200);
+  assert.equal((await read()).merchantName, null);
+  assert.equal((await edit(await read(), { merchantName: '越权' }, 'empty')).status, 403);
 
   const pending = await preview([
     ['A', remote.customerOrderId, 'CONCURRENCY-SKU', '同步后导入', '是'],
@@ -896,16 +896,16 @@ test('后台同步不再干扰编辑和采购导入，同字段冲突、旧客�
     {},
   );
   assert.equal(imported.status, 200);
-  assert.equal((await read()).purchaseNote, '同步后导入');
+  assert.equal((await read()).merchantName, '同步后导入');
   const collision = await preview([
     ['A', remote.customerOrderId, 'CONCURRENCY-SKU', '不应覆盖', '是'],
   ]);
-  assert.equal((await edit(await read(), { purchaseNote: '预览后人工编辑' })).status, 200);
+  assert.equal((await edit(await read(), { merchantName: '预览后人工编辑' })).status, 200);
   assert.equal(
     (await request('operations', `/imports/purchases/${collision.id}/commit`, 'POST', {})).status,
     409,
   );
-  assert.equal((await read()).purchaseNote, '预览后人工编辑');
+  assert.equal((await read()).merchantName, '预览后人工编辑');
 
   const legacy = await preview([['A', remote.customerOrderId, 'CONCURRENCY-SKU', '旧预览', '是']]);
   const job = await ImportJob.findByPk(legacy.id);
@@ -932,7 +932,7 @@ test('后台同步不再干扰编辑和采购导入，同字段冲突、旧客�
   );
   assert.equal(skipped.status, 200);
   assert.equal(skipped.data.skipped, 1);
-  assert.equal((await read()).purchaseNote, '预览后人工编辑');
+  assert.equal((await read()).merchantName, '预览后人工编辑');
 });
 
 test('采购分配时间仅跟随渠道真实变化，迁移保留空历史，筛选导出遵守时间边界及权限', async () => {
@@ -973,7 +973,7 @@ test('采购分配时间仅跟随渠道真实变化，迁移保留空历史，�
   assert.ok(Date.parse(first) >= before && Date.parse(first) <= Date.now());
   assert.equal((await assign(['A'], ['渠道B', '渠道A'])).status, 200);
   assert.equal((await read()).purchaseAssignedAt, first);
-  assert.equal((await edit({ purchaseNote: '只改备注' })).status, 200);
+  assert.equal((await edit({ merchantName: '只改备注' })).status, 200);
   assert.equal((await read()).purchaseAssignedAt, first);
   assert.equal((await edit({ purchaseAssignedAt: '2000-01-01 00:00:00' })).status, 400);
   assert.equal((await edit({ purchaseChannel: null })).status, 200);
@@ -1175,7 +1175,7 @@ test('运营不能编辑或清空采购状态及渠道，也不能通过单条�
       allocatable: '是',
       purchaseStatus: '采购中',
       purchaseChannel: ['渠道A'],
-      purchaseNote: 'protected',
+      merchantName: 'protected',
     },
     { where: { itemId: items.A.id } },
   );
@@ -1189,11 +1189,11 @@ test('运营不能编辑或清空采购状态及渠道，也不能通过单条�
   ]) {
     const response = await request('operations', `/orders/${current.id}`, 'PUT', {
       version: current.version,
-      fields: { ...fields, purchaseNote: 'must roll back' },
+      fields: { ...fields, merchantName: 'must roll back' },
       baseFields: Object.fromEntries(Object.keys(fields).map((key) => [key, current[key]])),
     });
     assert.equal(response.status, 403);
-    assert.equal((await read()).purchaseNote, 'protected');
+    assert.equal((await read()).merchantName, 'protected');
     assert.equal((await read()).version, current.version);
   }
   for (const [path, payload] of [
@@ -1217,12 +1217,12 @@ test('运营不能编辑或清空采购状态及渠道，也不能通过单条�
       orderNumber: current.orderNumber,
       purchaseStatus: current.purchaseStatus,
       purchaseChannel: current.purchaseChannel,
-      purchaseNote: 'allowed note',
+      merchantName: 'allowed note',
     },
   });
   assert.equal(compatible.status, 200);
   const saved = await read();
-  assert.equal(saved.purchaseNote, 'allowed note');
+  assert.equal(saved.merchantName, 'allowed note');
   assert.equal(saved.purchaseStatus, '采购中');
   assert.deepEqual(saved.purchaseChannel, ['渠道A']);
   assert.equal(
@@ -1259,7 +1259,7 @@ test('运营不能编辑或清空采购状态及渠道，也不能通过单条�
 });
 
 test('运营导入跳过采购状态并提示，其他字段继续更新，旧预览也不能覆盖状态', async () => {
-  const columns = ['shopName', 'orderNumber', 'walmartSku', 'purchaseStatus', 'purchaseNote'];
+  const columns = ['shopName', 'orderNumber', 'walmartSku', 'purchaseStatus', 'merchantName'];
   const read = async () => (await request('operations', `/orders/${items.A.id}`)).data;
   await Purchase.update({ purchaseStatus: '采购中' }, { where: { itemId: items.A.id } });
   for (const status of ['采购失败', '不存在的状态']) {
@@ -1275,7 +1275,7 @@ test('运营导入跳过采购状态并提示，其他字段继续更新，旧�
     assert.equal(done.status, 200);
     assert.equal(done.data.updated, 1);
     assert.equal((await read()).purchaseStatus, '采购中');
-    assert.equal((await read()).purchaseNote, 'import-' + status);
+    assert.equal((await read()).merchantName, 'import-' + status);
   }
   const before = await read();
   const onlyStatus = await preview(
@@ -1304,7 +1304,7 @@ test('运营导入跳过采购状态并提示，其他字段继续更新，旧�
   const committed = await request('operations', `/imports/purchases/${old.id}/commit`, 'POST', {});
   assert.equal(committed.status, 200);
   assert.equal((await read()).purchaseStatus, '采购中');
-  assert.equal((await read()).purchaseNote, 'old preview');
+  assert.equal((await read()).merchantName, 'old preview');
   const committedJob = await ImportJob.findByPk(old.id);
   assert.ok(committedJob.warnings.some((warning) => /无权修改采购状态/.test(warning.message)));
   for (const role of ['admin', 'purchasing']) {

@@ -13,7 +13,15 @@ const props = defineProps({
   canAssign: Boolean,
   warningNow: { type: Number, required: true },
 });
-const emit = defineEmits(['selection-change', 'edit', 'assign', 'import', 'after-sale']);
+const emit = defineEmits([
+  'selection-change',
+  'edit',
+  'assign',
+  'import',
+  'after-sale',
+  'channel-change',
+  'loss-mark',
+]);
 const table = ref();
 const compactOperations = ref(false);
 const operationWidth = computed(() => (props.canAssign && !compactOperations.value ? 210 : 144));
@@ -33,7 +41,11 @@ const warnings = computed(() =>
   ),
 );
 const shippingRowClass = ({ row }) =>
-  warnings.value[row.id] ? `shipping-row-${warnings.value[row.id]}` : '';
+  row.isLoss
+    ? 'loss-mark-row'
+    : warnings.value[row.id]
+      ? `shipping-row-${warnings.value[row.id]}`
+      : '';
 defineExpose({
   clearSelection: () => table.value?.clearSelection(),
   syncSelection: () => {
@@ -94,6 +106,12 @@ defineExpose({
             >分配渠道</el-button
           >
           <el-button link type="primary" @click="emit('after-sale', row)">采购售后</el-button>
+          <el-button link type="primary" @click="emit('channel-change', row)"
+            >采购渠道变更</el-button
+          >
+          <el-button link :type="row.isLoss ? 'info' : 'danger'" @click="emit('loss-mark', row)">
+            {{ row.isLoss ? '取消亏损标记' : '标记亏损' }}
+          </el-button>
         </div>
         <span v-else class="muted" title="由 Walmart 同步维护">WFS 只读</span>
       </template></el-table-column

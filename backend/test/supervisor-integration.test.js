@@ -73,7 +73,7 @@ async function edit(name, fields, role = 'supervisor') {
 async function preview(role, names) {
   const book = new ExcelJS.Workbook(),
     sheet = book.addWorksheet('采购');
-  const keys = ['shopName', 'orderNumber', 'walmartSku', 'purchaseStatus', 'purchaseNote'];
+  const keys = ['shopName', 'orderNumber', 'walmartSku', 'purchaseStatus', 'merchantName'];
   sheet.addRow(keys);
   names.forEach((name) =>
     sheet.addRow([
@@ -332,10 +332,10 @@ test('主管可维护店铺归属、佣金、允许的字典和共享模板，�
   );
 });
 
-test('主管可单条和跨店批量分配渠道、修改采购状态；运营仍禁止', async () => {
+test('主管不能单条或批量分配渠道，但保留采购状态权限；运营仍禁止', async () => {
   assert.equal(
     (await edit('B', { purchaseStatus: '采购中', purchaseChannel: ['渠道A'] })).status,
-    200,
+    403,
   );
   const rows = await Promise.all(['A', 'B'].map(read));
   assert.equal(
@@ -345,7 +345,7 @@ test('主管可单条和跨店批量分配渠道、修改采购状态；运营�
         purchaseChannel: ['渠道A', '渠道B'],
       })
     ).status,
-    200,
+    403,
   );
   const latest = await Promise.all(['A', 'B'].map(read));
   const status = await request('supervisor', '/orders/batch-purchase-status', 'POST', {
@@ -355,12 +355,12 @@ test('主管可单条和跨店批量分配渠道、修改采购状态；运营�
   assert.equal(status.status, 200, JSON.stringify(status.data));
   for (const name of ['A', 'B']) {
     const row = await read(name);
-    assert.deepEqual(row.purchaseChannel, ['渠道A', '渠道B']);
+    assert.equal(row.purchaseChannel, null);
     assert.ok(row.purchaseConfirmedAt);
-    assert.ok(row.purchaseAssignedAt);
+    assert.equal(row.purchaseAssignedAt, null);
   }
   assert.equal((await edit('A', { purchaseStatus: '采购失败' }, 'operations')).status, 403);
-  assert.equal((await edit('A', { purchaseChannel: null }, 'operations')).status, 403);
+  assert.equal((await edit('A', { purchaseChannel: ['渠道A'] }, 'operations')).status, 403);
 });
 
 test('主管导入可跨店更新采购状态，但仍跳过WFS；普通角色导入限制不变', async () => {
