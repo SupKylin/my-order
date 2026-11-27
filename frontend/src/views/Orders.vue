@@ -30,6 +30,9 @@ const OrderColumnSettings = defineAsyncComponent(
   () => import('../components/orders/OrderColumnSettings.vue'),
 );
 const OrderEditor = defineAsyncComponent(() => import('../components/OrderEditor.vue'));
+const TrackingDialog = defineAsyncComponent(
+  () => import('../components/orders/TrackingDialog.vue'),
+);
 const AfterSaleDrawer = defineAsyncComponent(
   () => import('../components/orders/AfterSaleDrawer.vue'),
 );
@@ -103,6 +106,7 @@ const procurementAllowed = computed(() => canManageProcurement(auth.user?.role))
 const assignmentAllowed = computed(() => canAssignChannel(auth.user?.role));
 const notesAllowed = computed(() => canEditPurchaseNotes(auth.user?.role));
 const afterSaleItem = ref(null);
+const trackingItem = ref(null);
 const channelChangeItem = ref(null),
   channelChangeTicketId = ref(null);
 provide('openChannelChange', (ticket) => {
@@ -856,6 +860,7 @@ async function submitStatus() {
           @after-sale="openAfterSale"
           @channel-change="openChannelChange"
           @loss-mark="(row) => openLossMark([row], !row.isLoss)"
+          @tracking="trackingItem = $event"
         />
       </div>
       <div class="table-footer">
@@ -874,6 +879,7 @@ async function submitStatus() {
     </section>
   </div>
   <OrderEditor v-if="editor" v-model="editor" :item="editing" @saved="refresh" />
+  <TrackingDialog v-if="trackingItem" :item="trackingItem" @close="trackingItem = null" />
   <LossMarkDialog
     v-if="lossItems"
     :items="lossItems"

@@ -27,4 +27,7 @@ export const config = {
     channelChangeWebhook: process.env.WECOM_CHANNEL_CHANGE_WEBHOOK || '',
     appUrl: process.env.WECOM_AFTER_SALES_APP_URL || '',
   },
+  track123: {
+    apiSecret: process.env.TRACK123_API_SECRET || '',
+  },
 };

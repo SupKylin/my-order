@@ -14,6 +14,7 @@ import {
   Setting,
   Expand,
   Fold,
+  Van,
 } from '@element-plus/icons-vue';
 import { useAuth } from './stores/auth';
 import { useMeta } from './stores/meta';
@@ -35,6 +36,7 @@ const menus = [
   { path: '/store-summary', label: '店铺汇总', icon: House },
   { path: '/purchase-statistics', label: '采购统计汇总', icon: Document },
   { path: '/orders', label: '订单管理', icon: Box },
+  { path: '/tracking', label: '物流追踪', icon: Van },
   { path: '/purchase-after-sales', label: '采购售后', icon: Document },
   { path: '/channel-change-tickets', label: '渠道变更工单', icon: Document },
   // 订单统一由 Walmart API 接入，保留 Excel 导入入口代码。
@@ -74,6 +76,7 @@ const managementPage = computed(
       '/stores',
       '/purchase-after-sales',
       '/channel-change-tickets',
+      '/tracking',
     ].includes(route.path) || route.path.startsWith('/settings/'),
 );
 async function signOut() {

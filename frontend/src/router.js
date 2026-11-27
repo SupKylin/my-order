@@ -34,6 +34,11 @@ const router = createRouter({
       meta: { title: '订单管理', subtitle: '同步 Walmart 官方订单，管理采购与交付进度。' },
     },
     {
+      path: '/tracking',
+      component: () => import('./views/Tracking.vue'),
+      meta: { title: '物流追踪' },
+    },
+    {
       path: '/allocation',
       redirect: { path: '/orders', query: { assignedTo: 'unassigned' } },
     },

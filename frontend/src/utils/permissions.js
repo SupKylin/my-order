@@ -3,6 +3,7 @@ const common = [
   '/store-summary',
   '/purchase-statistics',
   '/orders',
+  '/tracking',
   '/purchase-after-sales',
   '/channel-change-tickets',
   '/imports/purchases/new',

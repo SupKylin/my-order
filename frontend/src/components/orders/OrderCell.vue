@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue';
+import { Van } from '@element-plus/icons-vue';
 import { useMeta } from '../../stores/meta';
 import { fmtDate, fmtBeijingDate, money } from '../../utils/format';
 import { CHINA_UTC_OFFSET } from '../../utils/businessTime';
@@ -14,6 +15,7 @@ const props = defineProps({
   warning: String,
   warningNow: { type: Number, required: true },
 });
+const emit = defineEmits(['tracking']);
 const trackingWarning = computed(() => purchaseWarning(props.row, props.warningNow));
 const showCancellationIntent = computed(
   () => props.row.platformOrderStatus === '已确认' && props.row.walmart?.intentToCancel === true,
@@ -175,6 +177,12 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
     }}</el-tag>
     <span v-else class="muted">—</span>
   </template>
+  <span v-else-if="field.key === 'trackingNumber'" class="tracking-number-cell">
+    <span class="mono">{{ value ?? '—' }}</span>
+    <el-button v-if="value" link type="primary" :icon="Van" @click.stop="emit('tracking', row)"
+      >查看物流</el-button
+    >
+  </span>
   <span v-else-if="['purchaseConfirmedAt', 'purchaseAssignedAt'].includes(field.key)">{{
     fmtBeijingDate(value)
   }}</span>
@@ -204,3 +212,18 @@ const safeLink = computed(() => (/^https?:\/\//i.test(value.value || '') ? value
     >{{ value ?? '—' }}</span
   >
 </template>
+
+<style scoped>
+.tracking-number-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+.tracking-number-cell .mono {
+  overflow-wrap: anywhere;
+}
+.tracking-number-cell :deep(.el-button) {
+  margin: 0;
+}
+</style>

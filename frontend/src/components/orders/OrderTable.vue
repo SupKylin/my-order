@@ -21,6 +21,7 @@ const emit = defineEmits([
   'after-sale',
   'channel-change',
   'loss-mark',
+  'tracking',
 ]);
 const table = ref();
 const compactOperations = ref(false);
@@ -95,7 +96,12 @@ defineExpose({
       "
     >
       <template #default="{ row }"
-        ><OrderCell :row="row" :field="field" :warning="warnings[row.id]" :warning-now="warningNow"
+        ><OrderCell
+          :row="row"
+          :field="field"
+          :warning="warnings[row.id]"
+          :warning-now="warningNow"
+          @tracking="emit('tracking', $event)"
       /></template>
     </el-table-column>
     <el-table-column v-if="showOperations" label="操作" fixed="right" :width="operationWidth"

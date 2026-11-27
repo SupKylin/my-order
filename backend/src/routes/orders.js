@@ -14,6 +14,7 @@ import {
 import { deleteItems } from '../services/order-deletion.js';
 import { exportOrders } from '../services/order-export.js';
 import { beginExport, exportProgress } from '../services/export-progress.js';
+import { getTracking, listTrackingItems, registerTracking } from '../services/track123.js';
 
 export function createOrdersRouter() {
   const router = Router();
@@ -49,6 +50,15 @@ export function createOrdersRouter() {
   );
   router.get('/orders/purchase-assignment-summary', async (req, res) =>
     res.json(await purchaseAssignmentSummary(req.user)),
+  );
+  router.get('/orders/tracking-items', async (req, res) =>
+    res.json(await listTrackingItems(req.query, req.user)),
+  );
+  router.get('/orders/:id/tracking', async (req, res) =>
+    res.json(await getTracking(req.params.id, req.user)),
+  );
+  router.post('/orders/:id/tracking/register', async (req, res) =>
+    res.json(await registerTracking(req.params.id, req.user)),
   );
   router.get('/orders/:id', async (req, res) => res.json(await getItem(req.params.id, req.user)));
   router.post('/orders', async (req, res) =>

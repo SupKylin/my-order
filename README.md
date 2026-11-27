@@ -17,6 +17,7 @@
 | [维护页面](docs/management-pages.md)         | 分页、筛选、批量删除边界                       |
 | [正式环境发布](docs/docker-release.md)       | 本地打包、Docker 发布、备份、迁移及回退        |
 | [宝塔测试部署](docs/baota-deployment.md)     | 独立 Node.js 测试站点部署，不用于更新正式容器  |
+| [Track123 物流追踪](docs/track123.md)        | 内部物流单号查询页、按需注册、MCP 接口文档与配置             |
 
 ## 本地运行
 

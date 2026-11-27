@@ -61,6 +61,9 @@ export const orderApi = {
   create: (fields) => api.post('/orders', { fields }),
   update: (id, fields, version, baseFields) =>
     api.put(`/orders/${id}`, { fields, version, ...(baseFields ? { baseFields } : {}) }),
+  tracking: (id) => api.get(`/orders/${id}/tracking`, { silent: true }),
+  trackingItems: (params) => api.get('/orders/tracking-items', { params }),
+  registerTracking: (id) => api.post(`/orders/${id}/tracking/register`, {}),
   remove: (id, version) => api.delete(`/orders/${id}`, { data: { version } }),
   removeMany: (items) => api.post('/orders/batch-delete', { items }),
   updateLossMark: (items, isLoss) => api.post('/orders/batch-loss-mark', { items, isLoss }),

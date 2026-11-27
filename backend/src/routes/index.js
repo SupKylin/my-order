@@ -19,6 +19,7 @@ import { createAuditRouter } from './audit.js';
 import { createPurchaseAfterSalesRouter } from './purchase-after-sales.js';
 import { createChannelChangesRouter } from './channel-change-tickets.js';
 import { createPurchaseStatisticsRouter } from './purchase-statistics.js';
+import { createTrack123DocsRouter } from './track123-docs.js';
 
 /** 统一注册 API 边界；业务路由默认受登录和 CSRF 保护。 */
 export function createApiRouter() {
@@ -31,6 +32,7 @@ export function createApiRouter() {
   router.use('/management', createManagementRouter());
   router.use(createDashboardRouter());
   router.use(createOrdersRouter());
+  router.use('/track123-docs', createTrack123DocsRouter());
   router.use('/purchase-after-sales', createPurchaseAfterSalesRouter());
   router.use('/channel-change-tickets', createChannelChangesRouter());
   router.use('/purchase-statistics', createPurchaseStatisticsRouter());
