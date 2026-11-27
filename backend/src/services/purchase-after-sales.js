@@ -18,6 +18,7 @@ import { assert } from '../errors.js';
 import { requirePermission, assertItemAccess } from '../permissions.js';
 import { assertOrderEditable, isWfsOrder } from '../lib/order-write-policy.js';
 import { filterValues } from '../lib/filter-values.js';
+import { decimalText } from '../lib/decimal.js';
 
 function createdDate(value) {
   assert(typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value), '创建日期格式无效');
@@ -64,7 +65,7 @@ const itemInclude = [
   {
     model: Purchase,
     as: 'purchase',
-    attributes: ['purchaseChannel', 'purchaseStatus'],
+    attributes: ['purchaseChannel', 'purchaseStatus', 'purchaseCost'],
     required: false,
   },
 ];
@@ -98,6 +99,8 @@ function summary(ticket) {
       manualEditable: !isWfsOrder(item),
       purchaseChannel: storedChannels(item.purchase?.purchaseChannel) || [],
       purchaseStatus: item.purchase?.purchaseStatus || null,
+      purchaseCost:
+        item.purchase?.purchaseCost == null ? null : decimalText(item.purchase.purchaseCost, 2),
     },
   };
 }

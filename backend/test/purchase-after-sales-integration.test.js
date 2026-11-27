@@ -133,6 +133,7 @@ before(async () => {
     await Purchase.create({
       itemId: items[name].id,
       purchaseStatus: '采购中',
+      purchaseCost: name === 'a' ? '12.30' : null,
       followupNote: '保留原备注',
     });
   }
@@ -181,6 +182,7 @@ test('运营创建多图工单，幂等重试；原订单和采购数据不变�
   assert.equal((await create(input, users.operator)).id, ticketId);
   assert.equal(await Record.count({ where: { ticketId } }), 1);
   const result = await detail(ticketId, {}, users.buyer);
+  assert.equal(result.item.purchaseCost, '12.30');
   assert.deepEqual(result.records[0].images, imagePaths);
   assert.equal(result.records[0].actorName, 'operator');
   assert.deepEqual((await items.a.reload()).toJSON(), originalItem);
@@ -490,6 +492,7 @@ test('采购渠道/状态多选、空值与权限取交集，处理中独立于�
   const own = result.rows.find((r) => r.item.id === items.a.id);
   assert.deepEqual(own.item.purchaseChannel, ['渠道A', '渠道B']);
   assert.equal(own.item.purchaseStatus, '采购失败');
+  assert.equal(own.item.purchaseCost, '12.30');
   result = await list({ purchaseChannel: ['渠道B'], purchaseStatus: ['采购中'] }, users.operator);
   assert.equal(result.total, 0);
   result = await list(

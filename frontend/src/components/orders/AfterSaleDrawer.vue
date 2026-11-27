@@ -5,7 +5,8 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { afterSalesApi } from '../../api/purchase-after-sales';
 import { useAuth } from '../../stores/auth';
 import { useMeta } from '../../stores/meta';
-import { fmtDate, fmtBeijingDate } from '../../utils/format';
+import { fmtDate, fmtBeijingDate, money } from '../../utils/format';
+import { canManageProcurement } from '../../utils/permissions';
 import AfterSaleComposer from './AfterSaleComposer.vue';
 const props = defineProps({ ticketId: [String, Number], showMenu: Boolean });
 const emit = defineEmits(['close', 'changed', 'loaded']);
@@ -16,12 +17,14 @@ const detail = ref(null),
   detailLoading = ref(false),
   statusBusy = ref(false),
   composerBusy = ref(false),
-  olderLoading = ref(false);
+  olderLoading = ref(false),
+  feedbackBusy = ref(false);
 const recordsBox = ref(null),
   detailFailed = ref(false);
 let detailVersion = 0,
   detailRequest = 0;
 const roleLabels = { admin: '管理员', supervisor: '主管', operations: '运营', purchasing: '采购' };
+const canFeedback = computed(() => canManageProcurement(auth.user?.role));
 const refundDraft = ref(''),
   refundOriginal = ref(''),
   refundVersion = ref(null),
@@ -33,7 +36,14 @@ function resetRefundDraft() {
 }
 async function saveRefund() {
   const ticket = detail.value;
-  if (!ticket || refundBusy.value || statusBusy.value || composerBusy.value || detailLoading.value)
+  if (
+    !ticket ||
+    refundBusy.value ||
+    statusBusy.value ||
+    composerBusy.value ||
+    detailLoading.value ||
+    feedbackBusy.value
+  )
     return;
   const amount = refundDraft.value.trim();
   if (amount && !/^\d{1,16}(?:\.\d{1,2})?$/.test(amount)) {
@@ -62,7 +72,8 @@ async function saveRefund() {
 }
 
 function close() {
-  if (!composerBusy.value && !statusBusy.value && !refundBusy.value) emit('close');
+  if (!composerBusy.value && !statusBusy.value && !refundBusy.value && !feedbackBusy.value)
+    emit('close');
 }
 function goToMenu() {
   router.push({ path: '/purchase-after-sales', query: { ticket: props.ticketId } });
@@ -129,8 +140,43 @@ async function sent() {
     emit('changed');
   }
 }
+async function markFeedback() {
+  const ticket = detail.value;
+  if (
+    !ticket ||
+    !canFeedback.value ||
+    ticket.supplierFeedback ||
+    !ticket.item.manualEditable ||
+    feedbackBusy.value ||
+    statusBusy.value ||
+    composerBusy.value ||
+    refundBusy.value ||
+    detailLoading.value
+  )
+    return;
+  feedbackBusy.value = true;
+  try {
+    const result = await afterSalesApi.feedback(ticket.id);
+    if (detail.value?.id === ticket.id) Object.assign(detail.value, result);
+    ElMessage.success('已标记反馈供应商');
+    emit('changed');
+    await loadDetail(ticket.id);
+  } catch (error) {
+    if (error?.response?.status === 409 && detail.value?.id === ticket.id)
+      await loadDetail(ticket.id);
+  } finally {
+    feedbackBusy.value = false;
+  }
+}
 async function changeStatus() {
-  if (!detail.value || statusBusy.value || composerBusy.value || refundBusy.value) return;
+  if (
+    !detail.value ||
+    statusBusy.value ||
+    composerBusy.value ||
+    refundBusy.value ||
+    feedbackBusy.value
+  )
+    return;
   const ticket = detail.value,
     status = ticket.status === 'open' ? 'completed' : 'open';
   if (status === 'completed') {
@@ -188,8 +234,8 @@ onBeforeUnmount(() => {
     size="min(820px, 100vw)"
     class="after-sale-drawer"
     :close-on-click-modal="false"
-    :show-close="!composerBusy && !statusBusy && !refundBusy"
-    :close-on-press-escape="!composerBusy && !statusBusy && !refundBusy"
+    :show-close="!composerBusy && !statusBusy && !refundBusy && !feedbackBusy"
+    :close-on-press-escape="!composerBusy && !statusBusy && !refundBusy && !feedbackBusy"
     append-to-body
     @close="close"
   >
@@ -209,6 +255,10 @@ onBeforeUnmount(() => {
               <dt>采购状态</dt>
               <dd>{{ detail.item.purchaseStatus?.trim() || '未填写' }}</dd>
             </div>
+            <div>
+              <dt>采购成本（USD）</dt>
+              <dd>{{ money(detail.item.purchaseCost) }}</dd>
+            </div>
           </dl>
           <div class="ticket-refund">
             <label for="purchase-refund-amount">采购退款金额</label>
@@ -220,18 +270,24 @@ onBeforeUnmount(() => {
                 maxlength="19"
                 placeholder="无退款请填0"
                 aria-label="采购退款金额"
-                :disabled="refundBusy || statusBusy || composerBusy || detailLoading"
+                :disabled="
+                  refundBusy || statusBusy || composerBusy || detailLoading || feedbackBusy
+                "
               />
               <el-button
                 :loading="refundBusy"
-                :disabled="!refundDirty || statusBusy || composerBusy || detailLoading"
+                :disabled="
+                  !refundDirty || statusBusy || composerBusy || detailLoading || feedbackBusy
+                "
                 @click="saveRefund"
                 >保存金额</el-button
               >
               <el-button
                 v-if="refundDirty"
                 text
-                :disabled="refundBusy || statusBusy || composerBusy || detailLoading"
+                :disabled="
+                  refundBusy || statusBusy || composerBusy || detailLoading || feedbackBusy
+                "
                 @click="resetRefundDraft"
                 >恢复已保存金额</el-button
               >
@@ -242,7 +298,7 @@ onBeforeUnmount(() => {
           <div class="ticket-actions">
             <el-button
               v-if="showMenu"
-              :disabled="composerBusy || statusBusy || refundBusy"
+              :disabled="composerBusy || statusBusy || refundBusy || feedbackBusy"
               @click="goToMenu"
               >前往采购售后菜单</el-button
             >
@@ -250,14 +306,24 @@ onBeforeUnmount(() => {
               detail.status === 'open' ? '处理中' : '售后完毕'
             }}</el-tag
             ><el-button
-              :disabled="composerBusy || statusBusy || refundBusy"
+              v-if="canFeedback && detail.item.manualEditable"
+              type="primary"
+              plain
+              :loading="feedbackBusy"
+              :disabled="
+                detail.supplierFeedback || composerBusy || statusBusy || refundBusy || detailLoading
+              "
+              @click="markFeedback"
+              >已反馈</el-button
+            ><el-button
+              :disabled="composerBusy || statusBusy || refundBusy || feedbackBusy"
               @click="loadDetail(detail.id)"
               >刷新记录</el-button
             ><el-button
               v-if="detail.item.manualEditable"
               type="primary"
               :loading="statusBusy"
-              :disabled="composerBusy || detailLoading || refundBusy"
+              :disabled="composerBusy || detailLoading || refundBusy || feedbackBusy"
               @click="changeStatus"
               >{{ detail.status === 'open' ? '售后完毕' : '重新打开' }}</el-button
             >
@@ -330,6 +396,7 @@ onBeforeUnmount(() => {
             :submit="(body) => afterSalesApi.reply(detail.id, body)"
             :disabled="
               statusBusy ||
+              feedbackBusy ||
               refundBusy ||
               detailLoading ||
               detail.status !== 'open' ||

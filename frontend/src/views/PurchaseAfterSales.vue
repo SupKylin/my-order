@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus';
 import { afterSalesApi } from '../api/purchase-after-sales';
 import { useAuth } from '../stores/auth';
 import { useMeta } from '../stores/meta';
-import { fmtDate } from '../utils/format';
+import { fmtDate, money } from '../utils/format';
 import AfterSaleDrawer from '../components/orders/AfterSaleDrawer.vue';
 import StoreOwnerSelect from '../components/home/StoreOwnerSelect.vue';
 import { canManageProcurement } from '../utils/permissions';
@@ -355,6 +355,9 @@ onBeforeUnmount(() => {
         </el-table-column>
         <el-table-column label="采购状态" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">{{ row.item.purchaseStatus?.trim() || '未填写' }}</template>
+        </el-table-column>
+        <el-table-column label="采购成本（USD）" min-width="150" align="right">
+          <template #default="{ row }">{{ money(row.item.purchaseCost) }}</template>
         </el-table-column>
         <el-table-column label="售后状态" width="120"
           ><template #default="{ row }"
